@@ -140,45 +140,175 @@ INSERT INTO inbox_items (title, description, source, department, status, structu
 
 -- ─── PROJECTS WITH PHASES AND TASKS ──────────────────────────────────────────
 
--- Project 1: Ramadan GCC Holiday Offer (originally in schema.sql)
-INSERT INTO projects (name, description, department, status, type) VALUES
-('Ramadan GCC Holiday Offer', 'Seasonal campaign targeting GCC markets during Ramadan with localized content and offers', 'strategic', 'Completed', 'campaign');
+-- Project 1: Ramadan GCC Holiday Offer
+INSERT INTO projects (name, description, problem, solution, department, status, type,
+  pain_points, requirements, risks, estimated_budget, estimated_timeline,
+  future_improvements, success_metrics) VALUES
+('Ramadan GCC Holiday Offer',
+ 'Seasonal campaign targeting GCC markets during Ramadan with localized content and offers',
+ 'GCC market engagement drops during Ramadan without culturally relevant offers',
+ 'Localized Ramadan fare packages with Skywards bonus miles and culturally sensitive messaging',
+ 'strategic', 'Completed', 'campaign',
+ '["Low engagement with generic offers during Ramadan period","Cultural missteps in previous years reduced brand trust in KSA","Competitor airlines (Etihad, Qatar) launching Ramadan campaigns earlier each year"]',
+ '["Arabic-first copywriting with cultural sensitivity review","Skywards bonus miles integration (2x miles on selected routes)","GCC-specific audience segments (KSA, UAE, Kuwait, Bahrain)","RTL email template support","Halal travel content and family-focused messaging"]',
+ '["Cultural insensitivity in messaging could damage brand in KSA market","Competitor pre-emption if campaign launches late","Ramadan dates shift annually — timing miscalculation risk"]',
+ 8.50, '6 weeks',
+ '["Extend to Eid al-Fitr follow-up campaign with post-Ramadan travel deals","Add push notification channel for real-time iftar-time offers","Build predictive model for Ramadan booking patterns across GCC markets"]',
+ '["Open rate >25% across GCC markets","Booking conversion rate >3.5%","Skywards miles redemption uplift >15%","Revenue target: $2.1M in attributed bookings","Brand sentiment score >4.2/5 in post-campaign survey"]'
+);
 
--- Project 2: Skywards Gold to Platinum (originally in schema.sql)
-INSERT INTO projects (name, description, department, status, type) VALUES
-('Skywards Gold to Platinum Conversion Program', 'Loyalty upgrade campaign converting Skywards Gold members to Platinum tier through targeted incentives', 'strategic', 'Completed', 'campaign');
+-- Project 2: Skywards Gold to Platinum
+INSERT INTO projects (name, description, problem, solution, department, status, type,
+  pain_points, requirements, risks, estimated_budget, estimated_timeline,
+  future_improvements, success_metrics) VALUES
+('Skywards Gold to Platinum Conversion Program',
+ 'Loyalty upgrade campaign converting Skywards Gold members to Platinum tier through targeted incentives',
+ '68% of Gold members never upgrade to Platinum — current upgrade path is unclear and not actively promoted',
+ 'Personalized upgrade pathways with dynamic miles calculator, exclusive Platinum preview experiences, and CRM-driven timing optimization',
+ 'strategic', 'Completed', 'campaign',
+ '["Gold members plateau — 68% never upgrade to Platinum","Current upgrade path unclear and not actively promoted","Competitor loyalty programs offer more transparent tier progression"]',
+ '["Personalized upgrade pathways based on individual flight patterns","Dynamic miles-to-upgrade calculator in email","Exclusive Platinum preview experiences (lounge access, priority boarding trial)","CRM integration for real-time tier progress tracking"]',
+ '["Over-discounting Platinum benefits could devalue tier","Members who recently earned Gold may feel pressured too soon","Revenue impact if too many members upgrade via promotional path vs organic"]',
+ 9.00, '8 weeks',
+ '["AI-driven optimal upgrade timing per member","Gamified tier progression with milestone rewards","Partner benefits integration (hotel upgrades, car rental status match)"]',
+ '["Gold-to-Platinum conversion rate >8%","Campaign engagement rate >30%","Revenue per converted member >$5,000 annual increase","NPS improvement among converted members >10 points","Retention rate of converted Platinum members >90% at 12 months"]'
+);
 
 -- Project 3: DXB-MAN Route Launch
-INSERT INTO projects (name, description, problem, solution, department, status, type) VALUES
-('DXB-MAN Route Launch Campaign', 'Full email campaign for the new Dubai-Manchester route launching June 15', 'Need to build awareness and drive bookings for new Manchester route in UK market', 'Multi-wave email campaign: announcement → early bird fares → launch day countdown', 'execution', 'In Progress', 'campaign');
+INSERT INTO projects (name, description, problem, solution, department, status, type,
+  pain_points, requirements, risks, estimated_budget, estimated_timeline,
+  future_improvements, success_metrics) VALUES
+('DXB-MAN Route Launch Campaign',
+ 'Full email campaign for the new Dubai-Manchester route launching June 15',
+ 'Need to build awareness and drive bookings for new Manchester route in UK market',
+ 'Multi-wave email campaign: announcement → early bird fares → launch day countdown',
+ 'execution', 'In Progress', 'campaign',
+ '["UK market saturated with route launch announcements from competitors","Manchester has limited brand awareness compared to London routes","No existing Emirates customer base in Manchester catchment area"]',
+ '["Multi-wave email campaign: teaser → early bird → launch day","UK-specific audience segments (Manchester metro, frequent UK-DXB travelers)","Competitive fare positioning against direct competitors","Landing page with route-specific content and booking widget"]',
+ '["Low initial load factor if awareness campaign underperforms","UK regulatory changes (post-Brexit visa rules) could affect demand","Seasonal weather in Manchester may reduce summer travel appeal"]',
+ 6.50, '5 weeks',
+ '["Expand to social media retargeting for email non-openers","Add in-flight experience preview video content","Build Manchester hub partnership program (airport, tourism board)"]',
+ '["Email open rate >22% across all waves","Early bird fare uptake >500 bookings in first 72 hours","Route awareness survey: >40% prompted recall in Manchester metro","First month load factor >65%","Cost per acquisition <$45"]'
+);
 
--- Project 2: Ramadan GCC Campaign
-INSERT INTO projects (name, description, problem, solution, department, status, type) VALUES
-('Ramadan 2026 GCC Campaign', 'Seasonal Ramadan campaign with special fares and Skywards bonus miles for GCC markets', 'Ramadan campaign requires cultural sensitivity, localized content, and rapid multi-market deployment', 'Phased approach: pre-Ramadan teasers → main offers → Eid follow-up', 'strategic', 'In Progress', 'campaign');
+-- Project 4: Ramadan 2026 GCC Campaign
+INSERT INTO projects (name, description, problem, solution, department, status, type,
+  pain_points, requirements, risks, estimated_budget, estimated_timeline,
+  future_improvements, success_metrics) VALUES
+('Ramadan 2026 GCC Campaign',
+ 'Seasonal Ramadan campaign with special fares and Skywards bonus miles for GCC markets',
+ 'Ramadan campaign requires cultural sensitivity, localized content, and rapid multi-market deployment',
+ 'Phased approach: pre-Ramadan teasers → main offers → Eid follow-up',
+ 'strategic', 'In Progress', 'campaign',
+ '["Previous Ramadan campaigns launched too late, losing early bookers to competitors","Content localization bottleneck — Arabic copy takes 3x longer than English","GCC market preferences vary significantly between KSA and UAE"]',
+ '["Pre-Ramadan launch (4 weeks before start)","Market-specific content for KSA, UAE, Kuwait","Arabic-first creative with RTL templates","Skywards Ramadan bonus miles promotion","Family travel packages with child-friendly routing"]',
+ '["Exact Ramadan start date depends on moon sighting — need flexible launch trigger","KSA market regulatory requirements for promotional disclaimers","Budget pressure from competing Q2 campaigns"]',
+ 9.50, '8 weeks',
+ '["Real-time personalization based on individual Ramadan travel history","WhatsApp channel for GCC markets","AI-generated culturally-aware content variants per sub-market"]',
+ '["Campaign launch >3 weeks before Ramadan start","Open rate >28% in KSA, >24% in UAE","Booking revenue >$3.2M across GCC markets","Skywards engagement uplift >20% during campaign period","Cultural sensitivity audit score: 0 violations"]'
+);
 
--- Project 3: Skywards Anniversary
-INSERT INTO projects (name, description, problem, solution, department, status, type) VALUES
-('Skywards 25th Anniversary', 'Global celebration campaign for Skywards loyalty program milestone', 'Need a premium multi-channel campaign that reinforces brand loyalty and drives re-engagement', 'Tiered rewards unlock + exclusive member experiences + retrospective storytelling', 'strategic', 'Planning', 'campaign');
+-- Project 5: Skywards 25th Anniversary
+INSERT INTO projects (name, description, problem, solution, department, status, type,
+  pain_points, requirements, risks, estimated_budget, estimated_timeline,
+  future_improvements, success_metrics) VALUES
+('Skywards 25th Anniversary',
+ 'Global celebration campaign for Skywards loyalty program milestone',
+ 'Need a premium multi-channel campaign that reinforces brand loyalty and drives re-engagement',
+ 'Tiered rewards unlock + exclusive member experiences + retrospective storytelling',
+ 'strategic', 'Planning', 'campaign',
+ '["Anniversary campaigns risk being purely nostalgic without driving revenue","Multi-channel coordination across 14 markets is operationally complex","Need to balance celebration messaging with commercial offers"]',
+ '["Global multi-channel campaign (email, push, social, in-flight)","Tiered rewards unlock for each Skywards tier","25th anniversary exclusive experiences catalog","Retrospective storytelling content series","Celebrity/influencer partnership integration"]',
+ '["SFMC infrastructure may not handle projected 4M sends/day volume","Brand messaging dilution across too many markets simultaneously","Budget approval pending — Q2 planning may be delayed"]',
+ 10.00, '12 weeks',
+ '["Convert anniversary momentum into permanent loyalty program enhancements","Build member-generated content platform for ongoing engagement","Launch anniversary-inspired permanent tier benefits"]',
+ '["Global reach >5M unique recipients","Engagement rate >35% across all channels","Anniversary offer redemption >100K members","Brand awareness uplift >15% in key markets","Skywards new enrollments >50K during campaign period","Social media impressions >25M"]'
+);
 
--- Project 4: Email Template Redesign
-INSERT INTO projects (name, description, problem, solution, department, status, type) VALUES
-('Email Template Modernization', 'Upgrade all email templates to new responsive design system with dark mode support', 'Current templates are 3+ years old, poor mobile rendering, no dark mode', 'New modular template library with reusable content blocks and responsive breakpoints', 'execution', 'In Progress', 'general');
+-- Project 6: Email Template Modernization
+INSERT INTO projects (name, description, problem, solution, department, status, type,
+  pain_points, requirements, risks, estimated_budget, estimated_timeline,
+  future_improvements, success_metrics) VALUES
+('Email Template Modernization',
+ 'Upgrade all email templates to new responsive design system with dark mode support',
+ 'Current templates are 3+ years old, poor mobile rendering, no dark mode',
+ 'New modular template library with reusable content blocks and responsive breakpoints',
+ 'execution', 'In Progress', 'general',
+ '["Current templates are 3+ years old with poor mobile rendering","No dark mode support — 40% of opens now on dark mode clients","Template build time averages 2 days per campaign variant","Inconsistent design across markets creates brand fragmentation"]',
+ '["Responsive design with breakpoints for mobile, tablet, desktop","Dark mode support for Apple Mail, Gmail, Outlook","Modular content block library (12+ reusable blocks)","RTL support for Arabic markets","Cross-client rendering validation (Outlook, Gmail, Apple Mail)"]',
+ '["Migration of active campaigns to new templates may cause rendering issues","Training gap — team needs to learn new block-based workflow","Legacy template dependencies in active Journey Builder flows"]',
+ 45000, '10 weeks',
+ '["AI-powered template selection based on campaign type","Dynamic content blocks that adapt to recipient preferences","AMP for Email interactive elements (carousels, forms)"]',
+ '["Template build time reduced from 2 days to 4 hours","Mobile rendering score >95% across top 5 email clients","Dark mode compatibility for 100% of new templates","Template reuse rate >60% across campaigns","Click-through rate improvement >10% vs legacy templates"]'
+);
 
--- Project 5: Flash Sale Framework
-INSERT INTO projects (name, description, problem, solution, department, status, type) VALUES
-('Flash Sale Automation Framework', 'Build reusable rapid-deploy pipeline for flash sales — target <4h from brief to send', 'Flash sales currently take 2-3 days to deploy, missing revenue windows', 'Pre-approved template + automated segment selection + expedited approval flow', 'execution', 'Completed', 'general');
+-- Project 7: Flash Sale Automation Framework
+INSERT INTO projects (name, description, problem, solution, department, status, type,
+  pain_points, requirements, risks, estimated_budget, estimated_timeline,
+  future_improvements, success_metrics) VALUES
+('Flash Sale Automation Framework',
+ 'Build reusable rapid-deploy pipeline for flash sales — target <4h from brief to send',
+ 'Flash sales currently take 2-3 days to deploy, missing revenue windows',
+ 'Pre-approved template + automated segment selection + expedited approval flow',
+ 'execution', 'Completed', 'general',
+ '["Flash sales currently take 2-3 days to deploy, missing revenue windows","Manual segment selection causes errors and delays","No pre-approved template pipeline — each sale needs full creative cycle","Approval bottleneck with 4+ stakeholders for each flash sale"]',
+ '["Pre-approved flash sale template library","Automated segment selection based on route and market","Expedited 2-person approval flow (vs standard 4-person)","<4 hour deployment target from brief to send","Real-time inventory integration for fare accuracy"]',
+ '["Rushed deployment may bypass brand compliance checks","Fare accuracy errors in automated pipeline could cause revenue loss","Over-frequent flash sales may train customers to wait for discounts"]',
+ 55000, '6 weeks',
+ '["AI-triggered flash sales based on inventory and demand signals","Dynamic pricing integration for real-time fare optimization","Automated post-sale performance reporting within 24 hours"]',
+ '["Deployment time <4 hours from brief to send","Revenue per flash sale >$500K","Zero fare accuracy errors in automated pipeline","Booking conversion rate >5%","Framework reuse across >3 markets per quarter"]'
+);
 
--- Project 6: Brand Compliance Automation
-INSERT INTO projects (name, description, problem, solution, department, status, type) VALUES
-('Brand Compliance Auto-Scoring', 'Automated brand compliance scoring for all outgoing communications', 'Manual brand reviews are bottleneck — Sofia reviews 40+ pieces/week', 'AI-powered compliance scoring with auto-approve for >95% score, manual review for rest', 'control', 'Planning', 'general');
+-- Project 8: Brand Compliance Auto-Scoring
+INSERT INTO projects (name, description, problem, solution, department, status, type,
+  pain_points, requirements, risks, estimated_budget, estimated_timeline,
+  future_improvements, success_metrics) VALUES
+('Brand Compliance Auto-Scoring',
+ 'Automated brand compliance scoring for all outgoing communications',
+ 'Manual brand reviews are bottleneck — Sofia reviews 40+ pieces/week',
+ 'AI-powered compliance scoring with auto-approve for >95% score, manual review for rest',
+ 'control', 'Planning', 'general',
+ '["Manual brand reviews are bottleneck — Sofia reviews 40+ pieces/week","Subjective compliance scoring leads to inconsistent approvals","FR and DE market content frequently has tone violations","Review turnaround time averages 48 hours, slowing campaign launches"]',
+ '["AI-powered compliance scoring engine using Emirates brand guidelines","Auto-approve threshold (>95% score) for low-risk content","Manual review queue for scores between 80-95%","Auto-reject with feedback for scores <80%","Multi-language support (EN, AR, DE, FR)"]',
+ '["AI model may miss nuanced cultural tone issues","Over-reliance on automation could reduce human brand expertise","False positives could slow down campaign deployment"]',
+ 75000, '10 weeks',
+ '["Real-time compliance scoring in content creation workflow","Visual compliance extension for image and layout review","Predictive compliance scoring during content drafting"]',
+ '["Compliance review turnaround reduced from 48h to <2h for auto-approved content","Brand compliance rate maintained >96%","Manual review volume reduced by 60%","Zero brand incidents from auto-approved content","Sofia review queue reduced from 40+/week to <15/week"]'
+);
 
--- Project 7: GDPR Consent Engine
-INSERT INTO projects (name, description, problem, solution, department, status, type) VALUES
-('GDPR Consent Refresh Engine', 'Proactive re-consent collection system for EU markets', 'Consent expiry causing audience shrinkage in EU markets — 15% contacts at risk', 'Automated consent lifecycle tracking + multi-touch re-consent journeys', 'control', 'In Progress', 'general');
+-- Project 9: GDPR Consent Refresh Engine
+INSERT INTO projects (name, description, problem, solution, department, status, type,
+  pain_points, requirements, risks, estimated_budget, estimated_timeline,
+  future_improvements, success_metrics) VALUES
+('GDPR Consent Refresh Engine',
+ 'Proactive re-consent collection system for EU markets',
+ 'Consent expiry causing audience shrinkage in EU markets — 15% contacts at risk',
+ 'Automated consent lifecycle tracking + multi-touch re-consent journeys',
+ 'control', 'In Progress', 'general',
+ '["15% of EU contacts at risk of consent expiry","No proactive re-consent mechanism — contacts lost silently","Manual tracking of consent dates across multiple data extensions","Re-consent emails have historically low engagement (<5% response rate)"]',
+ '["Automated consent lifecycle tracking per contact","Multi-touch re-consent journey (3 touches before expiry)","Market-specific compliance (GDPR, UK GDPR post-Brexit, UWG for DE)","Consent status dashboard with real-time expiry forecasting","Preference center integration for granular consent management"]',
+ '["Aggressive re-consent outreach may increase unsubscribe rates","Regulatory interpretation differences between EU markets","Data synchronization lag between CRM and consent database"]',
+ 60000, '8 weeks',
+ '["Predictive consent decay modeling — trigger re-consent before risk","Cross-channel consent synchronization (email, push, SMS)","Automated regulatory compliance updates when laws change"]',
+ '["Consent recovery rate >25% of at-risk contacts","EU addressable audience maintained within 2% of current size","Re-consent journey response rate >12%","Zero GDPR compliance incidents","Consent expiry forecast accuracy >90%"]'
+);
 
--- Project 8: Q1 Performance Analytics Dashboard
-INSERT INTO projects (name, description, problem, solution, department, status, type) VALUES
-('Q1 Performance Analytics', 'Comprehensive Q1 EMEA performance report with attribution modeling', 'Stakeholders lack unified view of cross-market campaign performance', 'Unified analytics dashboard with market comparison, channel attribution, and ROI tracking', 'control', 'Completed', 'general');
+-- Project 10: Q1 Performance Analytics Dashboard
+INSERT INTO projects (name, description, problem, solution, department, status, type,
+  pain_points, requirements, risks, estimated_budget, estimated_timeline,
+  future_improvements, success_metrics) VALUES
+('Q1 Performance Analytics',
+ 'Comprehensive Q1 EMEA performance report with attribution modeling',
+ 'Stakeholders lack unified view of cross-market campaign performance',
+ 'Unified analytics dashboard with market comparison, channel attribution, and ROI tracking',
+ 'control', 'Completed', 'general',
+ '["Stakeholders lack unified view of cross-market campaign performance","Attribution modeling is manual and inconsistent across markets","Report generation takes 3+ days per quarter","No real-time KPI anomaly detection"]',
+ '["Unified analytics dashboard covering UK, DE, FR, KSA, UAE markets","Channel attribution modeling (email, push, web)","Automated KPI anomaly detection with alerting","Executive-ready report generation with visualizations","Market comparison and benchmarking capabilities"]',
+ '["Data quality issues across different market tracking implementations","Attribution model accuracy depends on consistent UTM tagging","Stakeholder expectations may exceed what data supports"]',
+ 40000, '6 weeks',
+ '["Real-time streaming analytics dashboard","Predictive performance modeling for future campaigns","Automated insight generation using AI summarization"]',
+ '["Report generation time reduced from 3 days to <4 hours","Dashboard adoption by >80% of stakeholders","KPI anomaly detection catches >90% of significant deviations","Cross-market comparison available for all active campaigns","Executive satisfaction score >4.5/5 on report quality"]'
+);
 
 -- Phases and Tasks for Project 3 (DXB-MAN Route Launch)
 INSERT INTO phases (project_id, phase_number, name, objective) VALUES

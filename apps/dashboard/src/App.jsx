@@ -375,6 +375,23 @@ function App() {
           )}
         </section>
 
+        <section className="card" style={{ marginBottom: '40px', borderLeft: '4px solid var(--primary)' }}>
+          <h2 style={{ marginBottom: '16px' }}>{SectionIcons.successMetrics} {t('dashboard.successMetrics')}</h2>
+          <p className="subtitle" style={{ marginBottom: '20px' }}>{t('dashboard.successMetricsSubtitle')}</p>
+          {editMode ? (
+            <textarea
+              className="edit-textarea"
+              placeholder={t('dashboard.successMetricsPlaceholder')}
+              value={Array.isArray(selectedProject.success_metrics) ? selectedProject.success_metrics.join('\n') : ''}
+              onChange={e => setSelectedProject({ ...selectedProject, success_metrics: e.target.value.split('\n') })}
+            />
+          ) : (
+            <ul style={{ paddingLeft: '20px', color: 'var(--text-muted)' }}>
+              {selectedProject.success_metrics?.map((m, i) => <li key={i} style={{ marginBottom: '8px' }}>{m}</li>)}
+            </ul>
+          )}
+        </section>
+
         <section className="card" style={{ marginBottom: '40px' }}>
           <h2 style={{ marginBottom: '16px' }}>{t('dashboard.proposedSolution')}</h2>
           {editMode ? (

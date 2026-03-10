@@ -78,6 +78,7 @@ export const SectionIcons = {
   requirements: <Wrench size={S} />,
   risks: <AlertTriangle size={S} />,
   roadmap: <Rocket size={S} />,
+  successMetrics: <Target size={S} />,
 };
 
 // ─── Task Type Icons ────────────────────────────────────────────────────────
