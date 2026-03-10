@@ -91,6 +91,24 @@ async function initDatabase() {
         } else {
             console.log(`[DB] Seed not needed, projects count: ${projectCount.rows[0].c}`);
         }
+
+        // Refresh EOD report dates so Daily Standup always has data for today
+        try {
+            const eodCheck = await pool.query("SELECT COUNT(*)::int AS c FROM eod_reports WHERE date = CURRENT_DATE");
+            const eodTotal = await pool.query("SELECT COUNT(*)::int AS c FROM eod_reports");
+            if (eodTotal.rows[0].c > 0 && eodCheck.rows[0].c === 0) {
+                // Calculate offset once before updating
+                const offsetResult = await pool.query("SELECT (CURRENT_DATE - MAX(date))::int AS days_offset FROM eod_reports");
+                const daysOffset = offsetResult.rows[0].days_offset;
+                if (daysOffset > 0) {
+                    await pool.query(`UPDATE eod_reports SET date = date + $1`, [daysOffset]);
+                    await pool.query(`UPDATE raw_events SET timestamp = timestamp + make_interval(days => $1)`, [daysOffset]);
+                    console.log(`[DB] EOD report dates refreshed (+${daysOffset} days to current period)`);
+                }
+            }
+        } catch (eodErr) {
+            console.error('[DB] EOD date refresh error:', eodErr.message);
+        }
     } catch (err) {
         console.error('[DB] Init error:', err.message, err.detail || '');
     }
@@ -1961,7 +1979,7 @@ app.post('/api/inbox/:id/to-borrador', async (req, res) => {
 
         await pool.query(
             `UPDATE inbox_items
-             SET summary = $1, conversation = '[]'::jsonb, status = 'borrador', updated_at = NOW()
+             SET summary = $1, status = 'borrador', updated_at = NOW()
              WHERE id = $2`,
             [summary, req.params.id]
         );
@@ -2015,20 +2033,16 @@ app.post('/api/inbox/:id/reopen', async (req, res) => {
         const item = await pool.query('SELECT * FROM inbox_items WHERE id = $1', [req.params.id]);
         if (item.rows.length === 0) return res.status(404).json({ error: 'Not found' });
 
-        const { status, summary } = item.rows[0];
+        const { status } = item.rows[0];
         if (status !== 'borrador') {
             return res.status(400).json({ error: `Cannot reopen from status '${status}'` });
         }
 
-        const seedConversation = [
-            { role: 'user', content: `Contexto previo (borrador anterior):\n${summary}\n\nQuiero seguir refinando esta idea.` }
-        ];
-
         await pool.query(
             `UPDATE inbox_items
-             SET status = 'chat', conversation = $1, updated_at = NOW()
+             SET status = 'chat', summary = NULL, updated_at = NOW()
              WHERE id = $2`,
-            [JSON.stringify(seedConversation), req.params.id]
+            [req.params.id]
         );
 
         res.json({ id: parseInt(req.params.id), status: 'chat' });

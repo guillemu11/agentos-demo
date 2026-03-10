@@ -103,14 +103,67 @@ VALUES ('workspace_description', '"Agentic Marketing Intelligence platform for E
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- ─── SAMPLE EOD REPORTS (for demo richness) ──────────────────────────────────
+-- Distributed across last 3 days so Daily Standup always has data
 
 INSERT INTO eod_reports (agent_id, date, completed_tasks, in_progress_tasks, blockers, insights, mood, plan_tomorrow) VALUES
-('lucia', CURRENT_DATE, '["Drafted 3 subject line variants for DE Skywards Silver campaign","Localized UK Spring Sale email to Arabic (UAE market)","Created A/B copy variants for loyalty upsell push notification"]', '["Finalizing FR market copy for summer destinations campaign"]', '[]', '["German market responds 12% better to subject lines under 38 characters — adjusting all DE templates accordingly."]', 'productive', '["Complete FR localization, start KSA Ramadan-themed inspirational copy"]'),
-('diego', CURRENT_DATE, '["Built DE_Silver_Active_90D segment (n=45,231)","Validated suppression lists for UK GDPR compliance","Created lookalike model for high-value Skywards Gold converters"]', '["Sizing FR Spring campaign audience"]', '[]', '["Silver tier members who engaged with upgrade offers in the last 60 days show 3.2x higher conversion propensity."]', 'focused', '["Finalize FR segment, start KSA Ramadan audience clustering"]'),
-('carlos', CURRENT_DATE, '["Completed post-flight analysis for Feb UK campaign — 18% uplift vs control","Generated executive summary for Q1 EMEA performance","Set up anomaly detection alerts for KSA market KPIs"]', '["Attribution modeling for multi-touch DE campaign"]', '[]', '["UK campaign showed strongest performance in Tuesday 10am sends. Recommending this as default slot for UK market."]', 'strategic', '["Complete DE attribution model, prepare Q1 board-ready report"]'),
-('sofia', CURRENT_DATE, '["Reviewed and approved 12 copy variants for brand compliance","Flagged 2 tone violations in FR market copy (too casual for Emirates)","Updated terminology glossary with 5 new approved phrases"]', '["Visual audit of new email template designs"]', '[]', '["Maintaining 98.5% brand compliance rate across all markets this quarter."]', 'accomplished', '["Complete visual audit, review KSA Ramadan creative for cultural sensitivity"]'),
-('andres', CURRENT_DATE, '["Deployed Journey Builder flow for Skywards Silver upgrade campaign","Configured retry logic for transactional email failures","Created deployment runbook for NPS recovery automation"]', '["Setting up A/B test splits for DE campaign journey"]', '[]', '["New retry policy reduced failed sends by 34% in the last week."]', 'productive', '["Complete A/B journey setup, start FR Spring campaign automation scaffold"]'),
-('raul', CURRENT_DATE, '["Finalized Q2 campaign calendar with stakeholder sign-off","Allocated budget across 4 active campaigns","Prepared strategic brief for Skywards 25th anniversary campaign"]', '["Coordinating cross-market launch timeline for Summer Sale"]', '[]', '["Cross-market coordination reducing campaign overlap by 40% compared to last quarter."]', 'strategic', '["Finalize Summer Sale timeline, kickoff anniversary campaign planning"]');
+-- Today: 1 agent per department
+('lucia', CURRENT_DATE,
+  '[{"desc":"Drafted 3 subject line variants for DE Skywards Silver campaign","duration":"2h"},{"desc":"Localized UK Spring Sale email to Arabic (UAE market)","duration":"3h"},{"desc":"Created A/B copy variants for loyalty upsell push notification","duration":"1.5h"}]',
+  '[{"desc":"Finalizing FR market copy for summer destinations campaign","pct":65}]',
+  '[]',
+  '["German market responds 12% better to subject lines under 38 characters — adjusting all DE templates accordingly."]',
+  'productive',
+  '["Complete FR localization, start KSA Ramadan-themed inspirational copy"]'),
+('sofia', CURRENT_DATE,
+  '[{"desc":"Reviewed and approved 12 copy variants for brand compliance","duration":"4h"},{"desc":"Flagged 2 tone violations in FR market copy (too casual for Emirates)","duration":"1h"},{"desc":"Updated terminology glossary with 5 new approved phrases","duration":"45min"}]',
+  '[{"desc":"Visual audit of new email template designs","pct":40}]',
+  '[]',
+  '["Maintaining 98.5% brand compliance rate across all markets this quarter."]',
+  'accomplished',
+  '["Complete visual audit, review KSA Ramadan creative for cultural sensitivity"]'),
+('raul', CURRENT_DATE,
+  '[{"desc":"Finalized Q2 campaign calendar with stakeholder sign-off","duration":"3h"},{"desc":"Allocated budget across 4 active campaigns","duration":"2h"},{"desc":"Prepared strategic brief for Skywards 25th anniversary campaign","duration":"2.5h"}]',
+  '[{"desc":"Coordinating cross-market launch timeline for Summer Sale","pct":30}]',
+  '[]',
+  '["Cross-market coordination reducing campaign overlap by 40% compared to last quarter."]',
+  'strategic',
+  '["Finalize Summer Sale timeline, kickoff anniversary campaign planning"]'),
+-- Yesterday
+('diego', CURRENT_DATE - 1,
+  '[{"desc":"Built DE_Silver_Active_90D segment (n=45,231)","duration":"3h"},{"desc":"Validated suppression lists for UK GDPR compliance","duration":"2h"},{"desc":"Created lookalike model for high-value Skywards Gold converters","duration":"4h"}]',
+  '[{"desc":"Sizing FR Spring campaign audience","pct":70}]',
+  '[]',
+  '["Silver tier members who engaged with upgrade offers in the last 60 days show 3.2x higher conversion propensity."]',
+  'focused',
+  '["Finalize FR segment, start KSA Ramadan audience clustering"]'),
+('carlos', CURRENT_DATE - 1,
+  '[{"desc":"Completed post-flight analysis for Feb UK campaign — 18% uplift vs control","duration":"4h"},{"desc":"Generated executive summary for Q1 EMEA performance","duration":"2h"},{"desc":"Set up anomaly detection alerts for KSA market KPIs","duration":"1.5h"}]',
+  '[{"desc":"Attribution modeling for multi-touch DE campaign","pct":55}]',
+  '[]',
+  '["UK campaign showed strongest performance in Tuesday 10am sends. Recommending this as default slot for UK market."]',
+  'strategic',
+  '["Complete DE attribution model, prepare Q1 board-ready report"]'),
+-- 2 days ago
+('andres', CURRENT_DATE - 2,
+  '[{"desc":"Deployed Journey Builder flow for Skywards Silver upgrade campaign","duration":"3h"},{"desc":"Configured retry logic for transactional email failures","duration":"2h"},{"desc":"Created deployment runbook for NPS recovery automation","duration":"1.5h"}]',
+  '[{"desc":"Setting up A/B test splits for DE campaign journey","pct":45}]',
+  '[{"desc":"SFMC API rate limit preventing bulk journey activation","severity":"medium"}]',
+  '["New retry policy reduced failed sends by 34% in the last week."]',
+  'productive',
+  '["Complete A/B journey setup, start FR Spring campaign automation scaffold"]');
+
+-- ─── RAW EVENTS (for Generate EODs demo) ────────────────────────────────────
+-- Events for agents without EOD today, so "Generate EODs" button works
+
+INSERT INTO raw_events (agent_id, event_type, content, timestamp) VALUES
+('diego', 'tool_call', '{"tool": "segment-builder", "action": "Created FR_Spring_Audience segment", "result": "Segment sized at 28,450 members"}', CURRENT_TIMESTAMP - INTERVAL '3 hours'),
+('diego', 'message', '{"text": "Completed FR Spring campaign audience sizing. Ready for review."}', CURRENT_TIMESTAMP - INTERVAL '1 hour'),
+('carlos', 'tool_call', '{"tool": "analytics-dashboard", "action": "Generated DE campaign attribution report", "result": "Multi-touch attribution complete, email drove 42% of conversions"}', CURRENT_TIMESTAMP - INTERVAL '4 hours'),
+('carlos', 'message', '{"text": "DE attribution model finalized. Email is the strongest channel at 42% contribution."}', CURRENT_TIMESTAMP - INTERVAL '2 hours'),
+('andres', 'tool_call', '{"tool": "journey-builder", "action": "Configured A/B test splits for DE campaign", "result": "50/50 split configured with holdout group"}', CURRENT_TIMESTAMP - INTERVAL '5 hours'),
+('andres', 'commit', '{"message": "feat: add A/B test configuration for DE Silver upgrade journey", "files_changed": 3}', CURRENT_TIMESTAMP - INTERVAL '3 hours'),
+('martina', 'tool_call', '{"tool": "calendar-optimizer", "action": "Optimized send times for Summer Sale across 4 markets", "result": "UK: Tue 10am, DE: Wed 9am, FR: Thu 11am, KSA: Sun 8pm"}', CURRENT_TIMESTAMP - INTERVAL '2 hours'),
+('martina', 'message', '{"text": "Send time optimization complete for Summer Sale. No conflicts detected with existing scheduled sends."}', CURRENT_TIMESTAMP - INTERVAL '30 minutes');
 
 -- ─── AUDIT LOG ENTRIES ────────────────────────────────────────────────────────
 
