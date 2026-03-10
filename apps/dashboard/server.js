@@ -50,6 +50,60 @@ const pool = process.env.DATABASE_URL
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// ─── EOD demo data helpers ──────────────────────────────────────────────────
+
+let _lastEodRefreshDate = null;
+
+async function refreshEodDates() {
+    try {
+        const today = new Date().toISOString().split('T')[0];
+        if (_lastEodRefreshDate === today) return;
+
+        const eodCheck = await pool.query("SELECT COUNT(*)::int AS c FROM eod_reports WHERE date = CURRENT_DATE");
+        const eodTotal = await pool.query("SELECT COUNT(*)::int AS c FROM eod_reports");
+        if (eodTotal.rows[0].c > 0 && eodCheck.rows[0].c === 0) {
+            const offsetResult = await pool.query("SELECT (CURRENT_DATE - MAX(date))::int AS days_offset FROM eod_reports");
+            const daysOffset = offsetResult.rows[0].days_offset;
+            if (daysOffset > 0) {
+                await pool.query(`UPDATE eod_reports SET date = date + $1`, [daysOffset]);
+                await pool.query(`UPDATE raw_events SET timestamp = timestamp + make_interval(days => $1)`, [daysOffset]);
+                console.log(`[DB] EOD report dates refreshed (+${daysOffset} days to current period)`);
+            }
+        }
+        _lastEodRefreshDate = today;
+    } catch (err) {
+        console.error('[DB] EOD date refresh error:', err.message);
+    }
+}
+
+async function migrateEodFormat() {
+    try {
+        const sample = await pool.query(`
+            SELECT id FROM eod_reports
+            WHERE jsonb_typeof(completed_tasks->0) = 'string'
+            LIMIT 1
+        `);
+        if (sample.rows.length > 0) {
+            await pool.query(`
+                UPDATE eod_reports SET
+                    completed_tasks = (
+                        SELECT COALESCE(jsonb_agg(jsonb_build_object('desc', elem, 'duration', null)), '[]'::jsonb)
+                        FROM jsonb_array_elements_text(completed_tasks) AS elem
+                    ),
+                    in_progress_tasks = (
+                        SELECT COALESCE(jsonb_agg(jsonb_build_object('desc', elem, 'pct', 50)), '[]'::jsonb)
+                        FROM jsonb_array_elements_text(in_progress_tasks) AS elem
+                    )
+                WHERE jsonb_typeof(completed_tasks->0) = 'string'
+                   OR jsonb_typeof(in_progress_tasks->0) = 'string'
+            `);
+            console.log('[DB] EOD reports migrated from string to object format');
+        }
+    } catch (err) {
+        console.error('[DB] EOD format migration error:', err.message);
+    }
+}
+
 // ─── Auto-init DB schema in production ───────────────────────────────────────
 
 async function initDatabase() {
@@ -92,50 +146,9 @@ async function initDatabase() {
             console.log(`[DB] Seed not needed, projects count: ${projectCount.rows[0].c}`);
         }
 
-        // Refresh EOD report dates so Daily Standup always has data for today
-        try {
-            const eodCheck = await pool.query("SELECT COUNT(*)::int AS c FROM eod_reports WHERE date = CURRENT_DATE");
-            const eodTotal = await pool.query("SELECT COUNT(*)::int AS c FROM eod_reports");
-            if (eodTotal.rows[0].c > 0 && eodCheck.rows[0].c === 0) {
-                // Calculate offset once before updating
-                const offsetResult = await pool.query("SELECT (CURRENT_DATE - MAX(date))::int AS days_offset FROM eod_reports");
-                const daysOffset = offsetResult.rows[0].days_offset;
-                if (daysOffset > 0) {
-                    await pool.query(`UPDATE eod_reports SET date = date + $1`, [daysOffset]);
-                    await pool.query(`UPDATE raw_events SET timestamp = timestamp + make_interval(days => $1)`, [daysOffset]);
-                    console.log(`[DB] EOD report dates refreshed (+${daysOffset} days to current period)`);
-                }
-            }
-        } catch (eodErr) {
-            console.error('[DB] EOD date refresh error:', eodErr.message);
-        }
-
-        // Migrate EOD reports from plain string format to {desc} object format
-        try {
-            const sample = await pool.query(`
-                SELECT id, completed_tasks FROM eod_reports
-                WHERE jsonb_typeof(completed_tasks->0) = 'string'
-                LIMIT 1
-            `);
-            if (sample.rows.length > 0) {
-                await pool.query(`
-                    UPDATE eod_reports SET
-                        completed_tasks = (
-                            SELECT COALESCE(jsonb_agg(jsonb_build_object('desc', elem, 'duration', null)), '[]'::jsonb)
-                            FROM jsonb_array_elements_text(completed_tasks) AS elem
-                        ),
-                        in_progress_tasks = (
-                            SELECT COALESCE(jsonb_agg(jsonb_build_object('desc', elem, 'pct', 50)), '[]'::jsonb)
-                            FROM jsonb_array_elements_text(in_progress_tasks) AS elem
-                        )
-                    WHERE jsonb_typeof(completed_tasks->0) = 'string'
-                       OR jsonb_typeof(in_progress_tasks->0) = 'string'
-                `);
-                console.log('[DB] EOD reports migrated from string to object format');
-            }
-        } catch (migErr) {
-            console.error('[DB] EOD format migration error:', migErr.message);
-        }
+        // Run initial EOD refresh + migration
+        await refreshEodDates();
+        await migrateEodFormat();
     } catch (err) {
         console.error('[DB] Init error:', err.message, err.detail || '');
     }
@@ -1287,6 +1300,7 @@ app.post('/api/weekly-sessions/:id/report', async (req, res) => {
 
 app.get('/api/eod-reports', async (req, res) => {
     try {
+        await refreshEodDates();
         const { department, date, from, to } = req.query;
         let query = `
             SELECT r.*, a.name as agent_name, a.avatar, a.department, a.role
