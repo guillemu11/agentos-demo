@@ -1,0 +1,308 @@
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useLanguage } from '../../i18n/LanguageContext.jsx';
+import { campaignManagerData } from '../../data/agentViewMocks.js';
+import { getBauTypeById, getBauCategoryById } from '../../data/emiratesBauTypes.js';
+import AgentChat from '../AgentChat.jsx';
+import KpiCard from './shared/KpiCard.jsx';
+import StatusBadge from './shared/StatusBadge.jsx';
+import DataTable from './shared/DataTable.jsx';
+import ProgressBar from './shared/ProgressBar.jsx';
+import { AgentTabIcons } from '../icons.jsx';
+import {
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, Legend,
+} from 'recharts';
+
+export default function CampaignManagerView({ agent }) {
+  const navigate = useNavigate();
+  const { t, lang } = useLanguage();
+  const [activeTab, setActiveTab] = useState('campaigns');
+  const [metricsChart, setMetricsChart] = useState('line');
+  const data = campaignManagerData;
+
+  const activeCampaigns = data.campaigns.filter(c => c.status !== 'launched').length;
+  const completedCampaigns = data.campaigns.filter(c => c.status === 'launched').length;
+  const avgProgress = Math.round(data.campaigns.reduce((s, c) => s + c.progress, 0) / data.campaigns.length);
+
+  const tabs = [
+    { id: 'campaigns', label: 'Active Campaigns', icon: AgentTabIcons.campaigns },
+    { id: 'dependencies', label: 'Dependencies', icon: AgentTabIcons.dependencies, count: data.dependencies.filter(d => d.status !== 'resolved').length },
+    { id: 'metrics', label: 'Campaign Metrics', icon: AgentTabIcons.metrics },
+    { id: 'chat', label: 'Chat', icon: AgentTabIcons.chat },
+    { id: 'activity', label: 'Activity', icon: AgentTabIcons.activity },
+  ];
+
+  const depColumns = [
+    { key: 'campaign', label: t('campaignManager.campaign') || 'Campaña', sortable: true },
+    {
+      key: 'from', label: t('campaignManager.from') || 'De', sortable: true, render: (val) => (
+        <span style={{ fontWeight: 600 }}>{val}</span>
+      )
+    },
+    {
+      key: 'to', label: t('campaignManager.to') || 'Para', sortable: true, render: (val) => (
+        <span style={{ fontWeight: 600 }}>{val}</span>
+      )
+    },
+    { key: 'description', label: t('campaignManager.description') || 'Descripción', sortable: false },
+    {
+      key: 'status', label: t('campaignManager.status') || 'Estado', sortable: true, render: (val) => (
+        <StatusBadge status={val} />
+      )
+    },
+  ];
+
+  function getPhaseColor(phase) {
+    if (phase.done) return '#10b981';
+    if (phase.current) return '#6366f1';
+    return '#d1d5db';
+  }
+
+  function getStatusColor(status) {
+    const map = { launched: '#10b981', qa: '#f59e0b', content: '#6366f1', brief: '#94a3b8' };
+    return map[status] || '#94a3b8';
+  }
+
+  const recentEvents = agent.recent_events || [];
+
+  return (
+    <>
+      {/* Hero KPIs */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+        <KpiCard label={t('campaignManager.activeCampaigns') || 'Active Campaigns'} value={activeCampaigns} color="#6366f1" />
+        <KpiCard label={t('campaignManager.completed') || 'Completed'} value={completedCampaigns} color="#10b981" />
+        <KpiCard label={t('campaignManager.avgProgress') || 'Avg Progress'} value={`${avgProgress}%`} color="#f59e0b" />
+      </div>
+
+      {/* Campaign Pipeline Hero */}
+      <div className="card" style={{ padding: '20px', marginBottom: '24px' }}>
+        <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '16px' }}>{t('campaignManager.pipeline') || 'Campaign Pipeline'}</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {data.campaigns.map((campaign) => (
+            <div key={campaign.id} className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{campaign.name}</span>
+                  <StatusBadge status={campaign.status === 'launched' ? 'success' : campaign.status === 'qa' ? 'warning' : campaign.status === 'content' ? 'in-progress' : 'draft'} label={campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1)} />
+                  {campaign.bauType && (() => {
+                    const bt = getBauTypeById(campaign.bauType);
+                    const cat = bt ? getBauCategoryById(bt.category) : null;
+                    return bt && cat ? (
+                      <span
+                        onClick={(e) => { e.stopPropagation(); navigate(`/app/campaigns/bau/${bt.id}`); }}
+                        style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.65rem', fontWeight: 600, background: `${cat.color}15`, color: cat.color, cursor: 'pointer' }}
+                      >
+                        {cat.icon} {bt.name}
+                      </span>
+                    ) : null;
+                  })()}
+                </div>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                  {t('campaignManager.target') || 'Target'}: {new Date(campaign.targetDate).toLocaleDateString(lang === 'en' ? 'en-US' : 'es-ES', { month: 'short', day: 'numeric' })}
+                </span>
+              </div>
+              <ProgressBar percent={campaign.progress} color={getStatusColor(campaign.status)} />
+              {/* Phase indicators */}
+              <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                {campaign.phases.map((phase, i) => (
+                  <React.Fragment key={phase.name}>
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '4px',
+                      padding: '2px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600,
+                      background: phase.done ? 'rgba(16,185,129,0.15)' : phase.current ? 'rgba(99,102,241,0.15)' : 'rgba(0,0,0,0.05)',
+                      color: getPhaseColor(phase),
+                    }}>
+                      {phase.done ? '✓' : phase.current ? '●' : '○'} {phase.name}
+                    </span>
+                    {i < campaign.phases.length - 1 && (
+                      <span style={{ color: '#d1d5db', fontSize: '0.7rem' }}>→</span>
+                    )}
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="agent-tabs">
+        {tabs.map((tab) => (
+          <button key={tab.id} className={`agent-tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
+            <span>{tab.icon}</span>
+            <span>{tab.label}</span>
+            {tab.count != null && <span className="agent-tab-count">{tab.count}</span>}
+          </button>
+        ))}
+      </div>
+
+      <section className="agent-tab-content">
+        {activeTab === 'campaigns' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {data.campaigns.map((campaign) => (
+              <div key={campaign.id} className="card animate-fade-in" style={{ padding: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '1.05rem', marginBottom: '4px' }}>{campaign.name}</div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      {t('campaignManager.target') || 'Target'}: {new Date(campaign.targetDate).toLocaleDateString(lang === 'en' ? 'en-US' : 'es-ES', { month: 'long', day: 'numeric', year: 'numeric' })}
+                    </div>
+                  </div>
+                  <StatusBadge status={campaign.status === 'launched' ? 'success' : campaign.status === 'qa' ? 'warning' : campaign.status === 'content' ? 'in-progress' : 'draft'} label={campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1)} />
+                </div>
+
+                <ProgressBar percent={campaign.progress} color={getStatusColor(campaign.status)} />
+
+                <div style={{ display: 'flex', gap: '4px', margin: '12px 0', flexWrap: 'wrap' }}>
+                  {campaign.phases.map((phase, i) => (
+                    <React.Fragment key={phase.name}>
+                      <span style={{
+                        padding: '2px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600,
+                        background: phase.done ? 'rgba(16,185,129,0.15)' : phase.current ? 'rgba(99,102,241,0.15)' : 'rgba(0,0,0,0.05)',
+                        color: getPhaseColor(phase),
+                      }}>
+                        {phase.done ? '✓' : phase.current ? '●' : '○'} {phase.name}
+                      </span>
+                      {i < campaign.phases.length - 1 && (
+                        <span style={{ color: '#d1d5db', fontSize: '0.7rem', alignSelf: 'center' }}>→</span>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
+
+                {/* Assigned agents */}
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginRight: '4px' }}>{t('campaignManager.agents') || 'Agents'}:</span>
+                  {campaign.assignedAgents.map((a) => (
+                    <span key={a} style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '0.75rem', background: 'rgba(99,102,241,0.12)', color: '#818cf8' }}>{a}</span>
+                  ))}
+                </div>
+
+                {/* Metrics if launched */}
+                {campaign.metrics && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', padding: '12px', background: 'var(--bg-card)', borderRadius: '8px' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Open Rate</div>
+                      <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{campaign.metrics.openRate}%</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>CTR</div>
+                      <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{campaign.metrics.ctr}%</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Conversions</div>
+                      <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{campaign.metrics.conversions.toLocaleString()}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {activeTab === 'dependencies' && (
+          <DataTable columns={depColumns} data={data.dependencies} />
+        )}
+
+        {activeTab === 'metrics' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            {/* Chart toggle */}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                className={`agent-tab ${metricsChart === 'line' ? 'active' : ''}`}
+                style={{ padding: '4px 12px', fontSize: '0.8rem' }}
+                onClick={() => setMetricsChart('line')}
+              >
+                {t('campaignManager.lineChart') || 'Line Chart'}
+              </button>
+              <button
+                className={`agent-tab ${metricsChart === 'bar' ? 'active' : ''}`}
+                style={{ padding: '4px 12px', fontSize: '0.8rem' }}
+                onClick={() => setMetricsChart('bar')}
+              >
+                {t('campaignManager.barChart') || 'Bar Chart'}
+              </button>
+            </div>
+
+            <div className="card" style={{ padding: '20px' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '16px' }}>{t('campaignManager.weeklyMetrics') || 'Weekly Campaign Metrics'}</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                {metricsChart === 'line' ? (
+                  <LineChart data={data.metricsHistory}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+                    <XAxis dataKey="week" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Line type="monotone" dataKey="openRate" name="Open Rate %" stroke="#6366f1" strokeWidth={2} dot={{ r: 4 }} />
+                    <Line type="monotone" dataKey="ctr" name="CTR %" stroke="#10b981" strokeWidth={2} dot={{ r: 4 }} />
+                  </LineChart>
+                ) : (
+                  <BarChart data={data.metricsHistory}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+                    <XAxis dataKey="week" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="conversions" name="Conversions" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+
+            {/* Campaign ROI summary */}
+            <div className="card" style={{ padding: '20px' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '16px' }}>{t('campaignManager.campaignPerformance') || 'Campaign Performance'}</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {data.campaigns.filter(c => c.metrics).map((campaign) => (
+                  <div key={campaign.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'var(--bg-card)', borderRadius: '8px' }}>
+                    <span style={{ fontWeight: 600 }}>{campaign.name}</span>
+                    <div style={{ display: 'flex', gap: '24px' }}>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Open Rate</div>
+                        <div style={{ fontWeight: 700 }}>{campaign.metrics.openRate}%</div>
+                      </div>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>CTR</div>
+                        <div style={{ fontWeight: 700 }}>{campaign.metrics.ctr}%</div>
+                      </div>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Conv.</div>
+                        <div style={{ fontWeight: 700 }}>{campaign.metrics.conversions.toLocaleString()}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'chat' && (
+          <AgentChat agentId={agent.id} agentName={agent.name} agentAvatar={agent.avatar} />
+        )}
+
+        {activeTab === 'activity' && (
+          <div className="agent-activity-feed">
+            {recentEvents.length > 0 ? (
+              recentEvents.map((event, i) => (
+                <div key={event.id || i} className="activity-item animate-fade-in">
+                  <div className="activity-time">
+                    {event.timestamp ? new Date(event.timestamp).toLocaleTimeString(lang === 'en' ? 'en-US' : 'es-ES', { hour: '2-digit', minute: '2-digit' }) : '--:--'}
+                  </div>
+                  <div className={`activity-dot ${event.event_type === 'task_complete' ? 'success' : event.event_type === 'error' ? 'warning' : 'info'}`}></div>
+                  <div className="activity-message">
+                    {typeof event.content === 'string' ? event.content : event.content?.message || event.content?.summary || event.event_type}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="empty-state">{t('agentDetail.noActivity')}</div>
+            )}
+          </div>
+        )}
+      </section>
+    </>
+  );
+}

@@ -1,0 +1,27 @@
+{
+  "name": "agentos",
+  "version": "0.1.0",
+  "description": "The operating system for teams running AI agents",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "cd apps/dashboard && npm run dev",
+    "server": "cd apps/dashboard && node server.js",
+    "start": "concurrently \"npm run server\" \"npm run dev\"",
+    "db:up": "docker-compose up -d postgres",
+    "db:down": "docker-compose down",
+    "setup": "npm run db:up && cd apps/dashboard && npm install"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "project-management",
+    "dashboard"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "dotenv": "^17.3.1",
+    "pg": "^8.20.0"
+  }
+}
