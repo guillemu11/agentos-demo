@@ -109,6 +109,33 @@ async function initDatabase() {
         } catch (eodErr) {
             console.error('[DB] EOD date refresh error:', eodErr.message);
         }
+
+        // Migrate EOD reports from plain string format to {desc} object format
+        try {
+            const sample = await pool.query(`
+                SELECT id, completed_tasks FROM eod_reports
+                WHERE jsonb_typeof(completed_tasks->0) = 'string'
+                LIMIT 1
+            `);
+            if (sample.rows.length > 0) {
+                await pool.query(`
+                    UPDATE eod_reports SET
+                        completed_tasks = (
+                            SELECT COALESCE(jsonb_agg(jsonb_build_object('desc', elem, 'duration', null)), '[]'::jsonb)
+                            FROM jsonb_array_elements_text(completed_tasks) AS elem
+                        ),
+                        in_progress_tasks = (
+                            SELECT COALESCE(jsonb_agg(jsonb_build_object('desc', elem, 'pct', 50)), '[]'::jsonb)
+                            FROM jsonb_array_elements_text(in_progress_tasks) AS elem
+                        )
+                    WHERE jsonb_typeof(completed_tasks->0) = 'string'
+                       OR jsonb_typeof(in_progress_tasks->0) = 'string'
+                `);
+                console.log('[DB] EOD reports migrated from string to object format');
+            }
+        } catch (migErr) {
+            console.error('[DB] EOD format migration error:', migErr.message);
+        }
     } catch (err) {
         console.error('[DB] Init error:', err.message, err.detail || '');
     }
