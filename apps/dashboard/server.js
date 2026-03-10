@@ -54,21 +54,31 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 async function initDatabase() {
     try {
-        const res = await pool.query("SELECT to_regclass('public.agents')");
-        if (res.rows[0].to_regclass) return; // tables exist
-        console.log('[DB] Tables not found, initializing schema...');
         const __dirname2 = path.dirname(fileURLToPath(import.meta.url));
-        const schemaPath = path.join(__dirname2, '..', '..', 'packages', 'core', 'db', 'schema.sql');
-        const schema = fs.readFileSync(schemaPath, 'utf8');
-        await pool.query(schema);
-        console.log('[DB] Schema initialized successfully');
-        // Load seed data if available
-        for (const seedFile of ['seed-emirates.sql', 'seed-emirates-demo.sql']) {
-            const seedPath = path.join(__dirname2, '..', '..', seedFile);
-            if (fs.existsSync(seedPath)) {
-                const seed = fs.readFileSync(seedPath, 'utf8');
-                await pool.query(seed);
-                console.log(`[DB] Seed ${seedFile} loaded`);
+        const res = await pool.query("SELECT to_regclass('public.agents')");
+        const tablesExist = !!res.rows[0].to_regclass;
+
+        if (!tablesExist) {
+            console.log('[DB] Tables not found, initializing schema...');
+            const schemaPath = path.join(__dirname2, '..', '..', 'packages', 'core', 'db', 'schema.sql');
+            const schema = fs.readFileSync(schemaPath, 'utf8');
+            await pool.query(schema);
+            console.log('[DB] Schema initialized successfully');
+        }
+
+        // Check if seed data is needed (projects table empty = no demo data)
+        const projectCount = await pool.query('SELECT COUNT(*)::int AS c FROM projects');
+        const needsSeed = !tablesExist || projectCount.rows[0].c === 0;
+
+        if (needsSeed) {
+            console.log('[DB] Demo data missing, loading seed...');
+            for (const seedFile of ['seed-emirates.sql', 'seed-emirates-demo.sql']) {
+                const seedPath = path.join(__dirname2, '..', '..', seedFile);
+                if (fs.existsSync(seedPath)) {
+                    const seed = fs.readFileSync(seedPath, 'utf8');
+                    await pool.query(seed);
+                    console.log(`[DB] Seed ${seedFile} loaded`);
+                }
             }
         }
     } catch (err) {
