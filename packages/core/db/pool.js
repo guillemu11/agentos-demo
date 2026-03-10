@@ -10,7 +10,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const pool = process.env.DATABASE_URL
-    ? new pg.Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
+    ? new pg.Pool({ connectionString: process.env.DATABASE_URL })
     : new pg.Pool({
         host: process.env.PG_HOST || 'localhost',
         port: parseInt(process.env.PG_PORT || '5433', 10),

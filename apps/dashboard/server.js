@@ -39,7 +39,7 @@ app.use(cors({
 app.use(express.json());
 
 const pool = process.env.DATABASE_URL
-    ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
+    ? new Pool({ connectionString: process.env.DATABASE_URL })
     : new Pool({
         host: process.env.PG_HOST || 'localhost',
         port: parseInt(process.env.PG_PORT || '5434', 10),
