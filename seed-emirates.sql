@@ -3,19 +3,26 @@
 -- Run: psql -h localhost -p 5433 -U agentos -d agentos -f seed-emirates.sql
 -- ============================================================
 
--- Clear existing data
-DELETE FROM eod_reports;
-DELETE FROM raw_events;
-DELETE FROM weekly_brainstorms;
-DELETE FROM weekly_sessions;
-DELETE FROM tasks;
-DELETE FROM phases;
-DELETE FROM projects;
-DELETE FROM agents;
-DELETE FROM workflow_runs;
-DELETE FROM inbox_items;
-DELETE FROM audit_log;
-DELETE FROM pm_reports;
+-- Clear all data and reset SERIAL counters (CASCADE handles FK dependencies)
+TRUNCATE TABLE
+    brainstorm_messages,
+    brainstorm_conversations,
+    weekly_brainstorms,
+    weekly_sessions,
+    eod_reports,
+    raw_events,
+    tasks,
+    phases,
+    projects,
+    agent_memory,
+    agent_conversations,
+    collaboration_raises,
+    workflow_runs,
+    inbox_items,
+    audit_log,
+    pm_reports,
+    agents
+RESTART IDENTITY CASCADE;
 
 -- ─── 13 SPECIALIZED MARKETING AGENTS ─────────────────────────────────────────
 
