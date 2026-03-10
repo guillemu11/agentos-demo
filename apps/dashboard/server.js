@@ -10,6 +10,7 @@ import cors from 'cors';
 import pg from 'pg';
 import crypto from 'crypto';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import session from 'express-session';
 import connectPgSimple from 'connect-pg-simple';
@@ -48,6 +49,33 @@ const pool = process.env.DATABASE_URL
     });
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+// ─── Auto-init DB schema in production ───────────────────────────────────────
+
+async function initDatabase() {
+    try {
+        const res = await pool.query("SELECT to_regclass('public.agents')");
+        if (res.rows[0].to_regclass) return; // tables exist
+        console.log('[DB] Tables not found, initializing schema...');
+        const __dirname2 = path.dirname(fileURLToPath(import.meta.url));
+        const schemaPath = path.join(__dirname2, '..', '..', 'packages', 'core', 'db', 'schema.sql');
+        const schema = fs.readFileSync(schemaPath, 'utf8');
+        await pool.query(schema);
+        console.log('[DB] Schema initialized successfully');
+        // Load seed data if available
+        for (const seedFile of ['seed-emirates.sql', 'seed-emirates-demo.sql']) {
+            const seedPath = path.join(__dirname2, '..', '..', seedFile);
+            if (fs.existsSync(seedPath)) {
+                const seed = fs.readFileSync(seedPath, 'utf8');
+                await pool.query(seed);
+                console.log(`[DB] Seed ${seedFile} loaded`);
+            }
+        }
+    } catch (err) {
+        console.error('[DB] Init error:', err.message);
+    }
+}
+initDatabase();
 
 // ─── Session Middleware ──────────────────────────────────────────────────────
 
