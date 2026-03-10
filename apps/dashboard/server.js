@@ -75,14 +75,23 @@ async function initDatabase() {
             for (const seedFile of ['seed-emirates.sql', 'seed-emirates-demo.sql']) {
                 const seedPath = path.join(__dirname2, '..', '..', seedFile);
                 if (fs.existsSync(seedPath)) {
-                    const seed = fs.readFileSync(seedPath, 'utf8');
-                    await pool.query(seed);
-                    console.log(`[DB] Seed ${seedFile} loaded`);
+                    try {
+                        const seed = fs.readFileSync(seedPath, 'utf8');
+                        await pool.query(seed);
+                        console.log(`[DB] Seed ${seedFile} loaded successfully`);
+                    } catch (seedErr) {
+                        console.error(`[DB] Seed ${seedFile} FAILED:`, seedErr.message);
+                        console.error('[DB] Seed error detail:', seedErr.detail || seedErr.hint || '');
+                    }
+                } else {
+                    console.log(`[DB] Seed file not found: ${seedPath}`);
                 }
             }
+        } else {
+            console.log(`[DB] Seed not needed, projects count: ${projectCount.rows[0].c}`);
         }
     } catch (err) {
-        console.error('[DB] Init error:', err.message);
+        console.error('[DB] Init error:', err.message, err.detail || '');
     }
 }
 initDatabase();
@@ -383,6 +392,26 @@ app.patch('/api/tasks/:id', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// DB DIAGNOSTIC (temporary)
+app.get('/api/db-status', async (req, res) => {
+    try {
+        const counts = await pool.query(`
+            SELECT
+                (SELECT COUNT(*) FROM agents)::int AS agents,
+                (SELECT COUNT(*) FROM projects)::int AS projects,
+                (SELECT COUNT(*) FROM inbox_items)::int AS inbox,
+                (SELECT COUNT(*) FROM eod_reports)::int AS eod,
+                (SELECT COUNT(*) FROM weekly_sessions)::int AS weekly,
+                (SELECT COUNT(*) FROM workflow_runs)::int AS workflows,
+                (SELECT COUNT(*) FROM pm_reports)::int AS reports,
+                (SELECT COUNT(*) FROM audit_log)::int AS audit
+        `);
+        res.json({ status: 'ok', counts: counts.rows[0], timestamp: new Date().toISOString() });
+    } catch (err) {
+        res.json({ status: 'error', error: err.message });
+    }
+});
+
 // AGENTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
