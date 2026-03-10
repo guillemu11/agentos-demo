@@ -367,19 +367,4 @@ CREATE TABLE IF NOT EXISTS brainstorm_messages (
 CREATE INDEX IF NOT EXISTS idx_brainstorm_msg_conv ON brainstorm_messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_brainstorm_msg_project ON brainstorm_messages(conversation_id, project_index);
 
--- Seed: campaign projects for workflow linking
-INSERT INTO projects (name, description, department, status, type)
-SELECT 'Ramadan GCC Holiday Offer',
-       'Seasonal campaign targeting GCC markets during Ramadan with localized content and offers',
-       'strategic', 'Completed', 'campaign'
-WHERE NOT EXISTS (
-    SELECT 1 FROM projects WHERE name = 'Ramadan GCC Holiday Offer' AND department = 'strategic'
-);
-
-INSERT INTO projects (name, description, department, status, type)
-SELECT 'Skywards Gold to Platinum Conversion Program',
-       'Loyalty upgrade campaign converting Skywards Gold members to Platinum tier through targeted incentives',
-       'strategic', 'Completed', 'campaign'
-WHERE NOT EXISTS (
-    SELECT 1 FROM projects WHERE name = 'Skywards Gold to Platinum Conversion Program' AND department = 'strategic'
-);
+-- Seed data is now in seed-emirates.sql

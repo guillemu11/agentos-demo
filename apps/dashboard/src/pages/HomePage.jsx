@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { FeatureIcons, StepIcons } from '../components/icons.jsx';
+import WORKFLOWS from '../data/workflows.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -19,19 +20,18 @@ const features = [
 
 export default function HomePage() {
   const { t } = useLanguage();
-  const [stats, setStats] = useState({ agents: 0, projects: 0, workflows: 0, departments: 0 });
+  const [stats, setStats] = useState({ agents: 0, projects: 0, workflows: WORKFLOWS.length, departments: 0 });
 
   useEffect(() => {
     Promise.all([
       fetch(`${API_URL}/agents`).then(r => r.ok ? r.json() : []),
       fetch(`${API_URL}/projects`).then(r => r.ok ? r.json() : []),
       fetch(`${API_URL}/departments`).then(r => r.ok ? r.json() : []),
-      fetch(`${API_URL}/workflows/stats`).then(r => r.ok ? r.json() : { total_runs: 0 }),
-    ]).then(([agents, projects, departments, wfStats]) => {
+    ]).then(([agents, projects, departments]) => {
       setStats({
         agents: agents.length,
         projects: projects.length,
-        workflows: wfStats.total_runs,
+        workflows: WORKFLOWS.length,
         departments: departments.length,
       });
     }).catch(() => {});
