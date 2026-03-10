@@ -66,9 +66,10 @@ async function initDatabase() {
             console.log('[DB] Schema initialized successfully');
         }
 
-        // Check if seed data is needed (projects table empty = no demo data)
+        // Check if seed data is needed (projects table empty OR missing strategy data)
         const projectCount = await pool.query('SELECT COUNT(*)::int AS c FROM projects');
-        const needsSeed = !tablesExist || projectCount.rows[0].c === 0;
+        const strategyCheck = await pool.query("SELECT COUNT(*)::int AS c FROM projects WHERE jsonb_array_length(COALESCE(success_metrics, '[]'::jsonb)) > 0");
+        const needsSeed = !tablesExist || projectCount.rows[0].c === 0 || (projectCount.rows[0].c > 0 && strategyCheck.rows[0].c === 0);
 
         if (needsSeed) {
             console.log('[DB] Demo data missing, loading seed...');
