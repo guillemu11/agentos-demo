@@ -17,7 +17,7 @@ COPY apps/dashboard/server.js apps/dashboard/
 COPY packages/ packages/
 COPY --from=builder /app/apps/dashboard/dist apps/dashboard/dist
 COPY workspace.md ./
-COPY seed-emirates.sql seed-emirates-demo.sql ./
+COPY seeds/ seeds/
 
 # Make node_modules accessible to packages/core/ (Node resolves upward)
 RUN ln -s /app/apps/dashboard/node_modules /app/node_modules

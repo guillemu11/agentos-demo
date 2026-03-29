@@ -26,6 +26,7 @@ export default function Layout({ user, onLogout }) {
             label: 'Operations',
             items: [
                 { to: '/app/workflows', icon: icons.workflows, label: t('layout.workflows') },
+                { to: '/app/research', icon: icons.intelligence, label: t('layout.autoResearch') },
                 { to: '/app/inbox', icon: icons.agent, label: t('layout.projectManager') },
                 { to: '/app/pm-reports', icon: icons.reports, label: t('layout.pmReports') },
             ],
@@ -33,6 +34,7 @@ export default function Layout({ user, onLogout }) {
         {
             label: 'Control',
             items: [
+                { to: '/app/knowledge', icon: icons.intelligence, label: t('layout.knowledgeBase') },
                 { to: '/app/workspace/intelligence', icon: icons.intelligence, label: t('layout.intelligence') },
                 { to: '/app/workspace/audit', icon: icons.audit, label: t('layout.auditLog') },
                 { to: '/app/settings', icon: icons.settings, label: t('layout.settings') },

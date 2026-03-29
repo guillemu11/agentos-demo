@@ -19,6 +19,9 @@ import { chatWithPMAgent, extractJSON, generateSummary, generateProject } from '
 import { saveProject } from '../../packages/core/db/save_project.js';
 import { buildProjectContext } from '../../packages/core/pm-agent/context-builder.js';
 import Anthropic from '@anthropic-ai/sdk';
+import { initGemini, isGeminiReady, getGeminiClient } from '../../packages/core/ai-providers/gemini.js';
+import { initPinecone, isPineconeReady } from '../../packages/core/ai-providers/pinecone.js';
+import multer from 'multer';
 import { generateEodReport } from '../../packages/core/workspace-skills/eod-generator.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -49,6 +52,44 @@ const pool = process.env.DATABASE_URL
     });
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+// ─── Initialize optional AI providers (Gemini + Pinecone) ──────────────────
+if (process.env.GEMINI_API_KEY) {
+    try {
+        initGemini(process.env.GEMINI_API_KEY);
+        console.log('[AI] Gemini initialized (embeddings ready)');
+    } catch (err) {
+        console.warn('[AI] Gemini init failed:', err.message);
+    }
+}
+if (process.env.PINECONE_API_KEY && process.env.PINECONE_INDEX) {
+    try {
+        initPinecone(process.env.PINECONE_API_KEY, process.env.PINECONE_INDEX);
+        console.log('[AI] Pinecone initialized (index:', process.env.PINECONE_INDEX + ')');
+    } catch (err) {
+        console.warn('[AI] Pinecone init failed:', err.message);
+    }
+}
+
+// ─── Knowledge Base file upload setup ───────────────────────────────────────
+
+const kbDir = path.join(__dirname, '../../assets/kb');
+for (const sub of ['images', 'pdfs', 'tmp']) {
+    fs.mkdirSync(path.join(kbDir, sub), { recursive: true });
+}
+
+const kbUpload = multer({
+    dest: path.join(kbDir, 'tmp'),
+    limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+    fileFilter: (_req, file, cb) => {
+        const allowed = [
+            'application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/gif',
+            'text/html', 'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        ];
+        cb(null, allowed.includes(file.mimetype));
+    },
+});
 
 // ─── EOD demo data helpers ──────────────────────────────────────────────────
 
@@ -128,7 +169,7 @@ async function initDatabase() {
         if (needsSeed) {
             console.log('[DB] Demo data missing, loading seed...');
             for (const seedFile of ['seed-emirates.sql', 'seed-emirates-demo.sql']) {
-                const seedPath = path.join(__dirname2, '..', '..', seedFile);
+                const seedPath = path.join(__dirname2, '..', '..', 'seeds', seedFile);
                 if (fs.existsSync(seedPath)) {
                     try {
                         const seed = fs.readFileSync(seedPath, 'utf8');
@@ -401,21 +442,56 @@ app.delete('/api/projects/:id', async (req, res) => {
 // ── Pipeline ──
 app.get('/api/pipeline', async (req, res) => {
     try {
-        const { department } = req.query;
-        let query = `
-            SELECT p.*,
+        const { department, type } = req.query;
+        const items = [];
+
+        // Projects (always included unless filtered)
+        if (!type || type === 'project') {
+            let q = `SELECT p.*, 'project' as _type,
                 (SELECT COUNT(*) FROM tasks t JOIN phases ph ON t.phase_id = ph.id WHERE ph.project_id = p.id) as total_tasks,
                 (SELECT COUNT(*) FROM tasks t JOIN phases ph ON t.phase_id = ph.id WHERE ph.project_id = p.id AND t.status = 'Done') as done_tasks
-            FROM projects p
-        `;
-        const params = [];
-        if (department) {
-            params.push(department);
-            query += ` WHERE LOWER(p.department) = LOWER($${params.length})`;
+                FROM projects p`;
+            const params = [];
+            if (department) { params.push(department); q += ` WHERE LOWER(p.department) = LOWER($${params.length})`; }
+            q += ' ORDER BY p.updated_at DESC';
+            const result = await pool.query(q, params);
+            items.push(...result.rows);
         }
-        query += ' ORDER BY p.updated_at DESC';
-        const result = await pool.query(query, params);
-        res.json(result.rows);
+
+        // Email proposals
+        if (!type || type === 'email_proposal') {
+            let q = `SELECT id, campaign_id, variant_name as name, market, language, tier, subject_line, status, department, created_at, updated_at, 'email_proposal' as _type FROM email_proposals`;
+            const params = [];
+            if (department) { params.push(department); q += ` WHERE LOWER(department) = LOWER($${params.length})`; }
+            q += ' ORDER BY updated_at DESC LIMIT 50';
+            const result = await pool.query(q, params);
+            items.push(...result.rows);
+        }
+
+        // Research sessions
+        if (!type || type === 'research_session') {
+            let q = `SELECT id, title as name, topic, status, progress, sources_found, depth, campaign_id, department, created_at, updated_at, 'research_session' as _type FROM research_sessions`;
+            const params = [];
+            if (department) { params.push(department); q += ` WHERE LOWER(department) = LOWER($${params.length})`; }
+            q += ' ORDER BY updated_at DESC LIMIT 30';
+            const result = await pool.query(q, params);
+            items.push(...result.rows);
+        }
+
+        // Experiments
+        if (!type || type === 'experiment') {
+            let q = `SELECT id, campaign_id, experiment_type, hypothesis as name, status, winner, improvement_pct, department, created_at, updated_at, 'experiment' as _type FROM campaign_experiments`;
+            const params = [];
+            if (department) { params.push(department); q += ` WHERE LOWER(department) = LOWER($${params.length})`; }
+            q += ' ORDER BY updated_at DESC LIMIT 30';
+            const result = await pool.query(q, params);
+            items.push(...result.rows);
+        }
+
+        // Sort all by updated_at descending
+        items.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+
+        res.json(items);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -1945,18 +2021,29 @@ app.post('/api/chat/pm-agent', async (req, res) => {
         conversation.push({ role: 'user', content: message });
 
         const apiMessages = conversation.map(m => ({ role: m.role, content: m.content }));
-        const projectContext = await buildProjectContext(pool);
+        const [projectContext, ragResult] = await Promise.all([
+            buildProjectContext(pool),
+            isKBReady() ? buildRAGContext(pool, message, { namespaces: ['campaigns', 'kpis', 'research'] }) : { context: '', sources: [] },
+        ]);
+
+        // Append RAG context to project context
+        const fullProjectContext = ragResult.context
+            ? projectContext + '\n\n' + ragResult.context
+            : projectContext;
 
         // SSE headers
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Inbox-Item-Id', item.id.toString());
+        if (ragResult.sources.length > 0) {
+            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources));
+        }
         res.flushHeaders();
 
         // Stream response
         let fullResponse = '';
-        const stream = await chatWithPMAgent(apiMessages, { stream: true, projectContext });
+        const stream = await chatWithPMAgent(apiMessages, { stream: true, projectContext: fullProjectContext });
 
         stream.on('text', (text) => {
             fullResponse += text;
@@ -2187,17 +2274,35 @@ ${tools ? `Your tools: ${tools}` : ''}
         messages.push({ role: 'user', content: message });
         const apiMessages = messages.map(m => ({ role: m.role, content: m.content }));
 
+        // RAG: determine namespaces by department
+        const deptNamespaces = {
+            strategic: ['campaigns', 'kpis', 'research'],
+            execution: ['campaigns', 'emails', 'images', 'brand'],
+            control: ['campaigns', 'kpis', 'brand'],
+        };
+        const ragNamespaces = deptNamespaces[agent.department] || ['campaigns', 'kpis'];
+        const ragResult = isKBReady()
+            ? await buildRAGContext(pool, message, { namespaces: ragNamespaces })
+            : { context: '', sources: [] };
+
+        const finalSystemPrompt = ragResult.context
+            ? systemPrompt + '\n\n' + ragResult.context
+            : systemPrompt;
+
         // SSE headers
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
+        if (ragResult.sources.length > 0) {
+            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources));
+        }
         res.flushHeaders();
 
         // Stream response via chatWithPMAgent with systemPromptOverride
         let fullResponse = '';
         const stream = await chatWithPMAgent(apiMessages, {
             stream: true,
-            systemPromptOverride: systemPrompt,
+            systemPromptOverride: finalSystemPrompt,
         });
 
         stream.on('text', (text) => {
@@ -2326,30 +2431,61 @@ This campaign is part of Emirates' lifecycle marketing program with 31 triggered
 app.post('/api/chat/campaign/:campaignId', async (req, res) => {
     try {
         const { campaignId } = req.params;
-        const { message, history = [] } = req.body;
+        const { message } = req.body;
         if (!message) return res.status(400).json({ error: 'Message is required' });
 
         const ctx = CAMPAIGN_CONTEXT[campaignId];
         if (!ctx) return res.status(404).json({ error: 'Campaign not found' });
 
-        const systemPrompt = buildCampaignSystemPrompt(ctx);
+        // Load or create persistent conversation
+        let convRes = await pool.query(
+            'SELECT messages FROM campaign_conversations WHERE campaign_id = $1',
+            [campaignId]
+        );
+        let messages;
+        if (convRes.rows.length === 0) {
+            await pool.query(
+                'INSERT INTO campaign_conversations (campaign_id, messages) VALUES ($1, $2)',
+                [campaignId, '[]']
+            );
+            messages = [];
+        } else {
+            messages = Array.isArray(convRes.rows[0].messages) ? convRes.rows[0].messages : [];
+        }
 
-        const apiMessages = [
-            ...history.map(m => ({ role: m.role, content: m.content })),
-            { role: 'user', content: message },
-        ];
+        messages.push({ role: 'user', content: message });
+
+        // RAG: search with campaign filter
+        const ragResult = isKBReady()
+            ? await buildRAGContext(pool, message, {
+                namespaces: ['campaigns', 'emails', 'kpis'],
+                filter: { campaign_id: { $eq: campaignId } },
+            })
+            : { context: '', sources: [] };
+
+        const basePrompt = buildCampaignSystemPrompt(ctx);
+        const systemPrompt = ragResult.context
+            ? basePrompt + '\n\n' + ragResult.context
+            : basePrompt;
+
+        const apiMessages = messages.map(m => ({ role: m.role, content: m.content }));
 
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
+        if (ragResult.sources.length > 0) {
+            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources));
+        }
         res.flushHeaders();
 
+        let fullResponse = '';
         const stream = await chatWithPMAgent(apiMessages, {
             stream: true,
             systemPromptOverride: systemPrompt,
         });
 
         stream.on('text', (text) => {
+            fullResponse += text;
             res.write(`data: ${JSON.stringify({ text })}\n\n`);
         });
 
@@ -2366,6 +2502,13 @@ app.post('/api/chat/campaign/:campaignId', async (req, res) => {
 
         await stream.finalMessage();
 
+        // Persist conversation
+        messages.push({ role: 'assistant', content: fullResponse });
+        await pool.query(
+            'UPDATE campaign_conversations SET messages = $1, updated_at = NOW() WHERE campaign_id = $2',
+            [JSON.stringify(messages), campaignId]
+        );
+
         if (!streamEnded) {
             streamEnded = true;
             res.write('data: [DONE]\n\n');
@@ -2379,6 +2522,32 @@ app.post('/api/chat/campaign/:campaignId', async (req, res) => {
         } else if (!res.headersSent) {
             res.status(500).json({ error: err.message });
         }
+    }
+});
+
+// GET /api/campaigns/:campaignId/conversation — Load campaign chat
+app.get('/api/campaigns/:campaignId/conversation', requireAuth, async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT messages FROM campaign_conversations WHERE campaign_id = $1',
+            [req.params.campaignId]
+        );
+        res.json({ messages: result.rows.length > 0 ? result.rows[0].messages : [] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/campaigns/:campaignId/conversation — Clear campaign chat
+app.delete('/api/campaigns/:campaignId/conversation', requireAuth, async (req, res) => {
+    try {
+        await pool.query(
+            'UPDATE campaign_conversations SET messages = $1, updated_at = NOW() WHERE campaign_id = $2',
+            ['[]', req.params.campaignId]
+        );
+        res.json({ ok: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -2593,7 +2762,7 @@ app.get('/api/settings/api-keys', requireOwnerOrAdmin, async (req, res) => {
 
 app.put('/api/settings/api-keys', requireOwnerOrAdmin, async (req, res) => {
     try {
-        const allowedKeys = ['anthropic', 'confluence_url', 'confluence_token', 'jira_url', 'jira_email', 'jira_token', 'jira_project_key'];
+        const allowedKeys = ['anthropic', 'gemini', 'pinecone_api_key', 'pinecone_environment', 'pinecone_index', 'confluence_url', 'confluence_token', 'jira_url', 'jira_email', 'jira_token', 'jira_project_key'];
         // Load existing encrypted keys to merge
         const existing = {};
         const prev = await pool.query("SELECT value FROM workspace_config WHERE key = 'api_keys'");
@@ -2710,6 +2879,1376 @@ pool.query(`
     );
 `).catch(err => console.warn('[startup] agent_conversations:', err.message));
 
-app.listen(port, () => {
+// ═══════════════════════════════════════════════════════════════════════════════
+// PIPELINE UNIFIED STATUS + COMPARISON + ACTIVITY
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// PATCH /api/pipeline/:type/:id/status — Update status of any pipeline item
+app.patch('/api/pipeline/:type/:id/status', requireAuth, async (req, res) => {
+    try {
+        const { type, id } = req.params;
+        const { status } = req.body;
+        if (!status) return res.status(400).json({ error: 'status is required' });
+
+        const tableMap = {
+            project: { table: 'projects', valid: ['Planning', 'In Progress', 'Completed', 'Paused'] },
+            email_proposal: { table: 'email_proposals', valid: ['draft', 'review', 'approved', 'rejected'] },
+            research_session: { table: 'research_sessions', valid: ['queued', 'researching', 'synthesizing', 'completed', 'failed'] },
+            experiment: { table: 'campaign_experiments', valid: ['proposed', 'approved', 'running', 'completed', 'cancelled'] },
+        };
+
+        const config = tableMap[type];
+        if (!config) return res.status(400).json({ error: `Invalid type: ${type}` });
+        if (!config.valid.includes(status)) return res.status(400).json({ error: `Invalid status for ${type}: ${status}. Valid: ${config.valid.join(', ')}` });
+
+        await pool.query(`UPDATE ${config.table} SET status = $1, updated_at = NOW() WHERE id = $2`, [status, id]);
+        res.json({ ok: true, type, id: parseInt(id), status });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/activity/recent — Recent activity feed across all types
+app.get('/api/activity/recent', requireAuth, async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 15;
+
+        const activities = [];
+
+        // Recent email proposals
+        const emails = await pool.query(
+            `SELECT id, variant_name, campaign_id, status, updated_at, 'email_proposal' as type FROM email_proposals ORDER BY updated_at DESC LIMIT $1`, [limit]
+        );
+        for (const e of emails.rows) {
+            activities.push({ type: 'email_proposal', id: e.id, title: `Email "${e.variant_name}" — ${e.status}`, status: e.status, campaign_id: e.campaign_id, timestamp: e.updated_at });
+        }
+
+        // Recent research sessions
+        const research = await pool.query(
+            `SELECT id, title, status, updated_at, 'research_session' as type FROM research_sessions ORDER BY updated_at DESC LIMIT $1`, [limit]
+        );
+        for (const r of research.rows) {
+            activities.push({ type: 'research_session', id: r.id, title: `Research "${r.title}" — ${r.status}`, status: r.status, timestamp: r.updated_at });
+        }
+
+        // Recent experiments
+        const experiments = await pool.query(
+            `SELECT id, experiment_type, hypothesis, status, winner, improvement_pct, updated_at, 'experiment' as type FROM campaign_experiments ORDER BY updated_at DESC LIMIT $1`, [limit]
+        );
+        for (const x of experiments.rows) {
+            const detail = x.winner ? ` — Winner: ${x.winner}${x.improvement_pct ? ` (+${x.improvement_pct}%)` : ''}` : '';
+            activities.push({ type: 'experiment', id: x.id, title: `Experiment [${x.experiment_type}] ${x.status}${detail}`, status: x.status, timestamp: x.updated_at });
+        }
+
+        // Sort by timestamp descending, take top N
+        activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        res.json({ activities: activities.slice(0, limit) });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/pipeline/counts — Counts by type and active status
+app.get('/api/pipeline/counts', requireAuth, async (req, res) => {
+    try {
+        const [emailRes, researchRes, expRes] = await Promise.all([
+            pool.query(`SELECT COUNT(*) as count FROM email_proposals WHERE status IN ('draft','review')`),
+            pool.query(`SELECT COUNT(*) as count FROM research_sessions WHERE status IN ('queued','researching','synthesizing')`),
+            pool.query(`SELECT COUNT(*) as count FROM campaign_experiments WHERE status IN ('proposed','approved','running')`),
+        ]);
+        res.json({
+            emails_active: parseInt(emailRes.rows[0].count),
+            research_active: parseInt(researchRes.rows[0].count),
+            experiments_active: parseInt(expRes.rows[0].count),
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/chat/compare — Comparison chat with context of multiple campaigns
+app.post('/api/chat/compare', requireAuth, async (req, res) => {
+    try {
+        const { campaignIds = [], message } = req.body;
+        if (!message || campaignIds.length < 2) return res.status(400).json({ error: 'Need message and at least 2 campaignIds' });
+
+        const contexts = campaignIds.map(id => CAMPAIGN_CONTEXT[id]).filter(Boolean);
+        if (contexts.length < 2) return res.status(404).json({ error: 'Some campaigns not found' });
+
+        const comparisonPrompt = `You are a senior email marketing analyst comparing these campaigns:\n\n` +
+            contexts.map((ctx, i) => `## Campaign ${i + 1}: ${ctx.name}\n- Group: ${ctx.group}\n- Audience: ${ctx.audience}\n- KPIs: ${ctx.kpis.sends.toLocaleString()} sends, ${ctx.kpis.openRate}% open, ${ctx.kpis.clickRate}% click, ${ctx.kpis.conversionRate}% conversion\n`).join('\n') +
+            `\n## Your Task\nCompare these campaigns, identify what each does better, and suggest cross-pollination strategies. Be specific and data-driven. Respond in the same language the user writes in.`;
+
+        // RAG for both campaigns
+        let ragContext = '';
+        if (isKBReady()) {
+            const ragResult = await buildRAGContext(pool, message, { namespaces: ['campaigns', 'kpis'] });
+            ragContext = ragResult.context;
+        }
+
+        const fullPrompt = ragContext ? comparisonPrompt + '\n\n' + ragContext : comparisonPrompt;
+
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders();
+
+        const stream = await chatWithPMAgent(
+            [{ role: 'user', content: message }],
+            { stream: true, systemPromptOverride: fullPrompt }
+        );
+
+        stream.on('text', (text) => {
+            res.write(`data: ${JSON.stringify({ text })}\n\n`);
+        });
+
+        let streamEnded = false;
+        stream.on('error', (err) => {
+            if (!streamEnded) { streamEnded = true; res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`); res.write('data: [DONE]\n\n'); res.end(); }
+        });
+
+        await stream.finalMessage();
+        if (!streamEnded) { streamEnded = true; res.write('data: [DONE]\n\n'); res.end(); }
+    } catch (err) {
+        if (res.headersSent && !res.writableEnded) { res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`); res.write('data: [DONE]\n\n'); res.end(); }
+        else if (!res.headersSent) { res.status(500).json({ error: err.message }); }
+    }
+});
+
+// POST /api/research/from-session — Create campaign brief from research session
+app.post('/api/research/:id/to-inbox', requireAuth, async (req, res) => {
+    try {
+        const session = await pool.query('SELECT * FROM research_sessions WHERE id = $1', [req.params.id]);
+        if (session.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+
+        const s = session.rows[0];
+        const recommendations = Array.isArray(s.recommendations) ? s.recommendations.slice(0, 5).join('\n- ') : '';
+
+        const result = await pool.query(
+            `INSERT INTO inbox_items (title, description, source, status, department)
+             VALUES ($1, $2, 'agent', 'chat', $3) RETURNING *`,
+            [`Campaign from Research: ${s.title}`, `Based on research findings:\n- ${recommendations}`, s.department || 'strategic']
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUTORESEARCH
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import { startResearch, cancelResearch } from '../../packages/core/research/engine.js';
+
+// Tracks SSE connections for streaming research progress
+const _researchStreams = new Map();
+
+// POST /api/research/sessions — Start a new research session
+app.post('/api/research/sessions', requireAuth, async (req, res) => {
+    try {
+        const { topic, depth = 'standard', sourcesMode = 'both', campaignId } = req.body;
+        if (!topic) return res.status(400).json({ error: 'topic is required' });
+
+        const result = await pool.query(
+            `INSERT INTO research_sessions (title, topic, depth, sources_mode, campaign_id, status)
+             VALUES ($1, $2, $3, $4, $5, 'queued') RETURNING id`,
+            [topic.slice(0, 100), topic, depth, sourcesMode, campaignId || null]
+        );
+        const sessionId = result.rows[0].id;
+
+        // Start research in background
+        const callbacks = {
+            onProgress: (p) => {
+                const stream = _researchStreams.get(sessionId);
+                if (stream) stream.write(`data: ${JSON.stringify({ type: 'progress', value: p })}\n\n`);
+            },
+            onQuery: (q) => {
+                const stream = _researchStreams.get(sessionId);
+                if (stream) stream.write(`data: ${JSON.stringify({ type: 'query', value: q })}\n\n`);
+            },
+            onSource: (s) => {
+                const stream = _researchStreams.get(sessionId);
+                if (stream) stream.write(`data: ${JSON.stringify({ type: 'source', value: s })}\n\n`);
+            },
+            onPhase: (p) => {
+                const stream = _researchStreams.get(sessionId);
+                if (stream) {
+                    stream.write(`data: ${JSON.stringify({ type: 'phase', value: p })}\n\n`);
+                    if (p === 'completed' || p === 'failed' || p === 'cancelled') {
+                        stream.write('data: [DONE]\n\n');
+                        stream.end();
+                        _researchStreams.delete(sessionId);
+                    }
+                }
+            },
+        };
+
+        startResearch(pool, sessionId, { topic, depth, sourcesMode, campaignId }, callbacks)
+            .catch(err => console.error('[research] Error:', err.message));
+
+        res.status(201).json({ sessionId, status: 'queued' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/research/sessions — List sessions
+app.get('/api/research/sessions', requireAuth, async (req, res) => {
+    try {
+        const { status, campaignId, limit = 20 } = req.query;
+        let where = 'WHERE 1=1';
+        const params = [];
+        if (status) { params.push(status); where += ` AND status = $${params.length}`; }
+        if (campaignId) { params.push(campaignId); where += ` AND campaign_id = $${params.length}`; }
+        params.push(parseInt(limit));
+
+        const result = await pool.query(
+            `SELECT id, title, topic, depth, sources_mode, status, progress, sources_found, iterations, campaign_id, created_at, completed_at
+             FROM research_sessions ${where} ORDER BY created_at DESC LIMIT $${params.length}`,
+            params
+        );
+        res.json({ sessions: result.rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/research/sessions/:id — Detail + report
+app.get('/api/research/sessions/:id', requireAuth, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM research_sessions WHERE id = $1', [req.params.id]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/research/sessions/:id/stream — SSE progress stream
+app.get('/api/research/sessions/:id/stream', requireAuth, (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    _researchStreams.set(parseInt(req.params.id), res);
+
+    req.on('close', () => {
+        _researchStreams.delete(parseInt(req.params.id));
+    });
+});
+
+// POST /api/research/sessions/:id/cancel — Cancel active session
+app.post('/api/research/sessions/:id/cancel', requireAuth, async (req, res) => {
+    try {
+        cancelResearch(parseInt(req.params.id));
+        await pool.query(`UPDATE research_sessions SET status = 'failed', error = 'Cancelled', updated_at = NOW() WHERE id = $1`, [req.params.id]);
+        res.json({ ok: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/research/sessions/:id — Delete session
+app.delete('/api/research/sessions/:id', requireAuth, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM campaign_experiments WHERE research_session_id = $1', [req.params.id]);
+        await pool.query('DELETE FROM research_sessions WHERE id = $1', [req.params.id]);
+        res.json({ deleted: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/research/sessions/:id/experiments — List experiments for session
+app.get('/api/research/sessions/:id/experiments', requireAuth, async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT * FROM campaign_experiments WHERE research_session_id = $1 ORDER BY created_at',
+            [req.params.id]
+        );
+        res.json({ experiments: result.rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PATCH /api/experiments/:id — Update experiment status
+app.patch('/api/experiments/:id', requireAuth, async (req, res) => {
+    try {
+        const { status, results, winner } = req.body;
+        const updates = [];
+        const params = [];
+        if (status) { params.push(status); updates.push(`status = $${params.length}`); }
+        if (results) { params.push(JSON.stringify(results)); updates.push(`results = $${params.length}`); }
+        if (winner) { params.push(winner); updates.push(`winner = $${params.length}`); }
+        if (updates.length === 0) return res.status(400).json({ error: 'Nothing to update' });
+
+        params.push(req.params.id);
+        await pool.query(`UPDATE campaign_experiments SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${params.length}`, params);
+
+        const result = await pool.query('SELECT * FROM campaign_experiments WHERE id = $1', [req.params.id]);
+        res.json(result.rows[0] || {});
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/campaigns/:campaignId/auto-improve — Shortcut: launch research for a campaign
+app.post('/api/campaigns/:campaignId/auto-improve', requireAuth, async (req, res) => {
+    try {
+        const { campaignId } = req.params;
+        const ctx = CAMPAIGN_CONTEXT[campaignId];
+        if (!ctx) return res.status(404).json({ error: 'Campaign not found' });
+
+        const topic = `How to improve the "${ctx.name}" email campaign. Current metrics: ${ctx.kpis.sends.toLocaleString()} sends, ${ctx.kpis.openRate}% open rate, ${ctx.kpis.clickRate}% click rate, ${ctx.kpis.conversionRate}% conversion. Audience: ${ctx.audience}. Analyze competitors, industry trends, and best practices for ${ctx.group} campaigns.`;
+
+        const result = await pool.query(
+            `INSERT INTO research_sessions (title, topic, depth, sources_mode, campaign_id, status)
+             VALUES ($1, $2, 'standard', 'both', $3, 'queued') RETURNING id`,
+            [`Improve: ${ctx.name}`, topic, campaignId]
+        );
+        const sessionId = result.rows[0].id;
+
+        startResearch(pool, sessionId, { topic, depth: 'standard', sourcesMode: 'both', campaignId }, {})
+            .catch(err => console.error('[auto-improve] Error:', err.message));
+
+        res.status(201).json({ sessionId, status: 'queued' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXPERIMENT LOOPS (AutoExperiment)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import { runExperimentCycle, startAutoLoop, stopAutoLoop, isLoopActive } from '../../packages/core/research/experiment-loop.js';
+
+// POST /api/experiment-loops — Create & optionally start a loop
+app.post('/api/experiment-loops', requireAuth, async (req, res) => {
+    try {
+        const { campaign_id, name, metric_target, experiment_type, max_cycles = 20, cycle_interval = '4h', baseline, autoStart = false } = req.body;
+        if (!campaign_id || !name || !metric_target || !experiment_type) {
+            return res.status(400).json({ error: 'campaign_id, name, metric_target, experiment_type required' });
+        }
+        const status = autoStart ? 'running' : 'idle';
+        const { rows: [loop] } = await pool.query(
+            `INSERT INTO experiment_loops (campaign_id, name, metric_target, experiment_type, max_cycles, cycle_interval, current_baseline, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+            [campaign_id, name, metric_target, experiment_type, max_cycles, cycle_interval, baseline ? JSON.stringify(baseline) : null, status]
+        );
+        if (autoStart) startAutoLoop(pool, loop.id, cycle_interval);
+        res.status(201).json({ id: loop.id, status });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/experiment-loops — List loops
+app.get('/api/experiment-loops', requireAuth, async (req, res) => {
+    try {
+        const { campaign_id } = req.query;
+        let query = `SELECT * FROM experiment_loops`;
+        const params = [];
+        if (campaign_id) { params.push(campaign_id); query += ` WHERE campaign_id = $1`; }
+        query += ` ORDER BY created_at DESC`;
+        const { rows } = await pool.query(query, params);
+        res.json({ loops: rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/experiment-loops/:id — Loop detail with recent cycles
+app.get('/api/experiment-loops/:id', requireAuth, async (req, res) => {
+    try {
+        const { rows: [loop] } = await pool.query(`SELECT * FROM experiment_loops WHERE id = $1`, [req.params.id]);
+        if (!loop) return res.status(404).json({ error: 'Loop not found' });
+        const { rows: cycles } = await pool.query(
+            `SELECT * FROM experiment_cycles WHERE loop_id = $1 ORDER BY cycle_number DESC LIMIT 10`, [loop.id]
+        );
+        res.json({ ...loop, recent_cycles: cycles });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/experiment-loops/:id/cycles — All cycles
+app.get('/api/experiment-loops/:id/cycles', requireAuth, async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            `SELECT * FROM experiment_cycles WHERE loop_id = $1 ORDER BY cycle_number ASC`, [req.params.id]
+        );
+        res.json({ cycles: rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/experiment-loops/:id/run-cycle — Manually trigger one cycle
+app.post('/api/experiment-loops/:id/run-cycle', requireAuth, async (req, res) => {
+    try {
+        const loopId = parseInt(req.params.id);
+        const result = await runExperimentCycle(pool, loopId);
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/experiment-loops/:id/pause — Pause a running loop
+app.post('/api/experiment-loops/:id/pause', requireAuth, async (req, res) => {
+    try {
+        const loopId = parseInt(req.params.id);
+        stopAutoLoop(loopId);
+        await pool.query(`UPDATE experiment_loops SET status = 'paused', updated_at = NOW() WHERE id = $1`, [loopId]);
+        res.json({ ok: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/experiment-loops/:id/resume — Resume a paused loop
+app.post('/api/experiment-loops/:id/resume', requireAuth, async (req, res) => {
+    try {
+        const loopId = parseInt(req.params.id);
+        const { rows: [loop] } = await pool.query(`SELECT cycle_interval FROM experiment_loops WHERE id = $1`, [loopId]);
+        if (!loop) return res.status(404).json({ error: 'Loop not found' });
+        await pool.query(`UPDATE experiment_loops SET status = 'running', updated_at = NOW() WHERE id = $1`, [loopId]);
+        startAutoLoop(pool, loopId, loop.cycle_interval);
+        res.json({ ok: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/experiment-loops/:id — Delete loop + cascade cycles
+app.delete('/api/experiment-loops/:id', requireAuth, async (req, res) => {
+    try {
+        const loopId = parseInt(req.params.id);
+        stopAutoLoop(loopId);
+        await pool.query('DELETE FROM experiment_loops WHERE id = $1', [loopId]);
+        res.json({ deleted: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/experiment-loops/:id/knowledge — Return accumulated knowledge
+app.get('/api/experiment-loops/:id/knowledge', requireAuth, async (req, res) => {
+    try {
+        const { rows: [loop] } = await pool.query(
+            `SELECT knowledge_md FROM experiment_loops WHERE id = $1`, [req.params.id]
+        );
+        if (!loop) return res.status(404).json({ error: 'Loop not found' });
+        res.json({ knowledge: loop.knowledge_md });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/experiment-loops/:id/stream — SSE for real-time cycle updates
+app.get('/api/experiment-loops/:id/stream', requireAuth, async (req, res) => {
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+    });
+
+    const loopId = parseInt(req.params.id);
+    let lastCycleCount = 0;
+
+    const interval = setInterval(async () => {
+        try {
+            const { rows: [loop] } = await pool.query(
+                `SELECT cycle_count, status, total_improvement_pct FROM experiment_loops WHERE id = $1`, [loopId]
+            );
+            if (!loop) { clearInterval(interval); res.end(); return; }
+
+            if (loop.cycle_count > lastCycleCount) {
+                lastCycleCount = loop.cycle_count;
+                const { rows: [cycle] } = await pool.query(
+                    `SELECT * FROM experiment_cycles WHERE loop_id = $1 ORDER BY cycle_number DESC LIMIT 1`, [loopId]
+                );
+                res.write(`data: ${JSON.stringify({ type: 'cycle', cycle, loop_status: loop.status, total_improvement: loop.total_improvement_pct })}\n\n`);
+            }
+
+            if (loop.status === 'completed' || loop.status === 'failed' || loop.status === 'paused') {
+                res.write(`data: ${JSON.stringify({ type: 'status', status: loop.status })}\n\n`);
+                res.write('data: [DONE]\n\n');
+                clearInterval(interval);
+                res.end();
+            }
+        } catch { /* ignore */ }
+    }, 3000);
+
+    req.on('close', () => clearInterval(interval));
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EMAIL PROPOSALS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/campaigns/:campaignId/emails — List email proposals
+app.get('/api/campaigns/:campaignId/emails', requireAuth, async (req, res) => {
+    try {
+        const { campaignId } = req.params;
+        const { market, language, tier, status } = req.query;
+
+        let where = 'WHERE campaign_id = $1';
+        const params = [campaignId];
+        if (market) { params.push(market); where += ` AND market = $${params.length}`; }
+        if (language) { params.push(language); where += ` AND language = $${params.length}`; }
+        if (tier) { params.push(tier); where += ` AND tier = $${params.length}`; }
+        if (status) { params.push(status); where += ` AND status = $${params.length}`; }
+
+        const result = await pool.query(
+            `SELECT id, campaign_id, variant_name, market, language, tier, subject_line, preview_text,
+                    status, version, created_at, updated_at
+             FROM email_proposals ${where} ORDER BY created_at DESC`,
+            params
+        );
+        res.json({ proposals: result.rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/campaigns/:campaignId/emails/:id — Get single proposal with full HTML
+app.get('/api/campaigns/:campaignId/emails/:id', requireAuth, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM email_proposals WHERE id = $1 AND campaign_id = $2', [req.params.id, req.params.campaignId]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Proposal not found' });
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/campaigns/:campaignId/emails/generate — Generate email proposals via SSE
+app.post('/api/campaigns/:campaignId/emails/generate', requireAuth, async (req, res) => {
+    try {
+        const { campaignId } = req.params;
+        const { markets = ['UAE'], languages = ['en'], tiers = [null], instructions = '' } = req.body;
+
+        const ctx = CAMPAIGN_CONTEXT[campaignId];
+        if (!ctx) return res.status(404).json({ error: 'Campaign not found' });
+
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders();
+
+        // RAG context for email generation
+        let ragContext = '';
+        if (isKBReady()) {
+            const ragResult = await buildRAGContext(pool, `${ctx.name} email template design copy`, {
+                namespaces: ['campaigns', 'emails', 'brand'],
+                filter: { campaign_id: { $eq: campaignId } },
+            });
+            ragContext = ragResult.context;
+        }
+
+        const variants = [];
+        for (const market of markets) {
+            for (const lang of languages) {
+                for (const tier of tiers) {
+                    variants.push({ market, language: lang, tier });
+                }
+            }
+        }
+
+        const totalVariants = variants.length;
+        const createdIds = [];
+
+        for (let i = 0; i < variants.length; i++) {
+            const v = variants[i];
+            const variantLabel = `${v.market}-${v.language}${v.tier ? '-' + v.tier : ''}`;
+
+            res.write(`data: ${JSON.stringify({ phase: 'generating', variant: variantLabel, progress: Math.round((i / totalVariants) * 100) })}\n\n`);
+
+            const prompt = `Generate a complete marketing email for the following campaign:
+
+Campaign: ${ctx.name}
+Description: ${ctx.description}
+Trigger: ${ctx.trigger}
+Target Audience: ${ctx.audience}
+Market: ${v.market}
+Language: ${v.language}
+${v.tier ? `Tier: ${v.tier}` : 'All tiers'}
+${instructions ? `Additional instructions: ${instructions}` : ''}
+
+${ragContext}
+
+Respond with EXACTLY this JSON format (no other text):
+{
+  "subject_line": "The email subject line",
+  "preview_text": "Preview/preheader text (max 90 chars)",
+  "html_content": "<!DOCTYPE html><html>..complete responsive email HTML..</html>",
+  "copy_blocks": {
+    "hero_headline": "Main headline text",
+    "hero_subheadline": "Supporting text",
+    "body_text": "Main body paragraph",
+    "cta_text": "Call to action button text",
+    "footer_text": "Footer/legal text"
+  }
+}`;
+
+            try {
+                const response = await anthropic.messages.create({
+                    model: 'claude-sonnet-4-6',
+                    max_tokens: 4096,
+                    messages: [{ role: 'user', content: prompt }],
+                });
+
+                const text = response.content[0]?.text || '';
+                let emailData;
+                try {
+                    // Try to parse JSON from response (may be wrapped in ```json blocks)
+                    const jsonMatch = text.match(/\{[\s\S]*\}/);
+                    emailData = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+                } catch { emailData = null; }
+
+                if (emailData) {
+                    const insertResult = await pool.query(
+                        `INSERT INTO email_proposals (campaign_id, variant_name, market, language, tier, subject_line, preview_text, html_content, copy_blocks, status)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft') RETURNING id`,
+                        [campaignId, variantLabel, v.market, v.language, v.tier, emailData.subject_line, emailData.preview_text, emailData.html_content, JSON.stringify(emailData.copy_blocks || {})]
+                    );
+                    createdIds.push(insertResult.rows[0].id);
+                }
+            } catch (err) {
+                res.write(`data: ${JSON.stringify({ phase: 'error', variant: variantLabel, error: err.message })}\n\n`);
+            }
+        }
+
+        res.write(`data: ${JSON.stringify({ phase: 'complete', proposals: createdIds, total: createdIds.length })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+    } catch (err) {
+        if (res.headersSent && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+            res.write('data: [DONE]\n\n');
+            res.end();
+        } else if (!res.headersSent) {
+            res.status(500).json({ error: err.message });
+        }
+    }
+});
+
+// PATCH /api/campaigns/:campaignId/emails/:id — Update status or add feedback
+app.patch('/api/campaigns/:campaignId/emails/:id', requireAuth, async (req, res) => {
+    try {
+        const { status, feedback } = req.body;
+        const { id, campaignId } = req.params;
+
+        if (status) {
+            await pool.query('UPDATE email_proposals SET status = $1, updated_at = NOW() WHERE id = $2 AND campaign_id = $3', [status, id, campaignId]);
+        }
+        if (feedback) {
+            await pool.query(
+                `UPDATE email_proposals SET feedback = feedback || $1::jsonb, updated_at = NOW() WHERE id = $2 AND campaign_id = $3`,
+                [JSON.stringify([feedback]), id, campaignId]
+            );
+        }
+
+        const result = await pool.query('SELECT * FROM email_proposals WHERE id = $1', [id]);
+        res.json(result.rows[0] || {});
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/campaigns/:campaignId/emails/:id — Delete proposal
+app.delete('/api/campaigns/:campaignId/emails/:id', requireAuth, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM email_proposals WHERE id = $1 AND campaign_id = $2', [req.params.id, req.params.campaignId]);
+        res.json({ deleted: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/campaigns/:campaignId/emails/:id/diff/:otherId — Diff between two proposals
+app.get('/api/campaigns/:campaignId/emails/:id/diff/:otherId', requireAuth, async (req, res) => {
+    try {
+        const [a, b] = await Promise.all([
+            pool.query('SELECT * FROM email_proposals WHERE id = $1', [req.params.id]),
+            pool.query('SELECT * FROM email_proposals WHERE id = $1', [req.params.otherId]),
+        ]);
+        if (a.rows.length === 0 || b.rows.length === 0) return res.status(404).json({ error: 'Proposal not found' });
+
+        const propA = a.rows[0];
+        const propB = b.rows[0];
+
+        // Simple text diff: find differences in copy blocks
+        const diffs = {};
+        const blocksA = propA.copy_blocks || {};
+        const blocksB = propB.copy_blocks || {};
+        const allKeys = new Set([...Object.keys(blocksA), ...Object.keys(blocksB)]);
+
+        for (const key of allKeys) {
+            if (blocksA[key] !== blocksB[key]) {
+                diffs[key] = { a: blocksA[key] || '', b: blocksB[key] || '' };
+            }
+        }
+
+        res.json({
+            proposalA: { id: propA.id, variant_name: propA.variant_name, subject_line: propA.subject_line },
+            proposalB: { id: propB.id, variant_name: propB.variant_name, subject_line: propB.subject_line },
+            subject_diff: propA.subject_line !== propB.subject_line ? { a: propA.subject_line, b: propB.subject_line } : null,
+            copy_diffs: diffs,
+            total_diffs: Object.keys(diffs).length + (propA.subject_line !== propB.subject_line ? 1 : 0),
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/campaigns/:campaignId/emails/:id/duplicate — Duplicate as new version
+app.post('/api/campaigns/:campaignId/emails/:id/duplicate', requireAuth, async (req, res) => {
+    try {
+        const orig = await pool.query('SELECT * FROM email_proposals WHERE id = $1 AND campaign_id = $2', [req.params.id, req.params.campaignId]);
+        if (orig.rows.length === 0) return res.status(404).json({ error: 'Proposal not found' });
+
+        const p = orig.rows[0];
+        const maxVersion = await pool.query(
+            'SELECT COALESCE(MAX(version), 0) + 1 as next FROM email_proposals WHERE campaign_id = $1 AND market = $2 AND language = $3 AND tier IS NOT DISTINCT FROM $4',
+            [p.campaign_id, p.market, p.language, p.tier]
+        );
+
+        const result = await pool.query(
+            `INSERT INTO email_proposals (campaign_id, variant_name, market, language, tier, subject_line, preview_text, html_content, copy_blocks, segmentation_logic, personalization_rules, parent_proposal_id, version, status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'draft') RETURNING id`,
+            [p.campaign_id, p.variant_name + '-v' + maxVersion.rows[0].next, p.market, p.language, p.tier, p.subject_line, p.preview_text, p.html_content, JSON.stringify(p.copy_blocks), JSON.stringify(p.segmentation_logic), JSON.stringify(p.personalization_rules), p.id, maxVersion.rows[0].next]
+        );
+
+        res.status(201).json({ id: result.rows[0].id });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// KNOWLEDGE BASE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import { ingestDocument, ingestCampaigns, ingestBauTypes, deleteDocument, ingestFile } from '../../packages/core/knowledge/ingestion.js';
+import { searchKnowledge, searchMultiNamespace, buildRAGContext, isKBReady } from '../../packages/core/knowledge/retrieval.js';
+
+// Auto-migrate: add multimodal columns to KB tables
+(async () => {
+    try {
+        await pool.query(`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS content_type TEXT DEFAULT 'text'`);
+        await pool.query(`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS file_path TEXT`);
+        await pool.query(`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS original_filename TEXT`);
+        await pool.query(`ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS file_size INTEGER`);
+        await pool.query(`ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS media_type TEXT DEFAULT 'text'`);
+        await pool.query(`ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS file_path TEXT`);
+    } catch (_) { /* columns may already exist */ }
+})();
+
+// Serve KB files (images, PDFs) with auth
+app.use('/api/kb-files', requireAuth, express.static(kbDir));
+
+// GET /api/knowledge/status — KB health and stats
+app.get('/api/knowledge/status', requireAuth, async (req, res) => {
+    try {
+        const docs = await pool.query(
+            `SELECT namespace, status, COUNT(*) as count FROM knowledge_documents GROUP BY namespace, status`
+        );
+        const chunks = await pool.query(
+            `SELECT kd.namespace, COUNT(kc.id) as count
+             FROM knowledge_chunks kc
+             JOIN knowledge_documents kd ON kd.id = kc.document_id
+             GROUP BY kd.namespace`
+        );
+        const totals = await pool.query(
+            `SELECT
+                (SELECT COUNT(*) FROM knowledge_documents) as total_documents,
+                (SELECT COUNT(*) FROM knowledge_chunks) as total_chunks,
+                (SELECT MAX(updated_at) FROM knowledge_documents WHERE status = 'indexed') as last_ingestion`
+        );
+
+        const namespaces = {};
+        for (const row of docs.rows) {
+            if (!namespaces[row.namespace]) namespaces[row.namespace] = { docs: 0, indexed: 0, chunks: 0 };
+            namespaces[row.namespace].docs += parseInt(row.count);
+            if (row.status === 'indexed') namespaces[row.namespace].indexed += parseInt(row.count);
+        }
+        for (const row of chunks.rows) {
+            if (!namespaces[row.namespace]) namespaces[row.namespace] = { docs: 0, indexed: 0, chunks: 0 };
+            namespaces[row.namespace].chunks = parseInt(row.count);
+        }
+
+        res.json({
+            ready: isKBReady(),
+            totalDocuments: parseInt(totals.rows[0].total_documents),
+            totalChunks: parseInt(totals.rows[0].total_chunks),
+            lastIngestion: totals.rows[0].last_ingestion,
+            namespaces,
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/knowledge/documents — List documents
+app.get('/api/knowledge/documents', requireAuth, async (req, res) => {
+    try {
+        const { namespace, status, page = 1, limit = 50 } = req.query;
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+
+        let where = 'WHERE 1=1';
+        const params = [];
+        if (namespace) { params.push(namespace); where += ` AND namespace = $${params.length}`; }
+        if (status) { params.push(status); where += ` AND status = $${params.length}`; }
+
+        const countResult = await pool.query(`SELECT COUNT(*) FROM knowledge_documents ${where}`, params);
+        params.push(parseInt(limit), offset);
+        const result = await pool.query(
+            `SELECT id, namespace, source_type, source_id, title, chunk_count, content_type, file_path, original_filename, status, error_message, created_at, updated_at
+             FROM knowledge_documents ${where}
+             ORDER BY created_at DESC
+             LIMIT $${params.length - 1} OFFSET $${params.length}`,
+            params
+        );
+
+        res.json({
+            documents: result.rows,
+            total: parseInt(countResult.rows[0].count),
+            page: parseInt(page),
+            limit: parseInt(limit),
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/knowledge/ingest — Ingest a single document
+app.post('/api/knowledge/ingest', requireAuth, async (req, res) => {
+    try {
+        if (!isKBReady()) return res.status(503).json({ error: 'Knowledge base not configured. Set Gemini and Pinecone API keys in Settings.' });
+
+        const { title, content, namespace, sourceType, sourceId, metadata } = req.body;
+        if (!title || !content || !namespace || !sourceType) {
+            return res.status(400).json({ error: 'title, content, namespace, and sourceType are required' });
+        }
+
+        const result = await ingestDocument(pool, { title, content, namespace, sourceType, sourceId, metadata });
+        res.status(201).json(result);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/knowledge/ingest-campaigns — Bulk ingest all campaigns + BAU types
+app.post('/api/knowledge/ingest-campaigns', requireAuth, async (req, res) => {
+    try {
+        if (!isKBReady()) return res.status(503).json({ error: 'Knowledge base not configured. Set Gemini and Pinecone API keys in Settings.' });
+
+        // Dynamic import of campaign data
+        const { CAMPAIGNS, CAMPAIGN_GROUPS } = await import('../../apps/dashboard/src/data/emiratesCampaigns.js');
+        const { BAU_TYPES, BAU_CATEGORIES } = await import('../../apps/dashboard/src/data/emiratesBauTypes.js');
+
+        const campaignResult = await ingestCampaigns(pool, CAMPAIGNS, CAMPAIGN_GROUPS);
+        const bauResult = await ingestBauTypes(pool, BAU_TYPES, BAU_CATEGORIES);
+
+        res.json({
+            documentsCreated: campaignResult.documentsCreated + bauResult.documentsCreated,
+            chunksCreated: campaignResult.chunksCreated + bauResult.chunksCreated,
+            campaigns: campaignResult.documentsCreated,
+            bauTypes: bauResult.documentsCreated,
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/knowledge/upload — Upload and ingest a file (image or PDF)
+app.post('/api/knowledge/upload', requireAuth, kbUpload.single('file'), async (req, res) => {
+    try {
+        if (!isKBReady()) return res.status(503).json({ error: 'Knowledge base not configured. Set Gemini and Pinecone API keys in Settings.' });
+        if (!req.file) return res.status(400).json({ error: 'No file uploaded or unsupported file type' });
+
+        const { title, namespace, metadata } = req.body;
+        if (!title || !namespace) return res.status(400).json({ error: 'title and namespace are required' });
+
+        const parsedMetadata = metadata ? JSON.parse(metadata) : {};
+        const result = await ingestFile(pool, {
+            filePath: req.file.path,
+            originalFilename: req.file.originalname,
+            title,
+            namespace,
+            sourceType: 'upload',
+            metadata: parsedMetadata,
+        });
+        res.status(201).json(result);
+    } catch (err) {
+        // Clean up tmp file on error
+        if (req.file?.path) fs.unlink(req.file.path, () => {});
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/knowledge/search — Semantic search
+app.post('/api/knowledge/search', requireAuth, async (req, res) => {
+    try {
+        if (!isKBReady()) return res.status(503).json({ error: 'Knowledge base not configured.' });
+
+        const { query, namespace, filter, topK } = req.body;
+        if (!query) return res.status(400).json({ error: 'query is required' });
+
+        let results;
+        if (namespace) {
+            results = await searchKnowledge(pool, query, { namespace, filter, topK });
+        } else {
+            // Search all namespaces when none specified
+            results = await searchMultiNamespace(pool, query, ['campaigns', 'emails', 'images', 'kpis', 'research', 'brand'], { topK: topK || 10, filter });
+        }
+        res.json({ results });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/chat/knowledge — Conversational KB assistant (SSE streaming)
+app.post('/api/chat/knowledge', requireAuth, async (req, res) => {
+    try {
+        const { message, history, namespace } = req.body;
+        if (!message) return res.status(400).json({ error: 'message is required' });
+        if (!isKBReady()) return res.status(503).json({ error: 'Knowledge base not configured.' });
+
+        // Determine namespaces to search
+        const allNamespaces = ['campaigns', 'emails', 'images', 'kpis', 'research', 'brand'];
+        const namespaces = namespace ? [namespace] : allNamespaces;
+
+        // Build RAG context
+        const ragResult = await buildRAGContext(pool, message, { namespaces, maxTokens: 2000 });
+
+        // System prompt for conversational KB assistant
+        const systemPrompt = `You are the Knowledge Base Assistant for AgentOS. You help users explore and understand the organization's knowledge base.
+
+## Response Rules
+1. Answer conversationally. Synthesize and explain the information — do NOT just list documents or raw data.
+2. When you find relevant information, explain what it is and why it matters.
+3. Cite your sources naturally by document title in your response.
+4. For images in the knowledge base, embed them inline using markdown: ![Document Title](/api/kb-files/{filePath})
+5. For PDFs, link them using markdown: [Document Title](/api/kb-files/{filePath})
+6. If multiple results are relevant, summarize the key findings and highlight the best matches.
+7. If nothing relevant is found, say so honestly and suggest what the user could try instead.
+8. Respond in the same language the user writes to you.
+9. Be concise but thorough. Under 400 words unless the user asks for more detail.
+10. Use markdown formatting (bold, lists, headers) to make your responses easy to scan.` +
+            (ragResult.context ? '\n\n' + ragResult.context : '');
+
+        // Build messages array from history (cap at last 10 pairs = 20 messages)
+        const trimmedHistory = Array.isArray(history) ? history.slice(-20) : [];
+        const apiMessages = [
+            ...trimmedHistory.map(m => ({ role: m.role, content: m.content })),
+            { role: 'user', content: message },
+        ];
+
+        // SSE headers
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        const headerSources = ragResult.sources.map(s => ({
+            ...s,
+            htmlSource: s.htmlSource ? true : undefined,
+        }));
+        if (headerSources.length > 0) {
+            res.setHeader('X-RAG-Sources', JSON.stringify(headerSources));
+        }
+        const htmlSources = ragResult.sources.filter(s => s.htmlSource && s.htmlSource !== true);
+        if (htmlSources.length > 0) {
+            res.setHeader('X-HTML-Sources', JSON.stringify(htmlSources.map(s => ({
+                title: s.title,
+                htmlSource: s.htmlSource,
+            }))));
+        }
+        if (ragResult.mediaResults && ragResult.mediaResults.length > 0) {
+            res.setHeader('X-RAG-Media', JSON.stringify(ragResult.mediaResults));
+        }
+        res.flushHeaders();
+
+        // Stream response via Gemini
+        const gemini = getGeminiClient();
+        const geminiMessages = apiMessages.map(m => ({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content }],
+        }));
+
+        const streamResult = await gemini.models.generateContentStream({
+            model: 'gemini-2.0-flash',
+            contents: geminiMessages,
+            config: {
+                systemInstruction: systemPrompt,
+                maxOutputTokens: 4096,
+                temperature: 0.7,
+            },
+        });
+
+        for await (const chunk of streamResult) {
+            const text = chunk.text || '';
+            if (text) {
+                res.write(`data: ${JSON.stringify({ text })}\n\n`);
+            }
+        }
+
+        res.write('data: [DONE]\n\n');
+        res.end();
+    } catch (err) {
+        if (res.headersSent && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+            res.write('data: [DONE]\n\n');
+            res.end();
+        } else if (!res.headersSent) {
+            res.status(500).json({ error: err.message });
+        }
+    }
+});
+
+// DELETE /api/knowledge/documents/:id — Delete document + vectors
+app.delete('/api/knowledge/documents/:id', requireAuth, async (req, res) => {
+    try {
+        await deleteDocument(pool, parseInt(req.params.id));
+        res.json({ deleted: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SERVER START
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// WEBSOCKET — GEMINI VOICE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import http from 'http';
+import { WebSocketServer } from 'ws';
+
+const server = http.createServer(app);
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (req, socket, head) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    if (url.pathname === '/ws/voice' || url.pathname === '/ws/voice-meeting') {
+        wss.handleUpgrade(req, socket, head, (ws) => {
+            wss.emit('connection', ws, req);
+        });
+    } else {
+        socket.destroy();
+    }
+});
+
+wss.on('connection', async (ws, req) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const isMeeting = url.pathname === '/ws/voice-meeting';
+
+    if (isMeeting) {
+        return handleVoiceMeeting(ws, url);
+    }
+
+    const agentId = url.searchParams.get('agentId');
+    const campaignId = url.searchParams.get('campaignId');
+    const context = agentId ? `agent:${agentId}` : campaignId ? `campaign:${campaignId}` : 'pm-agent';
+
+    console.log(`[Voice WS] Connected: ${context}`);
+
+    // Build system prompt for the voice session (same as text chat)
+    let systemPrompt = 'You are a helpful AI assistant. Respond concisely and naturally as if in a voice conversation. Keep responses short (2-3 sentences max).';
+
+    if (agentId) {
+        try {
+            const agentRes = await pool.query('SELECT * FROM agents WHERE id = $1', [agentId]);
+            if (agentRes.rows.length > 0) {
+                const agent = agentRes.rows[0];
+                const skills = Array.isArray(agent.skills) ? agent.skills.join(', ') : '';
+                systemPrompt = `You are ${agent.name}, an AI agent in the ${agent.department} department. Your role: ${agent.role}. ${skills ? `Skills: ${skills}.` : ''} Respond concisely as if in a voice conversation. Keep responses short (2-3 sentences). Respond in the same language the user speaks.`;
+            }
+        } catch { /* fallback to default */ }
+    } else if (campaignId) {
+        const ctx = CAMPAIGN_CONTEXT[campaignId];
+        if (ctx) {
+            systemPrompt = `You are the campaign assistant for "${ctx.name}". ${ctx.description}. Current KPIs: ${ctx.kpis.openRate}% open rate, ${ctx.kpis.clickRate}% click rate. Respond concisely as if in a voice conversation. Keep responses short.`;
+        }
+    }
+
+    // Conversation history for this voice session
+    const messages = [];
+
+    ws.on('message', async (data) => {
+        try {
+            const msg = JSON.parse(data.toString());
+
+            if (msg.type === 'transcript') {
+                // User speech transcript -> generate AI response
+                messages.push({ role: 'user', content: msg.text });
+
+                const response = await anthropic.messages.create({
+                    model: 'claude-sonnet-4-6',
+                    max_tokens: 256,
+                    system: systemPrompt,
+                    messages: messages.slice(-10),
+                });
+
+                const aiText = response.content[0]?.text || '';
+                messages.push({ role: 'assistant', content: aiText });
+
+                ws.send(JSON.stringify({ type: 'response', text: aiText }));
+            }
+
+            if (msg.type === 'ping') {
+                ws.send(JSON.stringify({ type: 'pong' }));
+            }
+        } catch (err) {
+            ws.send(JSON.stringify({ type: 'error', message: err.message }));
+        }
+    });
+
+    ws.on('close', () => {
+        console.log(`[Voice WS] Disconnected: ${context}`);
+    });
+
+    // Send ready signal
+    ws.send(JSON.stringify({ type: 'ready', context, systemPrompt: systemPrompt.slice(0, 100) + '...' }));
+});
+
+// ─── Voice Meeting Handler ──────────────────────────────────────────────────
+
+const AGENT_ROLES_FOR_TYPE = {
+    email_proposal: ['lucia', 'html-developer'],
+    research_session: ['raul', 'competitive-intel'],
+    experiment: ['carlos', 'diego'],
+    project: ['raul'],
+};
+
+async function handleVoiceMeeting(ws, url) {
+    const meetingId = url.searchParams.get('meetingId');
+    const department = url.searchParams.get('department') || 'strategic';
+
+    console.log(`[Meeting WS] Connected: meeting=${meetingId}, dept=${department}`);
+
+    // Load meeting or create new
+    let meeting;
+    if (meetingId) {
+        const res = await pool.query('SELECT * FROM meeting_sessions WHERE id = $1', [meetingId]);
+        meeting = res.rows[0];
+    }
+
+    if (!meeting) {
+        const res = await pool.query(
+            `INSERT INTO meeting_sessions (department, status, agenda, transcript, participants)
+             VALUES ($1, 'active', '[]', '[]', '[]') RETURNING *`,
+            [department]
+        );
+        meeting = res.rows[0];
+    }
+
+    let agenda = Array.isArray(meeting.agenda) ? meeting.agenda : [];
+    let transcript = Array.isArray(meeting.transcript) ? meeting.transcript : [];
+    let decisions = Array.isArray(meeting.decisions) ? meeting.decisions : [];
+    let currentItemIndex = 0;
+
+    // Load agenda from pipeline if empty
+    if (agenda.length === 0) {
+        try {
+            const items = await pool.query(
+                `SELECT id, name, status, department, 'project' as _type FROM projects WHERE LOWER(department) = LOWER($1) AND status != 'Completed'
+                 UNION ALL
+                 SELECT id, variant_name as name, status, department, 'email_proposal' as _type FROM email_proposals WHERE status IN ('draft','review') AND (department IS NULL OR LOWER(department) = LOWER($1))
+                 UNION ALL
+                 SELECT id, title as name, status, department, 'research_session' as _type FROM research_sessions WHERE status = 'completed' AND (department IS NULL OR LOWER(department) = LOWER($1))
+                 UNION ALL
+                 SELECT id, hypothesis as name, status, department, 'experiment' as _type FROM campaign_experiments WHERE status IN ('proposed','approved') AND (department IS NULL OR LOWER(department) = LOWER($1))
+                 ORDER BY _type LIMIT 15`,
+                [department]
+            );
+            agenda = items.rows.map(r => ({ id: r.id, name: r.name, type: r._type, status: r.status }));
+            await pool.query('UPDATE meeting_sessions SET agenda = $1 WHERE id = $2', [JSON.stringify(agenda), meeting.id]);
+        } catch { /* ignore */ }
+    }
+
+    ws.send(JSON.stringify({ type: 'meeting-ready', meetingId: meeting.id, agenda, currentItem: 0 }));
+
+    ws.on('message', async (data) => {
+        try {
+            const msg = JSON.parse(data.toString());
+
+            if (msg.type === 'transcript') {
+                // Human speaking during meeting
+                transcript.push({ speaker: 'human', text: msg.text, item: currentItemIndex, time: new Date().toISOString() });
+
+                // Check for decision commands
+                const lower = msg.text.toLowerCase();
+                let decision = null;
+                if (lower.includes('approve') || lower.includes('aprueb')) decision = 'approved';
+                else if (lower.includes('reject') || lower.includes('rechaz')) decision = 'rejected';
+                else if (lower.includes('next') || lower.includes('siguiente')) decision = 'skip';
+
+                if (decision && agenda[currentItemIndex]) {
+                    const item = agenda[currentItemIndex];
+                    decisions.push({ item: item.name, type: item.type, decision, itemIndex: currentItemIndex });
+
+                    // Apply decision to pipeline
+                    if (decision !== 'skip') {
+                        const tableMap = { project: 'projects', email_proposal: 'email_proposals', research_session: 'research_sessions', experiment: 'campaign_experiments' };
+                        const table = tableMap[item.type];
+                        if (table) {
+                            try { await pool.query(`UPDATE ${table} SET status = $1, updated_at = NOW() WHERE id = $2`, [decision, item.id]); } catch { /* ignore */ }
+                        }
+                    }
+
+                    ws.send(JSON.stringify({ type: 'decision', decision, item: item.name, itemIndex: currentItemIndex }));
+
+                    // Move to next item
+                    currentItemIndex++;
+                    if (currentItemIndex < agenda.length) {
+                        ws.send(JSON.stringify({ type: 'next-item', itemIndex: currentItemIndex, item: agenda[currentItemIndex] }));
+                    } else {
+                        ws.send(JSON.stringify({ type: 'meeting-complete' }));
+                    }
+                } else {
+                    // Generate agent response about current item
+                    const currentItem = agenda[currentItemIndex];
+                    const presenterIds = AGENT_ROLES_FOR_TYPE[currentItem?.type] || ['raul'];
+                    const presenterId = presenterIds[0];
+
+                    let agentName = presenterId;
+                    try {
+                        const agentRes = await pool.query('SELECT name, role FROM agents WHERE id = $1', [presenterId]);
+                        if (agentRes.rows.length > 0) agentName = agentRes.rows[0].name;
+                    } catch { /* ignore */ }
+
+                    const response = await anthropic.messages.create({
+                        model: 'claude-sonnet-4-6',
+                        max_tokens: 256,
+                        system: `You are ${agentName} in a team meeting discussing "${currentItem?.name || 'agenda item'}". Be concise (2-3 sentences). The human just said something — respond helpfully. If they seem ready to decide, ask them to approve, reject, or skip.`,
+                        messages: [{ role: 'user', content: msg.text }],
+                    });
+
+                    const aiText = response.content[0]?.text || '';
+                    transcript.push({ speaker: agentName, text: aiText, item: currentItemIndex, time: new Date().toISOString() });
+
+                    ws.send(JSON.stringify({ type: 'agent-response', agent: agentName, agentId: presenterId, text: aiText }));
+                }
+
+                // Persist transcript + decisions
+                await pool.query('UPDATE meeting_sessions SET transcript = $1, decisions = $2 WHERE id = $3',
+                    [JSON.stringify(transcript), JSON.stringify(decisions), meeting.id]);
+            }
+
+            if (msg.type === 'next-item') {
+                currentItemIndex = Math.min((msg.index ?? currentItemIndex + 1), agenda.length - 1);
+                ws.send(JSON.stringify({ type: 'next-item', itemIndex: currentItemIndex, item: agenda[currentItemIndex] }));
+            }
+
+            if (msg.type === 'present-item') {
+                // Agent presents the current item
+                const item = agenda[currentItemIndex];
+                if (!item) return;
+
+                const presenterIds = AGENT_ROLES_FOR_TYPE[item.type] || ['raul'];
+                const presenterId = presenterIds[0];
+
+                let agentInfo = { name: presenterId, role: '' };
+                try {
+                    const agentRes = await pool.query('SELECT name, role FROM agents WHERE id = $1', [presenterId]);
+                    if (agentRes.rows.length > 0) agentInfo = agentRes.rows[0];
+                } catch { /* ignore */ }
+
+                const response = await anthropic.messages.create({
+                    model: 'claude-sonnet-4-6',
+                    max_tokens: 300,
+                    system: `You are ${agentInfo.name} (${agentInfo.role}) presenting an item in a weekly team meeting. Be brief and focused (3-4 sentences). Present the key points, current status, and ask for a decision (approve, reject, or modify).`,
+                    messages: [{ role: 'user', content: `Present this ${item.type}: "${item.name}" (status: ${item.status})` }],
+                });
+
+                const aiText = response.content[0]?.text || '';
+                transcript.push({ speaker: agentInfo.name, text: aiText, item: currentItemIndex, time: new Date().toISOString() });
+
+                ws.send(JSON.stringify({ type: 'agent-presentation', agent: agentInfo.name, agentId: presenterId, text: aiText, item }));
+
+                await pool.query('UPDATE meeting_sessions SET transcript = $1 WHERE id = $2', [JSON.stringify(transcript), meeting.id]);
+            }
+
+            if (msg.type === 'end-meeting') {
+                // Generate summary
+                const summaryPrompt = `Generate a concise meeting summary in markdown:\n\n## Items Discussed\n${agenda.slice(0, currentItemIndex + 1).map((a, i) => {
+                    const dec = decisions.find(d => d.itemIndex === i);
+                    return `- ${a.name} (${a.type}): ${dec ? dec.decision : 'discussed'}`;
+                }).join('\n')}\n\n## Key Discussion Points\n${transcript.slice(-20).map(t => `- ${t.speaker}: ${t.text.slice(0, 100)}`).join('\n')}\n\nGenerate: ## Summary, ## Decisions, ## Action Items, ## Next Steps`;
+
+                const summaryRes = await anthropic.messages.create({
+                    model: 'claude-sonnet-4-6',
+                    max_tokens: 1024,
+                    messages: [{ role: 'user', content: summaryPrompt }],
+                });
+
+                const summaryMd = summaryRes.content[0]?.text || '';
+
+                await pool.query(
+                    'UPDATE meeting_sessions SET status = $1, summary_md = $2, completed_at = NOW(), duration_ms = $3 WHERE id = $4',
+                    ['completed', summaryMd, Date.now() - new Date(meeting.started_at).getTime(), meeting.id]
+                );
+
+                ws.send(JSON.stringify({ type: 'meeting-summary', summary: summaryMd, decisions }));
+            }
+
+            if (msg.type === 'ping') {
+                ws.send(JSON.stringify({ type: 'pong' }));
+            }
+        } catch (err) {
+            ws.send(JSON.stringify({ type: 'error', message: err.message }));
+        }
+    });
+
+    ws.on('close', () => {
+        console.log(`[Meeting WS] Disconnected: meeting=${meeting.id}`);
+    });
+}
+
+// ─── Meeting REST Endpoints ─────────────────────────────────────────────────
+
+app.get('/api/meetings', requireAuth, async (req, res) => {
+    try {
+        const { department, status } = req.query;
+        let where = 'WHERE 1=1';
+        const params = [];
+        if (department) { params.push(department); where += ` AND department = $${params.length}`; }
+        if (status) { params.push(status); where += ` AND status = $${params.length}`; }
+        const result = await pool.query(`SELECT id, department, status, agenda, decisions, summary_md, started_at, completed_at, duration_ms FROM meeting_sessions ${where} ORDER BY started_at DESC LIMIT 20`, params);
+        res.json({ meetings: result.rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/meetings/:id', requireAuth, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM meeting_sessions WHERE id = $1', [req.params.id]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Meeting not found' });
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/meetings/:id', requireAuth, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM meeting_sessions WHERE id = $1', [req.params.id]);
+        res.json({ deleted: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+server.listen(port, () => {
     console.log(`AgentOS API running at http://localhost:${port}`);
+    console.log(`WebSocket: ws://localhost:${port}/ws/voice | ws://localhost:${port}/ws/voice-meeting`);
 });

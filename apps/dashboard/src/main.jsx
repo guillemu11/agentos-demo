@@ -23,6 +23,8 @@ import CampaignDetail from './pages/CampaignDetail.jsx'
 import BauTypeDetail from './pages/BauTypeDetail.jsx'
 import SettingsPage from './pages/SettingsPage.jsx'
 import ToolDetail from './pages/ToolDetail.jsx'
+import KnowledgeBase from './pages/KnowledgeBase.jsx'
+import AutoResearch from './pages/AutoResearch.jsx'
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -74,8 +76,7 @@ function AuthGate({ children }) {
   }
 
   if (!user) {
-    // Guest mode: allow everyone in without login
-    return children({ user: { id: 0, email: 'guillermo@emirates.com', name: 'Guillermo Muñoz', role: 'owner' }, onLogout: () => {} });
+    return <LoginPage onLogin={setUser} />;
   }
 
   return children({ user, onLogout: handleLogout });
@@ -112,6 +113,9 @@ createRoot(document.getElementById('root')).render(
                       <Route path="/workspace/tool/:toolId" element={<ToolDetail />} />
                       <Route path="/inbox" element={<Inbox />} />
                       <Route path="/pm-reports" element={<PmReports />} />
+                      <Route path="/knowledge" element={<KnowledgeBase />} />
+                      <Route path="/research" element={<AutoResearch />} />
+                      <Route path="/research/:sessionId" element={<AutoResearch />} />
                       <Route path="/settings" element={<SettingsPage />} />
                     </Route>
                   </Routes>

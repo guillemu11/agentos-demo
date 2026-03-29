@@ -4,9 +4,10 @@ import InboxPanel from '../components/InboxPanel';
 import MultiAgentBrainstorm from '../components/MultiAgentBrainstorm';
 import WeeklyReport from '../components/WeeklyReport';
 import PipelineBoard from '../components/PipelineBoard';
+import VoiceMeeting from '../components/VoiceMeeting';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { PageHeaderIcons, ActionIcons } from '../components/icons.jsx';
-import { Inbox, Calendar, ClipboardList, Brain, BarChart3, Trash2 } from 'lucide-react';
+import { Inbox, Calendar, ClipboardList, Brain, BarChart3, Trash2, Phone } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -48,6 +49,7 @@ export default function WeeklyBoard() {
     };
 
     const [activeView, setActiveView] = useState('weeklies');
+    const [showMeeting, setShowMeeting] = useState(false);
     const [selectedWeekly, setSelectedWeekly] = useState(null);
     const [sessionSubTab, setSessionSubTab] = useState('resumen');
 
@@ -553,11 +555,30 @@ export default function WeeklyBoard() {
                     {/* ── Brainstorm ── */}
                     {sessionSubTab === 'brainstorm' && (
                         <div className="animate-fade-in">
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+                                <button
+                                    className="voice-mode-btn"
+                                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 9999, fontSize: '0.8rem', fontWeight: 600, width: 'auto' }}
+                                    onClick={() => setShowMeeting(true)}
+                                >
+                                    <Phone size={14} /> {t('meeting.startHybrid')}
+                                </button>
+                            </div>
                             <MultiAgentBrainstorm
                                 sessionId={selectedSession.id}
                                 department={deptId}
                                 sessionInbox={sessionInbox}
                             />
+                            {showMeeting && (
+                                <VoiceMeeting
+                                    department={deptId}
+                                    onClose={() => setShowMeeting(false)}
+                                    onSummary={(summary) => {
+                                        // Could save to weekly session report
+                                        setShowMeeting(false);
+                                    }}
+                                />
+                            )}
                         </div>
                     )}
 

@@ -367,4 +367,239 @@ CREATE TABLE IF NOT EXISTS brainstorm_messages (
 CREATE INDEX IF NOT EXISTS idx_brainstorm_msg_conv ON brainstorm_messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_brainstorm_msg_project ON brainstorm_messages(conversation_id, project_index);
 
+-- ─── KNOWLEDGE BASE ──────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS knowledge_documents (
+    id              SERIAL PRIMARY KEY,
+    namespace       TEXT NOT NULL,
+    source_type     TEXT NOT NULL,
+    source_id       TEXT,
+    title           TEXT NOT NULL,
+    content         TEXT NOT NULL,
+    metadata        JSONB DEFAULT '{}',
+    chunk_count     INTEGER DEFAULT 0,
+    embedding_model TEXT DEFAULT 'gemini-embedding-001',
+    status          TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'indexed', 'error')),
+    error_message   TEXT,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_kd_namespace ON knowledge_documents(namespace);
+CREATE INDEX IF NOT EXISTS idx_kd_source ON knowledge_documents(source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_kd_status ON knowledge_documents(status);
+
+CREATE OR REPLACE TRIGGER trg_knowledge_documents_updated_at
+BEFORE UPDATE ON knowledge_documents
+FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+    id            SERIAL PRIMARY KEY,
+    document_id   INTEGER NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE,
+    chunk_index   INTEGER NOT NULL,
+    content       TEXT NOT NULL,
+    pinecone_id   TEXT UNIQUE,
+    metadata      JSONB DEFAULT '{}',
+    created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_kc_document ON knowledge_chunks(document_id);
+CREATE INDEX IF NOT EXISTS idx_kc_pinecone ON knowledge_chunks(pinecone_id);
+
+-- ─── RESEARCH & EXPERIMENTS ─────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS research_sessions (
+    id              SERIAL PRIMARY KEY,
+    title           TEXT NOT NULL,
+    topic           TEXT NOT NULL,
+    depth           TEXT DEFAULT 'standard' CHECK (depth IN ('quick', 'standard', 'deep')),
+    sources_mode    TEXT DEFAULT 'both' CHECK (sources_mode IN ('web', 'internal', 'both')),
+    status          TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'researching', 'synthesizing', 'completed', 'failed')),
+    progress        INTEGER DEFAULT 0,
+    sources_found   INTEGER DEFAULT 0,
+    iterations      INTEGER DEFAULT 0,
+    max_iterations  INTEGER DEFAULT 5,
+    report_md       TEXT,
+    report_sections JSONB DEFAULT '[]',
+    search_queries  JSONB DEFAULT '[]',
+    sources         JSONB DEFAULT '[]',
+    experiments     JSONB DEFAULT '[]',
+    recommendations JSONB DEFAULT '[]',
+    error           TEXT,
+    campaign_id     TEXT,
+    department      TEXT,
+    triggered_by    TEXT DEFAULT 'user',
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    completed_at    TIMESTAMPTZ,
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_rs_status ON research_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_rs_created ON research_sessions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_rs_campaign ON research_sessions(campaign_id);
+
+CREATE OR REPLACE TRIGGER trg_research_sessions_updated_at
+BEFORE UPDATE ON research_sessions
+FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TABLE IF NOT EXISTS campaign_experiments (
+    id                  SERIAL PRIMARY KEY,
+    campaign_id         TEXT NOT NULL,
+    research_session_id INTEGER REFERENCES research_sessions(id),
+    experiment_type     TEXT NOT NULL CHECK (experiment_type IN ('subject_line', 'copy', 'design', 'segmentation', 'send_time', 'cta')),
+    hypothesis          TEXT NOT NULL,
+    variant_a           JSONB NOT NULL,
+    variant_b           JSONB NOT NULL,
+    status              TEXT DEFAULT 'proposed' CHECK (status IN ('proposed', 'approved', 'running', 'completed', 'cancelled')),
+    results             JSONB,
+    winner              TEXT,
+    confidence_level    NUMERIC,
+    improvement_pct     NUMERIC,
+    department          TEXT,
+    applied_at          TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ce_campaign ON campaign_experiments(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_ce_status ON campaign_experiments(status);
+
+CREATE OR REPLACE TRIGGER trg_campaign_experiments_updated_at
+BEFORE UPDATE ON campaign_experiments
+FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ─── EXPERIMENT LOOPS (AutoExperiment) ──────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS experiment_loops (
+    id                  SERIAL PRIMARY KEY,
+    campaign_id         TEXT NOT NULL,
+    name                TEXT NOT NULL,
+    metric_target       TEXT NOT NULL CHECK (metric_target IN ('openRate', 'clickRate', 'conversionRate')),
+    experiment_type     TEXT NOT NULL CHECK (experiment_type IN ('subject_line', 'copy', 'design', 'segmentation', 'send_time', 'cta')),
+    status              TEXT DEFAULT 'idle' CHECK (status IN ('idle', 'running', 'paused', 'completed', 'failed')),
+    cycle_count         INTEGER DEFAULT 0,
+    max_cycles          INTEGER DEFAULT 20,
+    cycle_interval      TEXT DEFAULT '4h',
+    current_baseline    JSONB,
+    best_result         JSONB,
+    knowledge_md        TEXT DEFAULT '',
+    total_improvement_pct NUMERIC DEFAULT 0,
+    config              JSONB DEFAULT '{}',
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_el_campaign ON experiment_loops(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_el_status ON experiment_loops(status);
+
+CREATE OR REPLACE TRIGGER trg_experiment_loops_updated_at
+BEFORE UPDATE ON experiment_loops
+FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+CREATE TABLE IF NOT EXISTS experiment_cycles (
+    id                  SERIAL PRIMARY KEY,
+    loop_id             INTEGER NOT NULL REFERENCES experiment_loops(id) ON DELETE CASCADE,
+    cycle_number        INTEGER NOT NULL,
+    status              TEXT DEFAULT 'generating' CHECK (status IN ('generating', 'deployed', 'measuring', 'evaluated', 'failed')),
+    hypothesis          TEXT,
+    baseline            JSONB,
+    challenger          JSONB,
+    baseline_metrics    JSONB,
+    challenger_metrics  JSONB,
+    winner              TEXT,
+    improvement_pct     NUMERIC,
+    learnings           TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ec_loop ON experiment_cycles(loop_id);
+
+CREATE OR REPLACE TRIGGER trg_experiment_cycles_updated_at
+BEFORE UPDATE ON experiment_cycles
+FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ─── EMAIL PROPOSALS ────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS email_proposals (
+    id                    SERIAL PRIMARY KEY,
+    campaign_id           TEXT NOT NULL,
+    variant_name          TEXT NOT NULL,
+    market                TEXT NOT NULL,
+    language              TEXT NOT NULL,
+    tier                  TEXT,
+    subject_line          TEXT,
+    preview_text          TEXT,
+    html_content          TEXT,
+    copy_blocks           JSONB DEFAULT '{}',
+    segmentation_logic    JSONB DEFAULT '{}',
+    personalization_rules JSONB DEFAULT '[]',
+    diff_from_base        JSONB,
+    status                TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'review', 'approved', 'rejected')),
+    feedback              JSONB DEFAULT '[]',
+    generated_by          TEXT DEFAULT 'ai',
+    parent_proposal_id    INTEGER REFERENCES email_proposals(id),
+    version               INTEGER DEFAULT 1,
+    department            TEXT,
+    created_at            TIMESTAMPTZ DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ep_campaign ON email_proposals(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_ep_market ON email_proposals(market, language);
+CREATE INDEX IF NOT EXISTS idx_ep_status ON email_proposals(status);
+
+CREATE OR REPLACE TRIGGER trg_email_proposals_updated_at
+BEFORE UPDATE ON email_proposals
+FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ─── CAMPAIGN CONVERSATIONS (persistent chat) ──────────────────────────────
+
+CREATE TABLE IF NOT EXISTS campaign_conversations (
+    id          SERIAL PRIMARY KEY,
+    campaign_id TEXT NOT NULL UNIQUE,
+    messages    JSONB DEFAULT '[]',
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cc_campaign ON campaign_conversations(campaign_id);
+
+CREATE OR REPLACE TRIGGER trg_campaign_conversations_updated_at
+BEFORE UPDATE ON campaign_conversations
+FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ─── MEETING SESSIONS ───────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS meeting_sessions (
+    id                 SERIAL PRIMARY KEY,
+    weekly_session_id  INTEGER REFERENCES weekly_sessions(id),
+    department         TEXT NOT NULL,
+    status             TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'completed')),
+    agenda             JSONB DEFAULT '[]',
+    transcript         JSONB DEFAULT '[]',
+    decisions          JSONB DEFAULT '[]',
+    participants       JSONB DEFAULT '[]',
+    summary_md         TEXT,
+    started_at         TIMESTAMPTZ DEFAULT NOW(),
+    completed_at       TIMESTAMPTZ,
+    duration_ms        INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_ms_weekly ON meeting_sessions(weekly_session_id);
+CREATE INDEX IF NOT EXISTS idx_ms_status ON meeting_sessions(status);
+
+-- ─── KNOWLEDGE BASE MULTIMODAL MIGRATIONS ──────────────────────────────────
+
+-- Support for multimodal content (images, PDFs)
+ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS content_type TEXT DEFAULT 'text';
+ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS file_path TEXT;
+ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS original_filename TEXT;
+ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS file_size INTEGER;
+
+ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS media_type TEXT DEFAULT 'text';
+ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS file_path TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_kd_content_type ON knowledge_documents(content_type);
+
 -- Seed data is now in seed-emirates.sql

@@ -256,6 +256,10 @@ function DepartmentsTab({ t }) {
 function ApiKeysTab({ t }) {
     const services = [
         { key: 'anthropic', label: t('settings.anthropicKey'), placeholder: t('settings.apiKeyPlaceholder'), hint: t('settings.apiKeyHint'), type: 'password' },
+        { key: 'gemini', label: t('settings.geminiKey'), placeholder: 'AIza...', hint: t('settings.geminiKeyHint'), type: 'password' },
+        { key: 'pinecone_api_key', label: t('settings.pineconeKey'), placeholder: 'pc-...', hint: t('settings.pineconeKeyHint'), type: 'password' },
+        { key: 'pinecone_environment', label: t('settings.pineconeEnv'), placeholder: 'us-east-1', hint: t('settings.pineconeEnvHint'), type: 'text' },
+        { key: 'pinecone_index', label: t('settings.pineconeIndex'), placeholder: 'agentos-kb', hint: t('settings.pineconeIndexHint'), type: 'text' },
         { key: 'confluence_url', label: t('settings.confluenceUrl'), placeholder: t('settings.confluenceUrlPlaceholder'), hint: t('settings.confluenceUrlHint'), type: 'text' },
         { key: 'confluence_token', label: t('settings.confluenceToken'), placeholder: t('settings.confluenceTokenPlaceholder'), hint: t('settings.confluenceTokenHint'), type: 'password' },
         { key: 'jira_url', label: t('settings.jiraUrl'), placeholder: t('settings.jiraUrlPlaceholder'), hint: t('settings.jiraUrlHint'), type: 'text' },

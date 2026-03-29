@@ -82,11 +82,18 @@ export default function PMAgentChat({ inboxItemId, onItemCreated, onStatusChange
             const res = await fetch(`${API_URL}/chat/pm-agent`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({
                     inbox_item_id: itemId,
                     message: msg,
                 }),
             });
+
+            // Extract RAG sources if available
+            const ragHeader = res.headers.get('X-RAG-Sources');
+            if (ragHeader) {
+                try { /* RAG sources available for future UI */ } catch { /* ignore */ }
+            }
 
             const newItemId = res.headers.get('X-Inbox-Item-Id');
             if (newItemId && !itemId) {
@@ -146,7 +153,6 @@ export default function PMAgentChat({ inboxItemId, onItemCreated, onStatusChange
             const data = await res.json();
             setItemStatus('borrador');
             setSummary(data.summary);
-            setMessages([]);
             onStatusChange?.();
         } catch (err) {
             alert(`Error: ${err.message}`);
@@ -187,11 +193,6 @@ export default function PMAgentChat({ inboxItemId, onItemCreated, onStatusChange
             }
             setItemStatus('chat');
             setSummary('');
-            // Reload conversation (seeded with summary context)
-            const itemRes = await fetch(`${API_URL}/inbox/${itemId}`);
-            const item = await itemRes.json();
-            const conv = Array.isArray(item.conversation) ? item.conversation : [];
-            setMessages(conv.map(m => ({ role: m.role, content: m.content })));
             onStatusChange?.();
         } catch (err) {
             alert(`Error: ${err.message}`);
@@ -231,6 +232,34 @@ export default function PMAgentChat({ inboxItemId, onItemCreated, onStatusChange
                     }}>
                         {summary || t('pmChat.noSummary')}
                     </div>
+
+                    {messages.length > 0 && (
+                        <div style={{ marginBottom: 16 }}>
+                            <div style={{
+                                fontSize: '0.8rem',
+                                fontWeight: 600,
+                                color: 'var(--text-secondary, #64748B)',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.05em',
+                                marginBottom: 12,
+                            }}>
+                                {t('pmChat.conversationHistory') || 'Conversation'}
+                            </div>
+                            <div style={{
+                                maxHeight: 300,
+                                overflowY: 'auto',
+                                borderRadius: 12,
+                                border: '1px solid var(--border-default, #E5E7EB)',
+                                padding: 12,
+                            }}>
+                                {messages.map((msg, i) => (
+                                    <div key={i} className={`chat-bubble ${msg.role}`} style={{ opacity: 0.85 }}>
+                                        {msg.content}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                         <button

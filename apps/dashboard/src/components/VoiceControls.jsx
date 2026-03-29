@@ -1,6 +1,6 @@
 import React from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
-import { Mic, Volume2, VolumeX } from 'lucide-react';
+import { Mic, Volume2, VolumeX, Phone } from 'lucide-react';
 
 export function MicButton({ isListening, onClick, disabled, sttSupported }) {
     const { t } = useLanguage();
@@ -51,6 +51,20 @@ export function TtsToggle({ ttsEnabled, setTtsEnabled, ttsSupported }) {
             type="button"
         >
             <span style={{ fontSize: '0.9rem', lineHeight: 1 }}>{ttsEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}</span>
+        </button>
+    );
+}
+
+export function VoiceModeButton({ onClick }) {
+    const { t } = useLanguage();
+    return (
+        <button
+            className="voice-mode-btn"
+            onClick={onClick}
+            title={t('voice.voiceMode')}
+            type="button"
+        >
+            <Phone size={14} />
         </button>
     );
 }

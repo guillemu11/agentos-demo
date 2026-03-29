@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
+import { Mail, Search, FlaskConical, FolderKanban } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -8,17 +9,39 @@ const statusTransitions = {
     'In Progress':  ['Completed', 'Paused'],
     'Completed':    ['In Progress'],
     'Paused':       ['Planning', 'In Progress'],
+    // Email proposal
+    'draft':        ['review'],
+    'review':       ['approved', 'rejected'],
+    'approved':     [],
+    'rejected':     ['draft'],
+    // Research
+    'queued':       [],
+    'researching':  [],
+    'completed':    [],
+    'failed':       [],
+    // Experiment
+    'proposed':     ['approved', 'cancelled'],
+    'running':      ['completed'],
+    'cancelled':    [],
+};
+
+const TYPE_CONFIG = {
+    project:          { icon: FolderKanban, color: '#a855f7', label: 'Projects' },
+    email_proposal:   { icon: Mail,         color: '#10b981', label: 'Emails' },
+    research_session: { icon: Search,       color: '#3b82f6', label: 'Research' },
+    experiment:       { icon: FlaskConical,  color: '#f59e0b', label: 'Experiments' },
 };
 
 export default function PipelineBoard({ department }) {
     const { t } = useLanguage();
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [updating, setUpdating] = useState(null); // project id being updated
-    const [jiraKeys, setJiraKeys] = useState({}); // projectId → mock jira key
+    const [updating, setUpdating] = useState(null);
+    const [jiraKeys, setJiraKeys] = useState({});
     const [creatingJira, setCreatingJira] = useState(null);
     const [importingJira, setImportingJira] = useState(false);
     const [jiraImportCounter, setJiraImportCounter] = useState(1);
+    const [typeFilter, setTypeFilter] = useState('');
 
     const columns = [
         { key: 'Planning',     label: t('pipeline.planning'),    color: '#a855f7', bg: '#faf5ff' },
@@ -26,6 +49,14 @@ export default function PipelineBoard({ department }) {
         { key: 'Completed',    label: t('pipeline.completed'),   color: '#10b981', bg: '#ecfdf5' },
         { key: 'Paused',       label: t('pipeline.paused'),      color: '#f59e0b', bg: '#fffbeb' },
     ];
+
+    // Map non-project statuses to columns
+    const statusColumnMap = {
+        'draft': 'Planning', 'queued': 'Planning', 'proposed': 'Planning',
+        'review': 'In Progress', 'researching': 'In Progress', 'synthesizing': 'In Progress', 'approved': 'In Progress', 'running': 'In Progress',
+        'completed': 'Completed', 'indexed': 'Completed',
+        'paused': 'Paused', 'rejected': 'Paused', 'failed': 'Paused', 'cancelled': 'Paused',
+    };
 
     const transitionLabels = {
         'Planning':     t('pipeline.planning'),
@@ -36,12 +67,14 @@ export default function PipelineBoard({ department }) {
 
     useEffect(() => {
         fetchProjects();
-    }, [department]);
+    }, [department, typeFilter]);
 
     async function fetchProjects() {
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/pipeline?department=${encodeURIComponent(department)}`);
+            const params = new URLSearchParams({ department });
+            if (typeFilter) params.set('type', typeFilter);
+            const res = await fetch(`${API_URL}/pipeline?${params}`);
             const data = await res.json();
             setProjects(Array.isArray(data) ? data : []);
         } catch {
@@ -79,17 +112,23 @@ export default function PipelineBoard({ department }) {
         setImportingJira(false);
     }
 
-    async function handleStatusChange(projectId, newStatus) {
-        setUpdating(projectId);
+    async function handleStatusChange(item, newStatus) {
+        const itemType = item._type || 'project';
+        const itemId = item.id;
+        setUpdating(`${itemType}-${itemId}`);
         try {
-            const res = await fetch(`${API_URL}/projects/${projectId}/status`, {
+            const url = itemType === 'project'
+                ? `${API_URL}/projects/${itemId}/status`
+                : `${API_URL}/pipeline/${itemType}/${itemId}/status`;
+            const res = await fetch(url, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ status: newStatus }),
             });
             if (res.ok) {
                 setProjects(prev => prev.map(p =>
-                    p.id === projectId ? { ...p, status: newStatus } : p
+                    (p.id === itemId && (p._type || 'project') === itemType) ? { ...p, status: newStatus } : p
                 ));
             }
         } catch { /* ignore */ }
@@ -114,11 +153,37 @@ export default function PipelineBoard({ department }) {
 
     const grouped = columns.map(col => ({
         ...col,
-        items: projects.filter(p => p.status === col.key),
+        items: projects.filter(p => {
+            const itemType = p._type || 'project';
+            if (itemType === 'project') return p.status === col.key;
+            return (statusColumnMap[p.status] || 'Planning') === col.key;
+        }),
     }));
+
+    // Count by type
+    const typeCounts = {};
+    for (const p of projects) {
+        const t = p._type || 'project';
+        typeCounts[t] = (typeCounts[t] || 0) + 1;
+    }
 
     return (
         <div>
+            {/* Type filter chips */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                <button className={`email-gen-chip ${typeFilter === '' ? 'active' : ''}`} onClick={() => setTypeFilter('')} style={{ fontSize: '0.7rem', padding: '4px 10px' }}>
+                    All ({projects.length})
+                </button>
+                {Object.entries(TYPE_CONFIG).map(([key, cfg]) => {
+                    const Icon = cfg.icon;
+                    return (
+                        <button key={key} className={`email-gen-chip ${typeFilter === key ? 'active' : ''}`} onClick={() => setTypeFilter(typeFilter === key ? '' : key)} style={{ fontSize: '0.7rem', padding: '4px 10px' }}>
+                            <Icon size={10} /> {cfg.label} {typeCounts[key] ? `(${typeCounts[key]})` : ''}
+                        </button>
+                    );
+                })}
+            </div>
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
                 <button
                     onClick={handleImportFromJira}
@@ -174,22 +239,56 @@ export default function PipelineBoard({ department }) {
                             </div>
                         ) : (
                             col.items.map(proj => {
+                                const itemType = proj._type || 'project';
+                                const typeConfig = TYPE_CONFIG[itemType];
+                                const TypeIcon = typeConfig?.icon || FolderKanban;
                                 const totalTasks = parseInt(proj.total_tasks) || 0;
                                 const doneTasks = parseInt(proj.done_tasks) || 0;
                                 const taskPct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
                                 const transitions = statusTransitions[proj.status] || [];
-                                const isUpdating = updating === proj.id;
+                                const isUpdating = updating === `${itemType}-${proj.id}`;
 
                                 return (
-                                    <div key={proj.id} className="card" style={{ padding: '16px' }}>
+                                    <div key={`${itemType}-${proj.id}`} className="card" style={{ padding: '16px', borderLeft: `3px solid ${typeConfig?.color || '#a855f7'}` }}>
+                                        {/* Type badge */}
+                                        {itemType !== 'project' && (
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}>
+                                                <TypeIcon size={10} style={{ color: typeConfig?.color }} />
+                                                <span style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: typeConfig?.color }}>
+                                                    {typeConfig?.label}
+                                                </span>
+                                                {itemType === 'email_proposal' && proj.market && (
+                                                    <span className="kb-namespace-tag" style={{ marginLeft: 4 }}>{proj.market}/{proj.language}</span>
+                                                )}
+                                                {itemType === 'experiment' && proj.experiment_type && (
+                                                    <span className="kb-namespace-tag" style={{ marginLeft: 4 }}>{proj.experiment_type}</span>
+                                                )}
+                                                {itemType === 'research_session' && proj.depth && (
+                                                    <span className="kb-namespace-tag" style={{ marginLeft: 4 }}>{proj.depth}</span>
+                                                )}
+                                            </div>
+                                        )}
+
                                         <h4 style={{ fontSize: '0.88rem', fontWeight: 700, color: '#0F172A', margin: '0 0 6px 0' }}>
-                                            {proj.name}
+                                            {proj.name || proj.variant_name || proj.title || proj.hypothesis?.slice(0, 60)}
                                         </h4>
 
-                                        {proj.problem && (
+                                        {/* Type-specific content */}
+                                        {itemType === 'project' && proj.problem && (
                                             <p style={{ fontSize: '0.78rem', color: '#64748B', margin: '0 0 10px 0', lineHeight: 1.5 }}>
                                                 {proj.problem.length > 120 ? proj.problem.substring(0, 120) + '...' : proj.problem}
                                             </p>
+                                        )}
+                                        {itemType === 'email_proposal' && proj.subject_line && (
+                                            <p style={{ fontSize: '0.78rem', color: '#64748B', margin: '0 0 10px 0', lineHeight: 1.5, fontStyle: 'italic' }}>
+                                                "{proj.subject_line.length > 80 ? proj.subject_line.substring(0, 80) + '...' : proj.subject_line}"
+                                            </p>
+                                        )}
+                                        {itemType === 'research_session' && (
+                                            <div style={{ display: 'flex', gap: 8, fontSize: '0.7rem', color: '#64748B', margin: '0 0 10px 0' }}>
+                                                <span>{proj.sources_found || 0} sources</span>
+                                                {proj.progress > 0 && proj.progress < 100 && <span>{proj.progress}%</span>}
+                                            </div>
                                         )}
 
                                         {/* Badges: timeline + budget */}
@@ -239,7 +338,7 @@ export default function PipelineBoard({ department }) {
                                                     return (
                                                         <button
                                                             key={target}
-                                                            onClick={() => handleStatusChange(proj.id, target)}
+                                                            onClick={() => handleStatusChange(proj, target)}
                                                             disabled={isUpdating}
                                                             style={{
                                                                 fontSize: '0.7rem', fontWeight: 600,

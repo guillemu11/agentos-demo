@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { useVoice } from '../hooks/useVoice.js';
-import { MicButton, SpeakerButton, TtsToggle } from './VoiceControls.jsx';
+import { MicButton, SpeakerButton, TtsToggle, VoiceModeButton } from './VoiceControls.jsx';
+import VoiceOverlay from './VoiceOverlay.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -10,6 +11,8 @@ export default function AgentChat({ agentId, agentName, agentAvatar }) {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [streaming, setStreaming] = useState(false);
+    const [ragSources, setRagSources] = useState([]);
+    const [voiceMode, setVoiceMode] = useState(false);
     const messagesEndRef = useRef(null);
 
     const handleTranscript = useCallback((transcript) => {
@@ -66,8 +69,15 @@ export default function AgentChat({ agentId, agentName, agentAvatar }) {
             const res = await fetch(`${API_URL}/chat/agent/${agentId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
                 body: JSON.stringify({ message: msg }),
             });
+
+            // Extract RAG sources from header
+            const ragHeader = res.headers.get('X-RAG-Sources');
+            if (ragHeader) {
+                try { setRagSources(JSON.parse(ragHeader)); } catch { /* ignore */ }
+            }
 
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
@@ -129,6 +139,7 @@ export default function AgentChat({ agentId, agentName, agentAvatar }) {
                     {agentAvatar} {t('agentChat.chatWith')} {agentName}
                 </span>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <VoiceModeButton onClick={() => setVoiceMode(true)} />
                     <TtsToggle ttsEnabled={ttsEnabled} setTtsEnabled={setTtsEnabled} ttsSupported={ttsSupported} />
                     {messages.length > 0 && !streaming && (
                         <button
@@ -201,6 +212,31 @@ export default function AgentChat({ agentId, agentName, agentAvatar }) {
                     {t('agentChat.send')}
                 </button>
             </div>
+            {ragSources.length > 0 && (
+                <div className="chat-rag-sources">
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        KB Sources
+                    </span>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                        {ragSources.map((s, i) => (
+                            <span key={i} className="kb-namespace-tag" title={`${s.title} (${(s.score * 100).toFixed(0)}%)`}>
+                                {s.title?.slice(0, 30)}{s.title?.length > 30 ? '...' : ''}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+            {voiceMode && (
+                <VoiceOverlay
+                    agentId={agentId}
+                    agentName={agentName}
+                    agentAvatar={agentAvatar}
+                    onClose={() => setVoiceMode(false)}
+                    onMessage={(role, text) => {
+                        setMessages(prev => [...prev, { role, content: text }]);
+                    }}
+                />
+            )}
         </div>
     );
 }

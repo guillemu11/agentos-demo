@@ -3,7 +3,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { CAMPAIGNS, CAMPAIGN_GROUPS, INDUSTRY_BENCHMARKS } from '../data/emiratesCampaigns.js';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Mail, Bot } from 'lucide-react';
+import { Mail, Bot, BarChart3, MessageSquare, Trash2, Zap, Loader } from 'lucide-react';
+import EmailProposalGenerator from '../components/EmailProposalGenerator.jsx';
+import EmailProposalViewer from '../components/EmailProposalViewer.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -15,11 +17,49 @@ export default function CampaignDetail() {
     const campaign = CAMPAIGNS.find(c => c.id === campaignId);
     const group = campaign ? CAMPAIGN_GROUPS.find(g => g.id === campaign.group) : null;
 
+    // Tab state
+    const [activeTab, setActiveTab] = useState('overview');
+
     // Chat state
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [streaming, setStreaming] = useState(false);
     const messagesEndRef = useRef(null);
+
+    // Email proposals state
+    const [emailProposals, setEmailProposals] = useState([]);
+    const [viewingProposal, setViewingProposal] = useState(null);
+
+    // Load persistent conversation
+    useEffect(() => {
+        if (!campaign) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch(`${API_URL}/campaigns/${campaign.id}/conversation`, { credentials: 'include' });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!cancelled) setMessages(Array.isArray(data.messages) ? data.messages : []);
+            } catch { /* ignore */ }
+        })();
+        return () => { cancelled = true; };
+    }, [campaign?.id]);
+
+    // Load email proposals
+    useEffect(() => {
+        if (!campaign) return;
+        loadEmailProposals();
+    }, [campaign?.id]);
+
+    async function loadEmailProposals() {
+        try {
+            const res = await fetch(`${API_URL}/campaigns/${campaign.id}/emails`, { credentials: 'include' });
+            if (res.ok) {
+                const data = await res.json();
+                setEmailProposals(data.proposals || []);
+            }
+        } catch { /* ignore */ }
+    }
 
     // Auto-scroll
     useEffect(() => {
@@ -78,10 +118,8 @@ export default function CampaignDetail() {
             const res = await fetch(`${API_URL}/chat/campaign/${campaign.id}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    message: msg,
-                    history: messages.slice(-20),
-                }),
+                credentials: 'include',
+                body: JSON.stringify({ message: msg }),
             });
 
             const reader = res.body.getReader();
@@ -183,8 +221,24 @@ export default function CampaignDetail() {
                 </div>
             </div>
 
-            {/* Metrics panel */}
-            {campaign.kpis.sends > 0 && (
+            {/* Tabs */}
+            <div className="kb-tabs" style={{ marginBottom: 20 }}>
+                <button className={`kb-tab ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
+                    <BarChart3 size={14} /> {t('campaigns.overview') || 'Overview'}
+                </button>
+                <button className={`kb-tab ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
+                    <MessageSquare size={14} /> Chat
+                </button>
+                <button className={`kb-tab ${activeTab === 'emails' ? 'active' : ''}`} onClick={() => setActiveTab('emails')}>
+                    <Mail size={14} /> Emails {emailProposals.length > 0 && <span className="kb-namespace-tag" style={{ marginLeft: 4 }}>{emailProposals.length}</span>}
+                </button>
+                <button className={`kb-tab ${activeTab === 'optimize' ? 'active' : ''}`} onClick={() => setActiveTab('optimize')}>
+                    <Zap size={14} /> Optimize
+                </button>
+            </div>
+
+            {/* Overview Tab */}
+            {activeTab === 'overview' && campaign.kpis.sends > 0 && (
                 <>
                     {/* KPI cards with benchmarks */}
                     <div className="campaign-metrics-grid">
@@ -265,71 +319,185 @@ export default function CampaignDetail() {
                 </>
             )}
 
-            {/* Chat + Agents sidebar */}
-            <div className="campaign-detail-layout">
-                {/* Chat panel */}
-                <div className="chat-container">
-                    <div className="chat-header">
-                        <span className="chat-header-title">
-                            {t('campaigns.campaignChat')}
-                        </span>
+            {/* Chat Tab */}
+            {activeTab === 'chat' && (
+                <div className="campaign-detail-layout">
+                    <div className="chat-container">
+                        <div className="chat-header">
+                            <span className="chat-header-title">
+                                {t('campaigns.campaignChat')}
+                            </span>
+                            {messages.length > 0 && !streaming && (
+                                <button
+                                    onClick={async () => {
+                                        try {
+                                            await fetch(`${API_URL}/campaigns/${campaign.id}/conversation`, { method: 'DELETE', credentials: 'include' });
+                                            setMessages([]);
+                                        } catch { /* ignore */ }
+                                    }}
+                                    style={{
+                                        background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-light)',
+                                        borderRadius: 9999, padding: '6px 16px', fontWeight: 500, fontSize: '0.8rem', cursor: 'pointer',
+                                    }}
+                                >
+                                    {t('agentChat.clearChat')}
+                                </button>
+                            )}
+                        </div>
+
+                        <div className="chat-messages">
+                            {messages.length === 0 && (
+                                <div className="chat-empty">
+                                    <div className="chat-empty-icon">{group?.icon || <Mail size={20} />}</div>
+                                    <div className="chat-empty-text">
+                                        <strong>{t('campaigns.chatEmptyTitle')}</strong><br />
+                                        {t('campaigns.chatEmptyText')}
+                                    </div>
+                                </div>
+                            )}
+
+                            {messages.map((msg, i) => (
+                                <div key={i} className={`chat-bubble ${msg.role}`}>
+                                    {msg.content || (streaming && i === messages.length - 1 ? '' : '...')}
+                                </div>
+                            ))}
+
+                            {streaming && messages[messages.length - 1]?.content === '' && (
+                                <div className="chat-typing">
+                                    <span className="chat-typing-dot"></span>
+                                    <span className="chat-typing-dot"></span>
+                                    <span className="chat-typing-dot"></span>
+                                </div>
+                            )}
+
+                            <div ref={messagesEndRef} />
+                        </div>
+
+                        <div className="chat-input-row">
+                            <input
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                onKeyDown={handleKeyDown}
+                                placeholder={t('campaigns.chatPlaceholder')}
+                                disabled={streaming}
+                            />
+                            <button onClick={() => sendMessage()} disabled={streaming || !input.trim()}>
+                                {t('campaigns.send')}
+                            </button>
+                        </div>
                     </div>
 
-                    <div className="chat-messages">
-                        {messages.length === 0 && (
-                            <div className="chat-empty">
-                                <div className="chat-empty-icon">{group?.icon || <Mail size={20} />}</div>
-                                <div className="chat-empty-text">
-                                    <strong>{t('campaigns.chatEmptyTitle')}</strong><br />
-                                    {t('campaigns.chatEmptyText')}
-                                </div>
-                            </div>
-                        )}
-
-                        {messages.map((msg, i) => (
-                            <div key={i} className={`chat-bubble ${msg.role}`}>
-                                {msg.content || (streaming && i === messages.length - 1 ? '' : '...')}
+                    <div className="card campaign-agents-sidebar" style={{ padding: 20 }}>
+                        <h3 style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', margin: '0 0 12px' }}>
+                            {t('campaigns.relevantAgents')}
+                        </h3>
+                        {campaign.agents.map(name => (
+                            <div key={name} className="agent-item">
+                                <span style={{ fontSize: '1rem' }}><Bot size={16} /></span>
+                                <span>{name}</span>
                             </div>
                         ))}
+                    </div>
+                </div>
+            )}
 
-                        {streaming && messages[messages.length - 1]?.content === '' && (
-                            <div className="chat-typing">
-                                <span className="chat-typing-dot"></span>
-                                <span className="chat-typing-dot"></span>
-                                <span className="chat-typing-dot"></span>
-                            </div>
-                        )}
-
-                        <div ref={messagesEndRef} />
+            {/* Emails Tab */}
+            {activeTab === 'emails' && (
+                <div>
+                    {/* Generator */}
+                    <div className="card" style={{ padding: 20, marginBottom: 20 }}>
+                        <h3 className="kb-section-title">{t('emails.generateNew')}</h3>
+                        <EmailProposalGenerator
+                            campaignId={campaign.id}
+                            onGenerated={() => loadEmailProposals()}
+                        />
                     </div>
 
-                    <div className="chat-input-row">
-                        <input
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            placeholder={t('campaigns.chatPlaceholder')}
-                            disabled={streaming}
+                    {/* Proposals grid */}
+                    {emailProposals.length > 0 && (
+                        <div className="card" style={{ padding: 20 }}>
+                            <h3 className="kb-section-title">{t('emails.proposals')} ({emailProposals.length})</h3>
+                            <div className="email-proposals-grid">
+                                {emailProposals.map(p => (
+                                    <div
+                                        key={p.id}
+                                        className="email-proposal-card"
+                                        onClick={() => setViewingProposal(p.id)}
+                                    >
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                                            <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{p.variant_name}</span>
+                                            <span className={`kb-status-badge ${p.status}`}>{p.status}</span>
+                                        </div>
+                                        <p style={{ margin: '0 0 8px', fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                                            {p.subject_line || t('emails.noSubject')}
+                                        </p>
+                                        <div style={{ display: 'flex', gap: 4 }}>
+                                            <span className="kb-namespace-tag">{p.market}</span>
+                                            <span className="kb-namespace-tag">{p.language?.toUpperCase()}</span>
+                                            {p.tier && <span className="kb-namespace-tag">{p.tier}</span>}
+                                        </div>
+                                        <button
+                                            className="kb-icon-btn"
+                                            style={{ marginTop: 8 }}
+                                            onClick={async (e) => {
+                                                e.stopPropagation();
+                                                await fetch(`${API_URL}/campaigns/${campaign.id}/emails/${p.id}`, { method: 'DELETE', credentials: 'include' });
+                                                loadEmailProposals();
+                                            }}
+                                        >
+                                            <Trash2 size={12} /> {t('emails.delete')}
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {emailProposals.length === 0 && (
+                        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
+                            {t('emails.noProposals')}
+                        </div>
+                    )}
+
+                    {/* Viewer overlay */}
+                    {viewingProposal && (
+                        <EmailProposalViewer
+                            campaignId={campaign.id}
+                            proposalId={viewingProposal}
+                            proposals={emailProposals}
+                            onClose={() => { setViewingProposal(null); loadEmailProposals(); }}
                         />
-                        <button onClick={() => sendMessage()} disabled={streaming || !input.trim()}>
-                            {t('campaigns.send')}
+                    )}
+                </div>
+            )}
+
+            {/* Optimize Tab */}
+            {activeTab === 'optimize' && (
+                <div>
+                    <div className="card" style={{ padding: 20, marginBottom: 20 }}>
+                        <h3 className="kb-section-title">{t('research.title')}</h3>
+                        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: '0 0 16px' }}>
+                            {t('research.subtitle')}
+                        </p>
+                        <button
+                            className="kb-action-btn"
+                            onClick={async () => {
+                                try {
+                                    const res = await fetch(`${API_URL}/campaigns/${campaign.id}/auto-improve`, {
+                                        method: 'POST', credentials: 'include',
+                                    });
+                                    if (res.ok) {
+                                        const data = await res.json();
+                                        navigate(`/app/research/${data.sessionId}`);
+                                    }
+                                } catch { /* ignore */ }
+                            }}
+                        >
+                            <Zap size={14} /> Auto-Improve This Campaign
                         </button>
                     </div>
                 </div>
-
-                {/* Agents sidebar */}
-                <div className="card campaign-agents-sidebar" style={{ padding: 20 }}>
-                    <h3 style={{ fontSize: '0.75rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', margin: '0 0 12px' }}>
-                        {t('campaigns.relevantAgents')}
-                    </h3>
-                    {campaign.agents.map(name => (
-                        <div key={name} className="agent-item">
-                            <span style={{ fontSize: '1rem' }}><Bot size={16} /></span>
-                            <span>{name}</span>
-                        </div>
-                    ))}
-                </div>
-            </div>
+            )}
         </div>
     );
 }
