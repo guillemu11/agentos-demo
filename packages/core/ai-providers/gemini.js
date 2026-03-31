@@ -9,8 +9,8 @@ import { GoogleGenAI } from '@google/genai';
 
 let _client = null;
 
-const EMBEDDING_MODEL = 'gemini-embedding-2-preview';
-const EMBEDDING_DIMENSIONS = 3072;
+export const EMBEDDING_MODEL = 'gemini-embedding-2-preview';
+export const EMBEDDING_DIMENSIONS = 3072;
 const MAX_CONCURRENT = 10;
 
 /**
@@ -35,7 +35,7 @@ export function getGeminiClient() {
  * Embed a single text string.
  * @param {string} text
  * @param {string} [taskType='RETRIEVAL_QUERY']
- * @returns {Promise<number[]>} - Embedding vector (768-dim)
+ * @returns {Promise<number[]>} - Embedding vector (3072-dim)
  */
 export async function embedText(text, taskType = 'RETRIEVAL_QUERY') {
     if (!_client) throw new Error('Gemini not initialized. Call initGemini() first.');
@@ -77,7 +77,7 @@ export async function embedBatch(texts) {
  * Embed a single image natively.
  * @param {string} base64Data - Base64-encoded image data
  * @param {string} mimeType - e.g. 'image/png', 'image/jpeg'
- * @returns {Promise<number[]>} - Embedding vector (768-dim)
+ * @returns {Promise<number[]>} - Embedding vector (3072-dim)
  */
 export async function embedImage(base64Data, mimeType) {
     if (!_client) throw new Error('Gemini not initialized. Call initGemini() first.');
@@ -92,7 +92,7 @@ export async function embedImage(base64Data, mimeType) {
 /**
  * Embed a PDF natively (max 6 pages).
  * @param {string} base64Data - Base64-encoded PDF data
- * @returns {Promise<number[]>} - Embedding vector (768-dim)
+ * @returns {Promise<number[]>} - Embedding vector (3072-dim)
  */
 export async function embedPdf(base64Data) {
     if (!_client) throw new Error('Gemini not initialized. Call initGemini() first.');

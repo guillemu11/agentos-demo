@@ -4,7 +4,7 @@
  * Chunks text, embeds via Gemini, upserts to Pinecone, tracks in PostgreSQL.
  */
 
-import { embedText, embedBatch, embedImage, embedPdf, isGeminiReady, extractTextFromPdfPage, extractTextFromImage, extractTextFromDocument } from '../ai-providers/gemini.js';
+import { embedText, embedBatch, embedImage, embedPdf, isGeminiReady, extractTextFromPdfPage, extractTextFromImage, extractTextFromDocument, EMBEDDING_DIMENSIONS } from '../ai-providers/gemini.js';
 import { upsertVectors, isPineconeReady, deleteVectors } from '../ai-providers/pinecone.js';
 import { PDFDocument } from 'pdf-lib';
 import fs from 'fs';
@@ -54,8 +54,8 @@ export function chunkText(text, { chunkSize = DEFAULT_CHUNK_SIZE, overlap = DEFA
         end = Math.min(end, text.length);
         chunks.push({ content: text.slice(start, end).trim(), index, offset: start });
         index++;
+        if (end >= text.length) break;   // reached end of text
         start = end - charOverlap;
-        if (start >= text.length) break;
     }
 
     return chunks.filter(c => c.content.length > 0);
@@ -287,6 +287,7 @@ const MIME_MAP = {
 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const MAX_PDF_SIZE = 3 * 1024 * 1024; // ~3MB proxy for 6-page limit
+const MAX_DOCX_SIZE = 15 * 1024 * 1024; // 15MB — Gemini Vision inline data limit
 
 /**
  * Ingest a single image into the knowledge base.
@@ -596,7 +597,7 @@ export async function ingestHtmlFile(pool, { filePath, relativePath, title, name
 }
 
 /**
- * Ingest a Word document (.docx / .doc) by extracting text via Gemini Vision,
+ * Ingest a Word document (.docx) by extracting text from the ZIP XML,
  * chunking, embedding, and storing in Pinecone + PostgreSQL.
  */
 export async function ingestWordFile(pool, { filePath, relativePath, title, namespace, sourceType = 'upload', metadata = {} }) {
@@ -605,6 +606,13 @@ export async function ingestWordFile(pool, { filePath, relativePath, title, name
 
     const ext = path.extname(filePath).toLowerCase();
     const fileSize = fs.statSync(filePath).size;
+
+    if (ext === '.doc') {
+        throw new Error('Legacy .doc format is not supported. Please save as .docx or PDF and re-upload.');
+    }
+    if (fileSize > MAX_DOCX_SIZE) {
+        throw new Error(`File too large (${(fileSize / 1024 / 1024).toFixed(1)}MB). Max for .docx is ${MAX_DOCX_SIZE / 1024 / 1024}MB. Try splitting or converting to PDF.`);
+    }
 
     // 1. Insert document
     const docResult = await pool.query(
@@ -616,23 +624,19 @@ export async function ingestWordFile(pool, { filePath, relativePath, title, name
     const documentId = docResult.rows[0].id;
 
     try {
-        // 2. Extract text — .docx is a ZIP with XML, extract text directly
+        // 2. Extract text from .docx via ZIP XML extraction (memory-safe)
         let extracted = '';
-        if (ext === '.doc') {
-            throw new Error('Legacy .doc format is not supported. Please save as PDF and re-upload.');
-        }
-        // .docx: read ZIP, find word/document.xml, strip XML tags
         const { execSync } = await import('child_process');
         try {
-            // Use PowerShell to extract document.xml from the docx ZIP
-            const ps = `Add-Type -AssemblyName System.IO.Compression.FileSystem; $zip = [System.IO.Compression.ZipFile]::OpenRead('${filePath.replace(/'/g, "''")}'); $entry = $zip.Entries | Where-Object { $_.FullName -eq 'word/document.xml' }; $reader = New-Object System.IO.StreamReader($entry.Open()); $reader.ReadToEnd(); $reader.Close(); $zip.Dispose()`;
-            const xml = execSync(`powershell -NoProfile -Command "${ps.replace(/"/g, '\\"')}"`, { maxBuffer: 50 * 1024 * 1024, encoding: 'utf-8' });
+            const safePath = filePath.replace(/\\/g, '/').replace(/'/g, "''");
+            const ps = `Add-Type -AssemblyName System.IO.Compression.FileSystem; $zip = [System.IO.Compression.ZipFile]::OpenRead('${safePath}'); $entry = $zip.Entries | Where-Object { $_.FullName -eq 'word/document.xml' }; $reader = New-Object System.IO.StreamReader($entry.Open()); $reader.ReadToEnd(); $reader.Close(); $zip.Dispose()`;
+            const xml = execSync(`powershell -NoProfile -Command "${ps.replace(/"/g, '\\"')}"`, { maxBuffer: 5 * 1024 * 1024, encoding: 'utf-8', timeout: 30000 });
             extracted = xml
                 .replace(/<[^>]+>/g, ' ')
                 .replace(/\s+/g, ' ')
                 .trim();
         } catch (zipErr) {
-            throw new Error(`Failed to extract text from .docx: ${zipErr.message}. Try saving as PDF instead.`);
+            throw new Error(`Failed to extract text from .docx: ${zipErr.message}. Try converting to PDF and re-uploading.`);
         }
         const content = (extracted || '').trim() || `[Document: ${title}]`;
 

@@ -8,6 +8,7 @@ import { Pinecone } from '@pinecone-database/pinecone';
 
 let _client = null;
 let _index = null;
+let _indexName = null;
 
 /**
  * Initialize the Pinecone client and connect to an index.
@@ -20,6 +21,7 @@ export function initPinecone(apiKey, indexName) {
     if (!indexName) throw new Error('Pinecone index name is required');
     _client = new Pinecone({ apiKey });
     _index = _client.index(indexName);
+    _indexName = indexName;
     return _client;
 }
 
@@ -104,6 +106,23 @@ export async function deleteNamespace(namespace) {
 export async function getIndexStats() {
     if (!_index) throw new Error('Pinecone not initialized.');
     return await _index.describeIndexStats();
+}
+
+/**
+ * Describe the Pinecone index (dimensions, metric, status, etc.).
+ * @param {string} [indexName] - Override index name (defaults to initialized index)
+ * @returns {Promise<object>}
+ */
+export async function describeIndex(indexName) {
+    if (!_client) throw new Error('Pinecone not initialized.');
+    return await _client.describeIndex(indexName || _indexName);
+}
+
+/**
+ * Get the initialized index name.
+ */
+export function getIndexName() {
+    return _indexName;
 }
 
 /**

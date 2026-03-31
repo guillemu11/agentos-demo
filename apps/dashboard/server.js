@@ -19,8 +19,8 @@ import { chatWithPMAgent, extractJSON, generateSummary, generateProject } from '
 import { saveProject } from '../../packages/core/db/save_project.js';
 import { buildProjectContext } from '../../packages/core/pm-agent/context-builder.js';
 import Anthropic from '@anthropic-ai/sdk';
-import { initGemini, isGeminiReady, getGeminiClient } from '../../packages/core/ai-providers/gemini.js';
-import { initPinecone, isPineconeReady } from '../../packages/core/ai-providers/pinecone.js';
+import { initGemini, isGeminiReady, getGeminiClient, EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from '../../packages/core/ai-providers/gemini.js';
+import { initPinecone, isPineconeReady, describeIndex } from '../../packages/core/ai-providers/pinecone.js';
 import multer from 'multer';
 import { generateEodReport } from '../../packages/core/workspace-skills/eod-generator.js';
 
@@ -66,6 +66,15 @@ if (process.env.PINECONE_API_KEY && process.env.PINECONE_INDEX) {
     try {
         initPinecone(process.env.PINECONE_API_KEY, process.env.PINECONE_INDEX);
         console.log('[AI] Pinecone initialized (index:', process.env.PINECONE_INDEX + ')');
+        // Validate index dimensions match embedding model
+        describeIndex().then(info => {
+            const indexDim = info.dimension;
+            if (indexDim !== EMBEDDING_DIMENSIONS) {
+                console.error(`[AI] CRITICAL: Pinecone index dimension (${indexDim}) ≠ embedding dimension (${EMBEDDING_DIMENSIONS}). KB uploads will fail!`);
+            } else {
+                console.log(`[AI] Pinecone dimension check OK (${indexDim})`);
+            }
+        }).catch(err => console.warn('[AI] Could not verify Pinecone dimensions:', err.message));
     } catch (err) {
         console.warn('[AI] Pinecone init failed:', err.message);
     }
@@ -3686,6 +3695,34 @@ app.get('/api/knowledge/status', requireAuth, async (req, res) => {
     }
 });
 
+// GET /api/knowledge/diagnostics — Check KB system health
+app.get('/api/knowledge/diagnostics', requireAuth, async (req, res) => {
+    try {
+        const geminiOk = isGeminiReady();
+        const pineconeOk = isPineconeReady();
+        let indexDimension = null;
+        let dimensionMatch = null;
+
+        if (pineconeOk) {
+            try {
+                const info = await describeIndex();
+                indexDimension = info.dimension;
+                dimensionMatch = info.dimension === EMBEDDING_DIMENSIONS;
+            } catch (err) {
+                indexDimension = `error: ${err.message}`;
+            }
+        }
+
+        res.json({
+            gemini: { ready: geminiOk, embeddingModel: EMBEDDING_MODEL, embeddingDimensions: EMBEDDING_DIMENSIONS },
+            pinecone: { ready: pineconeOk, indexName: process.env.PINECONE_INDEX, indexDimension, dimensionMatch },
+            healthy: geminiOk && pineconeOk && dimensionMatch === true,
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // GET /api/knowledge/documents — List documents
 app.get('/api/knowledge/documents', requireAuth, async (req, res) => {
     try {
@@ -3778,7 +3815,7 @@ app.post('/api/knowledge/upload', requireAuth, kbUpload.single('file'), async (r
         });
         res.status(201).json(result);
     } catch (err) {
-        // Clean up tmp file on error
+        console.error('[KB Upload] Error ingesting file:', err.message, err.stack);
         if (req.file?.path) fs.unlink(req.file.path, () => {});
         res.status(500).json({ error: err.message });
     }
@@ -3808,7 +3845,7 @@ app.post('/api/knowledge/search', requireAuth, async (req, res) => {
 // POST /api/chat/knowledge — Conversational KB assistant (SSE streaming)
 app.post('/api/chat/knowledge', requireAuth, async (req, res) => {
     try {
-        const { message, history, namespace } = req.body;
+        const { message, history, namespace, visualQuery } = req.body;
         if (!message) return res.status(400).json({ error: 'message is required' });
         if (!isKBReady()) return res.status(503).json({ error: 'Knowledge base not configured.' });
 
@@ -3816,10 +3853,19 @@ app.post('/api/chat/knowledge', requireAuth, async (req, res) => {
         const allNamespaces = ['campaigns', 'emails', 'images', 'kpis', 'research', 'brand'];
         const namespaces = namespace ? [namespace] : allNamespaces;
 
-        // Build RAG context
-        const ragResult = await buildRAGContext(pool, message, { namespaces, maxTokens: 2000 });
+        // Build RAG context (pass visualQuery flag for boosted visual retrieval)
+        const ragResult = await buildRAGContext(pool, message, { namespaces, maxTokens: visualQuery ? 3000 : 2000, visualQuery: !!visualQuery });
 
         // System prompt for conversational KB assistant
+        const visualInstruction = visualQuery ? `
+
+## CRITICAL: Visual Query Detected
+The user is asking for a diagram, image, schema, or visual content. You MUST:
+- Embed ALL matching [PÁGINA VISUAL: url] and [IMAGEN: url] references as inline images using ![description](url)
+- Show the visual FIRST, then explain what it contains
+- NEVER describe a diagram with text when the actual visual page is available in the context
+- If multiple visual pages match, embed ALL of them` : '';
+
         const systemPrompt = `You are the Knowledge Base Assistant for AgentOS. You help users explore and understand the organization's knowledge base.
 
 ## Response Rules
@@ -3835,6 +3881,7 @@ app.post('/api/chat/knowledge', requireAuth, async (req, res) => {
 9. Respond in the same language the user writes to you.
 10. Be concise but thorough. Under 400 words unless the user asks for more detail.
 11. Use markdown formatting (bold, lists, headers) to make your responses easy to scan.` +
+            visualInstruction +
             (ragResult.context ? '\n\n' + ragResult.context : '');
 
         // Build messages array from history (cap at last 10 pairs = 20 messages)
@@ -3930,7 +3977,7 @@ const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
-    if (url.pathname === '/ws/voice' || url.pathname === '/ws/voice-meeting') {
+    if (url.pathname === '/ws/voice' || url.pathname === '/ws/voice-meeting' || url.pathname === '/ws/voice-kb') {
         wss.handleUpgrade(req, socket, head, (ws) => {
             wss.emit('connection', ws, req);
         });
@@ -3945,6 +3992,10 @@ wss.on('connection', async (ws, req) => {
 
     if (isMeeting) {
         return handleVoiceMeeting(ws, url);
+    }
+
+    if (url.pathname === '/ws/voice-kb') {
+        return handleVoiceKB(ws, url);
     }
 
     const agentId = url.searchParams.get('agentId');
@@ -4203,6 +4254,224 @@ async function handleVoiceMeeting(ws, url) {
 
     ws.on('close', () => {
         console.log(`[Meeting WS] Disconnected: meeting=${meeting.id}`);
+    });
+}
+
+// ─── Voice KB Handler (Gemini Live Speech-to-Speech + RAG) ──────────────────
+
+const GEMINI_LIVE_MODEL = 'gemini-2.0-flash-live-001';
+const KB_NAMESPACES = ['campaigns', 'emails', 'images', 'kpis', 'research', 'brand'];
+
+const SEARCH_KNOWLEDGE_TOOL = {
+    name: 'searchKnowledge',
+    description: 'Search the knowledge base for relevant information about campaigns, emails, KPIs, research, brand guidelines, and images. Use this tool whenever the user asks a question to ground your answer in real data.',
+    parameters: {
+        type: 'OBJECT',
+        properties: {
+            query: { type: 'STRING', description: 'The search query based on what the user is asking about' },
+        },
+        required: ['query']
+    }
+};
+
+async function handleVoiceKB(ws, url) {
+    const namespace = url.searchParams.get('namespace') || '';
+    const lang = url.searchParams.get('lang') || 'es';
+
+    console.log(`[Voice KB] Connected: namespace=${namespace || 'all'}, lang=${lang}`);
+
+    // Verify Gemini and KB are ready
+    const gemini = getGeminiClient();
+    if (!gemini || !isKBReady()) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Gemini or Knowledge Base not configured' }));
+        ws.close();
+        return;
+    }
+
+    const systemPromptKB = `You are the Knowledge Base voice assistant for AgentOS. You help users find and understand information from their knowledge base which includes campaigns, emails, KPIs, research, and brand guidelines.
+
+When the user asks a question, use the searchKnowledge tool to find relevant information before answering. Base your responses on the retrieved knowledge. If no relevant information is found, say so honestly.
+
+Keep responses concise and conversational (2-4 sentences). Respond in the same language the user speaks.`;
+
+    let session = null;
+
+    try {
+        session = await gemini.live.connect({
+            model: GEMINI_LIVE_MODEL,
+            config: {
+                responseModalities: ['AUDIO'],
+                systemInstruction: systemPromptKB,
+                tools: [{ functionDeclarations: [SEARCH_KNOWLEDGE_TOOL] }],
+                speechConfig: {
+                    voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } },
+                },
+                inputAudioTranscription: {},
+                outputAudioTranscription: {},
+            },
+            callbacks: {
+                onopen: () => {
+                    console.log('[Voice KB] Gemini Live session opened');
+                    ws.send(JSON.stringify({ type: 'ready' }));
+                },
+                onmessage: async (message) => {
+                    try {
+                        // Audio response from model
+                        if (message.serverContent?.modelTurn?.parts) {
+                            for (const part of message.serverContent.modelTurn.parts) {
+                                if (part.inlineData) {
+                                    ws.send(JSON.stringify({
+                                        type: 'audio',
+                                        data: part.inlineData.data,
+                                        mimeType: part.inlineData.mimeType,
+                                    }));
+                                }
+                            }
+                        }
+
+                        // Input transcription (what user said)
+                        if (message.serverContent?.inputTranscription?.text) {
+                            ws.send(JSON.stringify({
+                                type: 'input-transcript',
+                                text: message.serverContent.inputTranscription.text,
+                            }));
+                        }
+
+                        // Output transcription (what AI said)
+                        if (message.serverContent?.outputTranscription?.text) {
+                            ws.send(JSON.stringify({
+                                type: 'output-transcript',
+                                text: message.serverContent.outputTranscription.text,
+                            }));
+                        }
+
+                        // Turn complete
+                        if (message.serverContent?.turnComplete) {
+                            ws.send(JSON.stringify({ type: 'turn-complete' }));
+                        }
+
+                        // Interrupted by user
+                        if (message.serverContent?.interrupted) {
+                            ws.send(JSON.stringify({ type: 'interrupted' }));
+                        }
+
+                        // Function calling (RAG search)
+                        if (message.toolCall?.functionCalls) {
+                            for (const fc of message.toolCall.functionCalls) {
+                                if (fc.name === 'searchKnowledge') {
+                                    const query = fc.args?.query || '';
+                                    console.log(`[Voice KB] RAG search: "${query}"`);
+                                    ws.send(JSON.stringify({ type: 'searching' }));
+
+                                    try {
+                                        const namespaces = namespace ? [namespace] : KB_NAMESPACES;
+                                        const { context, sources } = await buildRAGContext(pool, query, {
+                                            namespaces,
+                                            maxTokens: 1500,
+                                        });
+
+                                        session.sendToolResponse({
+                                            functionResponses: [{
+                                                id: fc.id,
+                                                name: fc.name,
+                                                response: { result: context || 'No relevant information found in the knowledge base.' },
+                                            }],
+                                        });
+
+                                        ws.send(JSON.stringify({ type: 'rag-sources', sources: sources || [] }));
+                                    } catch (ragErr) {
+                                        console.error('[Voice KB] RAG error:', ragErr.message);
+                                        session.sendToolResponse({
+                                            functionResponses: [{
+                                                id: fc.id,
+                                                name: fc.name,
+                                                response: { result: 'Error searching the knowledge base. Please try again.' },
+                                            }],
+                                        });
+                                    }
+                                }
+                            }
+                        }
+
+                        // Tool call cancellation
+                        if (message.toolCallCancellation) {
+                            console.log('[Voice KB] Tool call cancelled:', message.toolCallCancellation.ids);
+                        }
+
+                        // Session expiring warning
+                        if (message.goAway) {
+                            ws.send(JSON.stringify({
+                                type: 'warning',
+                                message: 'Voice session will expire soon',
+                                timeLeft: message.goAway.timeLeft,
+                            }));
+                        }
+                    } catch (err) {
+                        console.error('[Voice KB] Message handling error:', err.message);
+                    }
+                },
+                onerror: (err) => {
+                    console.error('[Voice KB] Gemini Live error:', err);
+                    try {
+                        ws.send(JSON.stringify({ type: 'error', message: 'Voice session error' }));
+                    } catch { /* ws may be closed */ }
+                },
+                onclose: (event) => {
+                    console.log('[Voice KB] Gemini Live session closed');
+                    try {
+                        ws.send(JSON.stringify({ type: 'session-closed' }));
+                    } catch { /* ws may be closed */ }
+                },
+            },
+        });
+    } catch (err) {
+        console.error('[Voice KB] Failed to create Gemini Live session:', err.message);
+        ws.send(JSON.stringify({ type: 'error', message: `Failed to start voice session: ${err.message}` }));
+        ws.close();
+        return;
+    }
+
+    // Handle messages from client
+    ws.on('message', (data) => {
+        try {
+            const msg = JSON.parse(data.toString());
+
+            if (msg.type === 'audio' && session) {
+                session.sendRealtimeInput({
+                    audio: { data: msg.data, mimeType: msg.mimeType || 'audio/pcm;rate=16000' },
+                });
+            }
+
+            if (msg.type === 'text' && session) {
+                session.sendClientContent({
+                    turns: [{ role: 'user', parts: [{ text: msg.text }] }],
+                    turnComplete: true,
+                });
+            }
+
+            if (msg.type === 'ping') {
+                ws.send(JSON.stringify({ type: 'pong' }));
+            }
+        } catch (err) {
+            console.error('[Voice KB] Client message error:', err.message);
+        }
+    });
+
+    // Cleanup on disconnect
+    ws.on('close', () => {
+        console.log('[Voice KB] Client disconnected');
+        if (session) {
+            try { session.close(); } catch { /* ignore */ }
+            session = null;
+        }
+    });
+
+    ws.on('error', (err) => {
+        console.error('[Voice KB] WebSocket error:', err.message);
+        if (session) {
+            try { session.close(); } catch { /* ignore */ }
+            session = null;
+        }
     });
 }
 

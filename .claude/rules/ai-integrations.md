@@ -29,7 +29,7 @@ paths:
 - Usar `@google/genai` package (reemplaza `@google/generative-ai` deprecated)
 - Embeddings: `ai.models.embedContent()` con modelo `gemini-embedding-2-preview` (multimodal)
 - Soporta embeder texto, imagenes (PNG/JPEG), PDFs (max 6 pags), video, audio
-- Dimensiones: 768 (configurado via `outputDimensionality`)
+- Dimensiones: 3072 (configurado via `outputDimensionality`)
 - Batch embeddings: concurrencia controlada (~10 en paralelo)
 - Voice: Multimodal Live API via WebSocket (server actua como proxy)
 - Search grounding: habilitado para AutoResearch
