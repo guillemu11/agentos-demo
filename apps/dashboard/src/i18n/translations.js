@@ -224,6 +224,7 @@ export const translations = {
         suggested3: 'Que KPIs tenemos registrados?',
         suggested4: 'Hay imagenes de la campana?',
         errorStream: 'Error al conectar con el asistente',
+        errorTimeout: 'La solicitud ha excedido el tiempo limite (60s). Intenta de nuevo.',
         namespaceAll: 'Todas las areas',
         emailPreview: 'Preview del email',
         viewCode: 'Ver codigo',
@@ -231,6 +232,21 @@ export const translations = {
         copyHtml: 'Copiar HTML',
         viewPage: 'Ver pagina',
         mediaResults: 'Contenido visual',
+        citation: 'Cita',
+        pdfPage: 'Pagina',
+        loadingMedia: 'Cargando...',
+        mediaError: 'Error al cargar',
+        relevance: 'relevancia',
+        voice: {
+          mode: 'Modo voz',
+          searching: 'Buscando en la base de conocimiento...',
+          error: 'Error en la sesion de voz',
+          notAvailable: 'Voz no disponible. Verifica que Gemini este configurado.',
+          sessionExpiring: 'La sesion de voz expirara pronto',
+          micPermission: 'Se requiere permiso de microfono',
+          mediaViewing: 'Contenido visual',
+          mediaOf: 'de',
+        },
       },
     },
 
@@ -804,6 +820,7 @@ export const translations = {
     inboxPage: {
       title: 'Project Manager',
       subtitle: 'Captura ideas, refinalas con el PM Agent, y conviertelas en proyectos.',
+      showItems: 'Ver ideas',
     },
 
     // WorkflowsHub
@@ -1078,6 +1095,9 @@ export const translations = {
       ready: 'Listo',
       notSupported: 'Voz no soportada en este navegador',
       endCall: 'Terminar llamada',
+      you: 'Tu',
+      mute: 'Silenciar',
+      unmute: 'Activar microfono',
     },
 
     // Marina — Documentation Agent
@@ -1366,6 +1386,7 @@ export const translations = {
         suggested3: 'What KPIs do we have recorded?',
         suggested4: 'Any images from the campaign?',
         errorStream: 'Error connecting to assistant',
+        errorTimeout: 'Request timed out (60s). Please try again.',
         namespaceAll: 'All areas',
         emailPreview: 'Email preview',
         viewCode: 'View code',
@@ -1373,6 +1394,21 @@ export const translations = {
         copyHtml: 'Copy HTML',
         viewPage: 'View page',
         mediaResults: 'Visual content',
+        citation: 'Citation',
+        pdfPage: 'Page',
+        loadingMedia: 'Loading...',
+        mediaError: 'Failed to load',
+        relevance: 'relevance',
+        voice: {
+          mode: 'Voice mode',
+          searching: 'Searching the knowledge base...',
+          error: 'Voice session error',
+          notAvailable: 'Voice not available. Check Gemini configuration.',
+          sessionExpiring: 'Voice session will expire soon',
+          micPermission: 'Microphone permission required',
+          mediaViewing: 'Visual content',
+          mediaOf: 'of',
+        },
       },
     },
 
@@ -1922,6 +1958,7 @@ export const translations = {
     inboxPage: {
       title: 'Project Manager',
       subtitle: 'Capture ideas, refine them with the PM Agent, and turn them into projects.',
+      showItems: 'Show ideas',
     },
 
     workflows: {
@@ -2191,6 +2228,9 @@ export const translations = {
       ready: 'Ready',
       notSupported: 'Voice not supported in this browser',
       endCall: 'End call',
+      you: 'You',
+      mute: 'Mute',
+      unmute: 'Unmute',
     },
 
     // Marina — Documentation Agent

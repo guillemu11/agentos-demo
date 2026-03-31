@@ -14,6 +14,24 @@ export const EMBEDDING_DIMENSIONS = 3072;
 const MAX_CONCURRENT = 10;
 
 /**
+ * Retry a function with exponential backoff on transient errors (429, 500, 503).
+ */
+async function withRetry(fn, maxRetries = 3) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (err) {
+            const status = err?.status || err?.httpStatusCode || (err?.message?.includes('429') ? 429 : 0);
+            const isRetryable = [429, 500, 503].includes(status) || /resource.exhausted|rate.limit|unavailable/i.test(err.message);
+            if (!isRetryable || attempt === maxRetries) throw err;
+            const delay = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+            console.warn(`[Gemini] Retry ${attempt + 1}/${maxRetries} after ${Math.round(delay)}ms — ${err.message?.slice(0, 80)}`);
+            await new Promise(r => setTimeout(r, delay));
+        }
+    }
+}
+
+/**
  * Initialize the Gemini client.
  * @param {string} apiKey - Google AI API key
  * @returns {GoogleGenAI}
@@ -39,12 +57,14 @@ export function getGeminiClient() {
  */
 export async function embedText(text, taskType = 'RETRIEVAL_QUERY') {
     if (!_client) throw new Error('Gemini not initialized. Call initGemini() first.');
-    const result = await _client.models.embedContent({
-        model: EMBEDDING_MODEL,
-        contents: text,
-        config: { outputDimensionality: EMBEDDING_DIMENSIONS, taskType },
+    return withRetry(async () => {
+        const result = await _client.models.embedContent({
+            model: EMBEDDING_MODEL,
+            contents: text,
+            config: { outputDimensionality: EMBEDDING_DIMENSIONS, taskType },
+        });
+        return result.embeddings[0].values;
     });
-    return result.embeddings[0].values;
 }
 
 /**
@@ -61,11 +81,14 @@ export async function embedBatch(texts) {
     for (let i = 0; i < texts.length; i += MAX_CONCURRENT) {
         const batch = texts.slice(i, i + MAX_CONCURRENT);
         const promises = batch.map((text, j) =>
-            _client.models.embedContent({
-                model: EMBEDDING_MODEL,
-                contents: text,
-                config: { outputDimensionality: EMBEDDING_DIMENSIONS, taskType: 'RETRIEVAL_DOCUMENT' },
-            }).then(r => { results[i + j] = r.embeddings[0].values; })
+            withRetry(async () => {
+                const r = await _client.models.embedContent({
+                    model: EMBEDDING_MODEL,
+                    contents: text,
+                    config: { outputDimensionality: EMBEDDING_DIMENSIONS, taskType: 'RETRIEVAL_DOCUMENT' },
+                });
+                results[i + j] = r.embeddings[0].values;
+            })
         );
         await Promise.all(promises);
     }
@@ -81,12 +104,14 @@ export async function embedBatch(texts) {
  */
 export async function embedImage(base64Data, mimeType) {
     if (!_client) throw new Error('Gemini not initialized. Call initGemini() first.');
-    const result = await _client.models.embedContent({
-        model: EMBEDDING_MODEL,
-        contents: [{ inlineData: { mimeType, data: base64Data } }],
-        config: { outputDimensionality: EMBEDDING_DIMENSIONS, taskType: 'RETRIEVAL_DOCUMENT' },
+    return withRetry(async () => {
+        const result = await _client.models.embedContent({
+            model: EMBEDDING_MODEL,
+            contents: [{ inlineData: { mimeType, data: base64Data } }],
+            config: { outputDimensionality: EMBEDDING_DIMENSIONS, taskType: 'RETRIEVAL_DOCUMENT' },
+        });
+        return result.embeddings[0].values;
     });
-    return result.embeddings[0].values;
 }
 
 /**
@@ -96,12 +121,14 @@ export async function embedImage(base64Data, mimeType) {
  */
 export async function embedPdf(base64Data) {
     if (!_client) throw new Error('Gemini not initialized. Call initGemini() first.');
-    const result = await _client.models.embedContent({
-        model: EMBEDDING_MODEL,
-        contents: [{ inlineData: { mimeType: 'application/pdf', data: base64Data } }],
-        config: { outputDimensionality: EMBEDDING_DIMENSIONS, taskType: 'RETRIEVAL_DOCUMENT' },
+    return withRetry(async () => {
+        const result = await _client.models.embedContent({
+            model: EMBEDDING_MODEL,
+            contents: [{ inlineData: { mimeType: 'application/pdf', data: base64Data } }],
+            config: { outputDimensionality: EMBEDDING_DIMENSIONS, taskType: 'RETRIEVAL_DOCUMENT' },
+        });
+        return result.embeddings[0].values;
     });
-    return result.embeddings[0].values;
 }
 
 /**
@@ -112,16 +139,18 @@ export async function embedPdf(base64Data) {
  */
 export async function extractTextFromImage(base64Data, mimeType) {
     if (!_client) throw new Error('Gemini not initialized. Call initGemini() first.');
-    const result = await _client.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: [{
-            parts: [
-                { inlineData: { mimeType, data: base64Data } },
-                { text: 'Describe this image in detail. If it contains text, extract ALL text exactly as shown. If it is an email screenshot or design, describe the layout and extract all visible copy. Respond in the same language as any text found. If no text, provide a detailed visual description.' },
-            ],
-        }],
+    return withRetry(async () => {
+        const result = await _client.models.generateContent({
+            model: 'gemini-2.0-flash',
+            contents: [{
+                parts: [
+                    { inlineData: { mimeType, data: base64Data } },
+                    { text: 'Describe this image in detail. If it contains text, extract ALL text exactly as shown. If it is an email screenshot or design, describe the layout and extract all visible copy. Respond in the same language as any text found. If no text, provide a detailed visual description.' },
+                ],
+            }],
+        });
+        return result.text || '';
     });
-    return result.text || '';
 }
 
 /**
@@ -131,16 +160,18 @@ export async function extractTextFromImage(base64Data, mimeType) {
  */
 export async function extractTextFromPdfPage(base64Data) {
     if (!_client) throw new Error('Gemini not initialized. Call initGemini() first.');
-    const result = await _client.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: [{
-            parts: [
-                { inlineData: { mimeType: 'application/pdf', data: base64Data } },
-                { text: 'Extract ALL text from this document page. Preserve the original structure including headings, lists, tables, and paragraphs. If the page contains diagrams, flowcharts, screenshots, or other visual elements, describe them in detail (what they show, the flow, connections, labels). Return the extracted text and visual descriptions together.' },
-            ],
-        }],
+    return withRetry(async () => {
+        const result = await _client.models.generateContent({
+            model: 'gemini-2.0-flash',
+            contents: [{
+                parts: [
+                    { inlineData: { mimeType: 'application/pdf', data: base64Data } },
+                    { text: 'Extract ALL text from this document page. Preserve the original structure including headings, lists, tables, and paragraphs. If the page contains diagrams, flowcharts, screenshots, or other visual elements, describe them in detail (what they show, the flow, connections, labels). Return the extracted text and visual descriptions together.' },
+                ],
+            }],
+        });
+        return result.text || '';
     });
-    return result.text || '';
 }
 
 /**
@@ -151,16 +182,18 @@ export async function extractTextFromPdfPage(base64Data) {
  */
 export async function extractTextFromDocument(base64Data, mimeType) {
     if (!_client) throw new Error('Gemini not initialized. Call initGemini() first.');
-    const result = await _client.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: [{
-            parts: [
-                { inlineData: { mimeType, data: base64Data } },
-                { text: 'Extract ALL text from this document. Preserve headings, lists, tables, and paragraph structure. Return only the extracted text, no commentary.' },
-            ],
-        }],
+    return withRetry(async () => {
+        const result = await _client.models.generateContent({
+            model: 'gemini-2.0-flash',
+            contents: [{
+                parts: [
+                    { inlineData: { mimeType, data: base64Data } },
+                    { text: 'Extract ALL text from this document. Preserve headings, lists, tables, and paragraph structure. Return only the extracted text, no commentary.' },
+                ],
+            }],
+        });
+        return result.text || '';
     });
-    return result.text || '';
 }
 
 /**

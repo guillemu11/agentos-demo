@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import renderMarkdown from '../utils/renderMarkdown.js';
-import { Send, Trash2, ChevronDown, ChevronUp, Database, Loader, Mic } from 'lucide-react';
-import KBVoiceOverlay from './KBVoiceOverlay.jsx';
+import { Send, Trash2, ChevronDown, ChevronUp, Database, Loader, Mic, MicOff, PhoneOff, X, FileText, Image as ImageIcon, Mail } from 'lucide-react';
+import { useGeminiLive } from '../hooks/useGeminiLive.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
+const fileUrl = (filePath) => `${API_URL.replace('/api', '')}/api/kb-files/${filePath}`;
 const NAMESPACES = ['campaigns', 'emails', 'images', 'kpis', 'research', 'brand'];
 const STORAGE_KEY = 'kb-chat-messages';
 
@@ -21,24 +22,93 @@ export default function KBChat() {
     const [namespace, setNamespace] = useState('');
     const [lastSources, setLastSources] = useState([]);
     const [sourcesExpanded, setSourcesExpanded] = useState(false);
-    const [htmlSources, setHtmlSources] = useState([]);
+    const [highlightedSource, setHighlightedSource] = useState(null);
+    // Voice state management
     const [voiceActive, setVoiceActive] = useState(false);
+    
+    // Modal state for media
+    const [expandedMedia, setExpandedMedia] = useState(null);
+
     const messagesEndRef = useRef(null);
+
+    // Turn complete handler for voice
+    const handleVoiceTurnComplete = (userText, assistantText, media) => {
+        if (!userText && !assistantText) return;
+        
+        const newMessages = [];
+        if (userText) {
+             newMessages.push({ role: 'user', content: userText });
+         }
+        if (assistantText || (media && media.length > 0)) {
+             newMessages.push({ role: 'assistant', content: assistantText, media: media || [] });
+         }
+         
+        if (newMessages.length > 0) {
+            setMessages(prev => [...prev, ...newMessages]);
+        }
+    };
+
+    // Initialize Gemini Live
+    const {
+        status: voiceStatus,
+        inputTranscript,
+        outputTranscript,
+        mediaResults: voiceMedia,
+        error: voiceError,
+        isMuted,
+        connect: connectVoice,
+        disconnect: disconnectVoice,
+        toggleMute
+    } = useGeminiLive({
+        namespace,
+        lang,
+        onTurnComplete: handleVoiceTurnComplete,
+        onSources: (newSources) => { if (newSources.length > 0) setLastSources(newSources); }
+    });
+
+    const isVoiceConnected = voiceStatus !== 'idle' && voiceStatus !== 'error';
 
     // Persist messages to localStorage
     useEffect(() => {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(messages)); } catch { /* ignore */ }
     }, [messages]);
 
-    // Auto-scroll
+    // Auto-scroll (including transcripts)
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, streaming]);
+    }, [messages, streaming, inputTranscript, outputTranscript]);
 
-    // Handle image clicks (open full-size in new tab)
+    // Cleanup voice on unmount
+    useEffect(() => {
+        return () => disconnectVoice();
+    }, [disconnectVoice]);
+
+    // Handle voice toggle
+    const toggleVoiceSession = () => {
+        if (isVoiceConnected) {
+            disconnectVoice();
+            setVoiceActive(false);
+        } else {
+            connectVoice();
+            setVoiceActive(true);
+        }
+    };
+
+    // Handle image clicks (open modal) and citation clicks
     function handleMessagesClick(e) {
-        if (e.target.tagName === 'IMG' && e.target.closest('.md-content')) {
-            window.open(e.target.src, '_blank');
+        if (e.target.tagName === 'IMG' && e.target.closest('.chat-inline-media-item')) {
+            e.preventDefault();
+            const src = e.target.getAttribute('data-filepath') || e.target.src;
+            setExpandedMedia({ type: 'image', src, title: e.target.alt });
+        }
+        // Citation marker click — expand sources panel and highlight the referenced source
+        const citationEl = e.target.closest('.citation-marker');
+        if (citationEl) {
+            e.preventDefault();
+            const sourceIdx = parseInt(citationEl.dataset.source) - 1;
+            setSourcesExpanded(true);
+            setHighlightedSource(sourceIdx);
+            setTimeout(() => setHighlightedSource(null), 2000);
         }
     }
 
@@ -60,7 +130,7 @@ export default function KBChat() {
             const history = messages.slice(-20);
 
             // Detect visual intent
-            const visualKeywords = /diagrama|diagram|imagen|image|esquema|schema|flujo|flow|chart|screenshot|captura|visual|grafico|gráfico/i;
+            const visualKeywords = /diagrama|diagram|imagen|image|esquema|schema|flujo|flow|chart|screenshot|captura|visual|grafico|gráfico|email|correo|show\s+me|see\s+the|ver\s+el|ver\s+la|mostrar|preview|template|plantilla|pdf|documento/i;
             const visualQuery = visualKeywords.test(msg);
 
             const res = await fetch(`${API_URL}/chat/knowledge`, {
@@ -83,13 +153,6 @@ export default function KBChat() {
                 try { setLastSources(JSON.parse(ragHeader)); } catch { /* ignore */ }
             } else {
                 setLastSources([]);
-            }
-
-            const htmlHeader = res.headers.get('X-HTML-Sources');
-            if (htmlHeader) {
-                try { setHtmlSources(JSON.parse(htmlHeader)); } catch { /* ignore */ }
-            } else {
-                setHtmlSources([]);
             }
 
             let parsedMedia = [];
@@ -251,27 +314,93 @@ export default function KBChat() {
                 )}
 
                 {messages.map((msg, i) => (
-                    <div key={i} className={`chat-bubble ${msg.role}`}>
-                        {msg.role === 'user'
-                            ? msg.content
-                            : msg.content
-                                ? <div className="md-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
-                                : (streaming && i === messages.length - 1 ? '' : '...')
-                        }
-                        {msg.role === 'assistant' && msg.media?.length > 0 && (
-                            <div className="chat-inline-media">
-                                {msg.media.map((m, j) => (
-                                    <a key={j} href={`${API_URL.replace('/api', '')}/api/kb-files/${m.filePath}`} target="_blank" rel="noopener noreferrer" className="chat-inline-media-item" title={m.title}>
-                                        {m.mediaType === 'image'
-                                            ? <img src={`${API_URL.replace('/api', '')}/api/kb-files/${m.filePath}`} alt={m.title} />
-                                            : <div className="chat-inline-pdf"><span>PDF</span><span>p.{m.pageNumber || '?'}</span></div>
-                                        }
-                                    </a>
-                                ))}
+                    <div key={i} className={`chat-line-wrapper ${msg.role}`}>
+                        <div className={`chat-bubble ${msg.role}`}>
+                            {msg.role === 'user'
+                                ? msg.content
+                                : msg.content
+                                    ? <div className="md-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                                    : (streaming && i === messages.length - 1 ? '' : '...')
+                            }
+                            {msg.role === 'assistant' && msg.media?.length > 0 && (
+                                <div className="chat-inline-media">
+                                    {msg.media.map((m, j) => (
+                                        m.mediaType === 'email_html' ? (
+                                            <div key={j} style={{ width: '100%', marginTop: 8 }}>
+                                                <EmailPreview html={m.htmlSource} title={m.title} />
+                                            </div>
+                                        ) : (
+                                            <div key={j} className="chat-inline-media-item" onClick={() => {
+                                                if (m.mediaType === 'image') {
+                                                    setExpandedMedia({ type: 'image', src: fileUrl(m.filePath), title: m.title });
+                                                } else {
+                                                    setExpandedMedia({ type: 'pdf', src: fileUrl(m.filePath), title: m.title, pageNumber: m.pageNumber });
+                                                }
+                                            }}>
+                                                {m.mediaType === 'image'
+                                                    ? <div className="chat-inline-img-wrap">
+                                                        <img src={fileUrl(m.filePath)} alt={m.title} data-filepath={fileUrl(m.filePath)} loading="lazy"
+                                                            onLoad={e => e.target.parentElement.classList.add('loaded')}
+                                                            onError={e => { e.target.style.display = 'none'; e.target.parentElement.classList.add('error'); }}
+                                                        />
+                                                      </div>
+                                                    : <div className="chat-inline-pdf"><FileText size={20} /><span className="chat-inline-pdf-title">{m.title?.slice(0, 20) || 'PDF'}</span><span>p.{m.pageNumber || '?'}</span></div>
+                                                }
+                                            </div>
+                                        )
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                ))}
+
+                {/* Live Voice Transcripts */}
+                {isVoiceConnected && (inputTranscript || outputTranscript || voiceStatus === 'listening' || voiceStatus === 'speaking' || voiceStatus === 'searching') && (
+                    <div className="voice-transcripts-live">
+                        {inputTranscript && (
+                            <div className="chat-line-wrapper user voice-preview">
+                                <div className="chat-bubble user">
+                                    {inputTranscript}
+                                </div>
+                            </div>
+                        )}
+                        {(outputTranscript || voiceStatus === 'searching' || voiceStatus === 'speaking') && (
+                            <div className="chat-line-wrapper assistant voice-preview">
+                                <div className="chat-bubble assistant">
+                                    {outputTranscript ? <div className="md-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(outputTranscript) }} /> : ''}
+                                    {voiceStatus === 'searching' && !outputTranscript && <span style={{ opacity: 0.6, fontStyle: 'italic' }}><Loader size={12} className="spin" style={{ display: 'inline-block', marginRight: 4 }}/> {t('knowledge.voice.searching')}</span>}
+                                    {voiceStatus === 'speaking' && <span className="voice-pulsing-dot" />}
+                                    
+                                    {voiceMedia?.length > 0 && (
+                                        <div className="chat-inline-media">
+                                            {voiceMedia.map((m, j) => (
+                                                m.mediaType === 'email_html' ? (
+                                                    <div key={j} style={{ width: '100%', marginTop: 8 }}>
+                                                        <EmailPreview html={m.htmlSource} title={m.title} />
+                                                    </div>
+                                                ) : (
+                                                    <div key={j} className="chat-inline-media-item" onClick={() => {
+                                                        if (m.mediaType === 'image') {
+                                                            setExpandedMedia({ type: 'image', src: fileUrl(m.filePath), title: m.title });
+                                                        } else {
+                                                            window.open(fileUrl(m.filePath), '_blank');
+                                                        }
+                                                    }}>
+                                                        {m.mediaType === 'image'
+                                                            ? <img src={fileUrl(m.filePath)} alt={m.title} data-filepath={fileUrl(m.filePath)} loading="lazy" />
+                                                            : <div className="chat-inline-pdf"><FileText size={24} /><span>PDF</span><span>p.{m.pageNumber || '?'}</span></div>
+                                                        }
+                                                    </div>
+                                                )
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
                     </div>
-                ))}
+                )}
 
                 {streaming && messages[messages.length - 1]?.content === '' && (
                     <div className="chat-typing">
@@ -299,11 +428,16 @@ export default function KBChat() {
                             {lastSources.map((s, i) => (
                                 <span
                                     key={i}
-                                    className="kb-chat-source-item"
-                                    title={`${s.title} — ${(s.score * 100).toFixed(0)}% relevance`}
+                                    className={`kb-chat-source-item${highlightedSource === i ? ' highlighted' : ''}`}
+                                    title={`${s.title} — ${(s.score * 100).toFixed(1)}% relevance — ${s.namespace || ''}`}
                                 >
-                                    {s.title?.slice(0, 35)}{s.title?.length > 35 ? '...' : ''}
-                                    <span style={{ opacity: 0.6, marginLeft: 4 }}>{(s.score * 100).toFixed(0)}%</span>
+                                    <span className="source-index">[{i + 1}]</span>
+                                    {s.mediaType === 'image' ? <ImageIcon size={11} /> :
+                                     s.mediaType === 'pdf_page' ? <FileText size={11} style={{ color: 'var(--primary)' }} /> :
+                                     s.mediaType === 'html_email' ? <Mail size={11} /> :
+                                     <FileText size={11} />}
+                                    {s.title?.slice(0, 30)}{s.title?.length > 30 ? '...' : ''}
+                                    <span style={{ opacity: 0.6, marginLeft: 4 }}>{(s.score * 100).toFixed(1)}%</span>
                                 </span>
                             ))}
                         </div>
@@ -311,44 +445,73 @@ export default function KBChat() {
                 </div>
             )}
 
-            {htmlSources.length > 0 && htmlSources.map((hs, i) => (
-                <EmailPreview key={i} html={hs.htmlSource} title={hs.title} />
-            ))}
-
             {/* Input */}
             <div className="kb-chat-input-row">
-                <input
-                    value={input}
-                    onChange={e => setInput(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder={t('knowledge.chat.placeholder')}
-                    disabled={streaming}
-                />
+                {isVoiceConnected ? (
+                    <div className="voice-active-bar" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px', background: 'var(--primary-soft)', borderRadius: 12, color: 'var(--primary)', fontWeight: 600 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span className={`voice-status-dot ${voiceStatus === 'listening' ? 'pulsing' : ''}`}></span>
+                            {voiceStatus === 'listening' ? t('voice.listening') : 
+                             voiceStatus === 'speaking' ? t('voice.speaking') : 
+                             voiceStatus === 'searching' ? t('knowledge.voice.searching') : t('voice.ready')}
+                            {voiceError && <span style={{ color: 'red', fontSize: '0.8rem', marginLeft: 8 }}>{voiceError}</span>}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                            <button className={`kb-voice-btn-inner ${isMuted ? 'muted' : ''}`} onClick={toggleMute} title={t('voice.mute')}>
+                                {isMuted ? <MicOff size={16} /> : <Mic size={16} />}
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <input
+                        value={input}
+                        onChange={e => setInput(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder={t('knowledge.chat.placeholder')}
+                        disabled={streaming}
+                    />
+                )}
+                
                 <button
-                    className="kb-voice-btn"
-                    onClick={() => setVoiceActive(true)}
+                    className={`kb-voice-btn ${isVoiceConnected ? 'active' : ''}`}
+                    onClick={toggleVoiceSession}
                     disabled={streaming}
-                    title={t('knowledge.voice.mode')}
+                    title={isVoiceConnected ? t('voice.endCall') : t('knowledge.voice.mode')}
+                    style={isVoiceConnected ? { background: '#ef4444', color: 'white', borderColor: '#ef4444' } : {}}
                 >
-                    <Mic size={16} />
+                    {isVoiceConnected ? <PhoneOff size={16} /> : <Mic size={16} />}
                 </button>
-                <button
-                    className="kb-action-btn"
-                    onClick={() => sendMessage()}
-                    disabled={streaming || !input.trim()}
-                    style={{ borderRadius: 12, padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 6 }}
-                >
-                    {streaming ? <Loader size={14} className="spin" /> : <Send size={14} />}
-                    {t('knowledge.chat.send')}
-                </button>
+                
+                {!isVoiceConnected && (
+                    <button
+                        className="kb-action-btn"
+                        onClick={() => sendMessage()}
+                        disabled={streaming || !input.trim()}
+                        style={{ borderRadius: 12, padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
+                        {streaming ? <Loader size={14} className="spin" /> : <Send size={14} />}
+                        {t('knowledge.chat.send')}
+                    </button>
+                )}
             </div>
         </div>
 
-        {voiceActive && (
-            <KBVoiceOverlay
-                namespace={namespace}
-                onClose={() => setVoiceActive(false)}
-            />
+        {/* Media Expansion Modal */}
+        {expandedMedia && (
+            <div className="kb-media-modal" onClick={() => setExpandedMedia(null)}>
+                <button className="kb-media-modal-close" onClick={() => setExpandedMedia(null)}>
+                    <X size={24} />
+                </button>
+                <div className="kb-media-modal-content" onClick={e => e.stopPropagation()}>
+                    {expandedMedia.type === 'image' && (
+                        <img src={expandedMedia.src} alt={expandedMedia.title} className="kb-media-modal-img" />
+                    )}
+                    {expandedMedia.type === 'pdf' && (
+                        <iframe src={expandedMedia.src} title={expandedMedia.title} className="kb-media-modal-pdf" />
+                    )}
+                    <div className="kb-media-modal-title">{expandedMedia.title}</div>
+                </div>
+            </div>
         )}
         </>
     );

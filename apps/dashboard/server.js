@@ -3855,7 +3855,7 @@ app.post('/api/chat/knowledge', requireAuth, async (req, res) => {
         const namespaces = namespace ? [namespace] : allNamespaces;
 
         // Build RAG context (pass visualQuery flag for boosted visual retrieval)
-        const ragResult = await buildRAGContext(pool, message, { namespaces, maxTokens: visualQuery ? 3000 : 2000, visualQuery: !!visualQuery, mode: 'text', maxMedia: visualQuery ? 4 : 2 });
+        const ragResult = await buildRAGContext(pool, message, { namespaces, maxTokens: visualQuery ? 4000 : 3000, visualQuery: !!visualQuery, mode: 'text', maxMedia: visualQuery ? 4 : 2 });
 
         // System prompt for conversational KB assistant
         const visualInstruction = visualQuery ? `
@@ -3878,7 +3878,7 @@ The user is asking for a diagram, image, schema, or visual content. You MUST:
 ## Response Rules
 1. Answer conversationally. Synthesize and explain the information — do NOT just list documents or raw data.
 2. When you find relevant information, explain what it is and why it matters.
-3. Cite your sources naturally by document title in your response.
+3. Cite your sources using numbered references [1], [2], etc. that match the source numbers in the knowledge context. Place citations inline after the relevant claim. Example: "The campaign has 18% open rate [1]."
 4. For images in the knowledge base, embed them inline using markdown: ![Document Title](/api/kb-files/{filePath})
 5. For PDF pages with diagrams or visual content, embed them inline using: ![Page X - Document Title](/api/kb-files/{filePath})
    When the context includes [VISUAL PAGE: url], ALWAYS embed that page using ![description](url) so the user can see the actual diagram or visual content.
@@ -4399,7 +4399,7 @@ CRITICAL INSTRUCTIONS:
 
                                     try {
                                         const namespaces = namespace ? [namespace] : KB_NAMESPACES;
-                                        const RAG_TIMEOUT_MS = 15000;
+                                        const RAG_TIMEOUT_MS = 45000;
                                         const ragPromise = buildRAGContext(pool, query, {
                                             namespaces,
                                             maxTokens: 1500,
@@ -4431,12 +4431,8 @@ CRITICAL INSTRUCTIONS:
 
                                         ws.send(JSON.stringify({ type: 'rag-sources', sources: sources || [] }));
                                         
-                                        // Only send media results back to the frontend if the AI requested visual content
-                                        if (needsVisuals && mediaResults && mediaResults.length > 0) {
-                                            ws.send(JSON.stringify({ type: 'rag-media', media: mediaResults }));
-                                        } else {
-                                            ws.send(JSON.stringify({ type: 'rag-media', media: [] }));
-                                        }
+                                        // Always send media results to frontend — user can see the screen even in voice mode
+                                        ws.send(JSON.stringify({ type: 'rag-media', media: mediaResults || [] }));
                                     } catch (ragErr) {
                                         console.error('[Voice KB] RAG error:', ragErr.message);
                                         session.sendToolResponse({

@@ -122,6 +122,7 @@ export async function ingestDocument(pool, doc) {
         }
 
         // 5. Upsert to Pinecone
+        if (vectors.length === 0) throw new Error('Produced 0 embeddings from text — check Gemini API logs');
         await upsertVectors(namespace, vectors);
 
         // 6. Save chunks to PostgreSQL
@@ -320,8 +321,16 @@ export async function ingestImageFile(pool, { filePath, relativePath, title, nam
         const embedding = await embedText(content, 'RETRIEVAL_DOCUMENT');
         const pineconeId = `doc-${documentId}-chunk-0`;
 
-        // 4. Upsert to Pinecone
-        await upsertVectors(namespace, [{
+        // 4. Also embed image natively for visual similarity search
+        let nativeEmbedding = null;
+        try {
+            nativeEmbedding = await embedImage(base64, mimeType);
+        } catch (err) {
+            console.warn(`[KB] Native image embedding failed for "${title}": ${err.message}`);
+        }
+
+        // 5. Upsert vectors to Pinecone (text description + optional native visual)
+        const vectors = [{
             id: pineconeId,
             values: embedding,
             metadata: {
@@ -337,22 +346,49 @@ export async function ingestImageFile(pool, { filePath, relativePath, title, nam
                 extraction_method: 'gemini-vision',
                 content_preview: content.slice(0, 200),
             },
-        }]);
+        }];
+        if (nativeEmbedding) {
+            vectors.push({
+                id: `${pineconeId}-visual`,
+                values: nativeEmbedding,
+                metadata: {
+                    ...metadata,
+                    document_id: documentId,
+                    chunk_index: 1,
+                    namespace,
+                    source_type: sourceType,
+                    title,
+                    media_type: 'image',
+                    file_path: relativePath,
+                    embedding_type: 'native_visual',
+                    content_preview: content.slice(0, 200),
+                },
+            });
+        }
+        await upsertVectors(namespace, vectors);
+        const chunkCount = nativeEmbedding ? 2 : 1;
 
-        // 5. Save chunk to PostgreSQL
+        // 6. Save chunks to PostgreSQL
         await pool.query(
             `INSERT INTO knowledge_chunks (document_id, chunk_index, content, pinecone_id, metadata, media_type, file_path)
              VALUES ($1, 0, $2, $3, $4, 'image', $5)`,
             [documentId, content, pineconeId, JSON.stringify({ mimeType, image_description: content, extraction_method: 'gemini-vision' }), relativePath]
         );
+        if (nativeEmbedding) {
+            await pool.query(
+                `INSERT INTO knowledge_chunks (document_id, chunk_index, content, pinecone_id, metadata, media_type, file_path)
+                 VALUES ($1, 1, $2, $3, $4, 'image', $5)`,
+                [documentId, content, `${pineconeId}-visual`, JSON.stringify({ mimeType, embedding_type: 'native_visual' }), relativePath]
+            );
+        }
 
-        // 6. Update status
+        // 7. Update status
         await pool.query(
-            `UPDATE knowledge_documents SET status = 'indexed', chunk_count = 1 WHERE id = $1`,
-            [documentId]
+            `UPDATE knowledge_documents SET status = 'indexed', chunk_count = $1 WHERE id = $2`,
+            [chunkCount, documentId]
         );
 
-        return { documentId, chunksCreated: 1, contentType: 'image' };
+        return { documentId, chunksCreated: chunkCount, contentType: 'image' };
     } catch (err) {
         await pool.query(`UPDATE knowledge_documents SET status = 'error', error_message = $1 WHERE id = $2`, [err.message, documentId]);
         throw err;
@@ -457,6 +493,10 @@ export async function ingestPdfFile(pool, { filePath, relativePath, title, names
         }
 
         // 4. Upsert all page vectors to Pinecone
+        if (vectors.length === 0) {
+            throw new Error(`PDF has ${pageBase64s.length} pages but produced 0 embeddings — check Gemini API logs`);
+        }
+        console.log(`[KB] Upserting ${vectors.length} vectors to Pinecone namespace "${namespace}"...`);
         await upsertVectors(namespace, vectors);
 
         // 5. Save chunks to PostgreSQL (each chunk points to its individual page file)
@@ -572,6 +612,7 @@ export async function ingestHtmlFile(pool, { filePath, relativePath, title, name
         }
 
         // 5. Upsert to Pinecone
+        if (vectors.length === 0) throw new Error('Produced 0 embeddings — check Gemini API logs');
         await upsertVectors(namespace, vectors);
 
         // 6. Save chunks to PostgreSQL
@@ -683,6 +724,7 @@ export async function ingestWordFile(pool, { filePath, relativePath, title, name
         }
 
         // 6. Upsert to Pinecone
+        if (vectors.length === 0) throw new Error('Produced 0 embeddings from DOCX — check Gemini API logs');
         await upsertVectors(namespace, vectors);
 
         // 7. Save chunks to PostgreSQL

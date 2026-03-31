@@ -53,8 +53,8 @@ export default function renderMarkdown(text) {
       if (url.toLowerCase().endsWith('.pdf')) {
         return storePlaceholder(
           `<div class="pdf-page-embed">` +
-          `<embed src="${url}" type="application/pdf" />` +
-          `<a href="${url}" target="_blank" rel="noopener noreferrer" class="pdf-page-link">${alt || 'Ver página PDF'}</a>` +
+          `<iframe src="${url}" title="${alt || 'PDF page'}" loading="lazy"></iframe>` +
+          `<a href="${url}" target="_blank" rel="noopener noreferrer" class="pdf-page-link">${alt || 'Ver página PDF'} ↗</a>` +
           `</div>`
         );
       }
@@ -67,6 +67,13 @@ export default function renderMarkdown(text) {
   result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
   );
+
+  // 5.5. Citation markers [1], [2], etc. — after links to avoid collisions
+  result = result.replace(/\[(\d{1,2})\]/g, (_, num) => {
+    return storePlaceholder(
+      `<sup class="citation-marker" data-source="${num}">[${num}]</sup>`
+    );
+  });
 
   // 6. Bold
   result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');

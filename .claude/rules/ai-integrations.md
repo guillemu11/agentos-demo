@@ -47,10 +47,16 @@ paths:
 ## RAG Pipeline
 
 - Chunking: 500 tokens por chunk, 50 tokens de overlap
-- Retrieval: top-5 resultados, score minimo 0.7
-- Contexto RAG se inyecta en system prompt como `[CONOCIMIENTO RELEVANTE]`
-- Maximo 2000 tokens de contexto RAG para no saturar el prompt
+- Retrieval: top-12 resultados (20 para visual), score minimo 0.45 (0.3 para visual)
+- **Reranking**: Pinecone cross-encoder `bge-reranker-v2-m3` despues de retrieval coseno
+- Threshold adaptativo: si top result > 0.8, filtrar resultados < topScore * 0.5
+- Contexto RAG se inyecta en system prompt como `[RELEVANT KNOWLEDGE]`
+- Maximo 3000 tokens de contexto RAG (4000 para visual queries)
+- **Citaciones numeradas**: bloques RAG usan `[1] Source:`, `[2] Source:` para referencia inline
+- System prompt instruye al LLM a citar con `[1]`, `[2]` inline
+- Media attachment threshold: score >= 0.5 (imagenes se muestran en voice mode tambien)
 - Los 3 chat endpoints deben incluir RAG: pm-agent, agent/:agentId, campaign/:campaignId
+- Image ingestion genera 2 embeddings: texto (descripcion) + nativo visual (embedImage)
 
 ## Patron SSE (Server-Sent Events)
 

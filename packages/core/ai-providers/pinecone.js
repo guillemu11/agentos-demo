@@ -126,6 +126,22 @@ export function getIndexName() {
 }
 
 /**
+ * Rerank documents against a query using Pinecone's cross-encoder model.
+ * @param {string} query - The query to rerank against
+ * @param {{ text: string }[]} documents - Array of objects with a 'text' field
+ * @param {{ topN?: number, rankFields?: string[] }} options
+ * @returns {Promise<{ data: { index: number, score: number, document: object }[] }>}
+ */
+export async function rerankResults(query, documents, options = {}) {
+    if (!_client) throw new Error('Pinecone not initialized.');
+    if (!documents.length) return { data: [] };
+    const { topN = 5, rankFields = ['text'] } = options;
+    return _client.inference.rerank('bge-reranker-v2-m3', query, documents, {
+        topN, returnDocuments: true, rankFields,
+    });
+}
+
+/**
  * Check if Pinecone is initialized and ready.
  */
 export function isPineconeReady() {

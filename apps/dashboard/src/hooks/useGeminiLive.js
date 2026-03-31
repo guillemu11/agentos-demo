@@ -44,33 +44,19 @@ function float32ToInt16Base64(float32Array) {
     return btoa(String.fromCharCode.apply(null, bytes));
 }
 
-function base64ToFloat32(base64, inputSampleRate, outputSampleRate) {
+function base64ToFloat32(base64) {
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     const int16 = new Int16Array(bytes.buffer);
-    let float32 = new Float32Array(int16.length);
+    const float32 = new Float32Array(int16.length);
     for (let i = 0; i < int16.length; i++) {
         float32[i] = int16[i] / (int16[i] < 0 ? 0x8000 : 0x7FFF);
-    }
-    // Resample if needed
-    if (inputSampleRate && outputSampleRate && inputSampleRate !== outputSampleRate) {
-        const ratio = outputSampleRate / inputSampleRate;
-        const newLength = Math.round(float32.length * ratio);
-        const resampled = new Float32Array(newLength);
-        for (let i = 0; i < newLength; i++) {
-            const srcIdx = i / ratio;
-            const lo = Math.floor(srcIdx);
-            const hi = Math.min(lo + 1, float32.length - 1);
-            const frac = srcIdx - lo;
-            resampled[i] = float32[lo] * (1 - frac) + float32[hi] * frac;
-        }
-        float32 = resampled;
     }
     return float32;
 }
 
-export function useGeminiLive({ namespace, lang = 'es', onSources }) {
+export function useGeminiLive({ namespace, lang = 'es', onSources, onTurnComplete }) {
     const [status, setStatus] = useState('idle'); // idle|connecting|connected|listening|speaking|searching|error
     const [inputTranscript, setInputTranscript] = useState('');
     const [outputTranscript, setOutputTranscript] = useState('');
@@ -84,72 +70,53 @@ export function useGeminiLive({ namespace, lang = 'es', onSources }) {
     const captureCtxRef = useRef(null);
     const workletNodeRef = useRef(null);
     const playbackCtxRef = useRef(null);
-    const audioQueueRef = useRef([]);
-    const isPlayingRef = useRef(false);
-    const currentSourceRef = useRef(null);
+    const scheduledSourcesRef = useRef([]);
+    const nextAudioTimeRef = useRef(0);
     const gainNodeRef = useRef(null);
     const onSourcesRef = useRef(onSources);
+    const onTurnCompleteRef = useRef(onTurnComplete);
     const turnCompleteRef = useRef(false);
     // Refs to avoid stale closures in audio callbacks
     const isMutedRef = useRef(false);
     const statusRef = useRef('idle');
     const fallbackBufferRef = useRef([]);
+    const inputTranscriptRef = useRef('');
+    const outputTranscriptRef = useRef('');
+    const mediaResultsRef = useRef([]);
 
     useEffect(() => { onSourcesRef.current = onSources; }, [onSources]);
+    useEffect(() => { onTurnCompleteRef.current = onTurnComplete; }, [onTurnComplete]);
     useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
     useEffect(() => { statusRef.current = status; }, [status]);
-
-    // Play queued audio buffers sequentially
-    const playNext = useCallback(() => {
-        const ctx = playbackCtxRef.current;
-        if (!ctx || audioQueueRef.current.length === 0) {
-            isPlayingRef.current = false;
-            currentSourceRef.current = null;
-            if (turnCompleteRef.current) {
-                setInputTranscript('');
-                setOutputTranscript('');
-                turnCompleteRef.current = false;
-                // Delay before reopening mic to let residual speaker audio dissipate
-                setTimeout(() => {
-                    statusRef.current = 'listening';
-                    setStatus('listening');
-                }, 400);
-            }
-            return;
-        }
-
-        isPlayingRef.current = true;
-        const float32 = audioQueueRef.current.shift();
-        const buffer = ctx.createBuffer(1, float32.length, ctx.sampleRate);
-        buffer.getChannelData(0).set(float32);
-
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(gainNodeRef.current || ctx.destination);
-        source.onended = playNext;
-        source.start();
-        currentSourceRef.current = source;
-    }, []);
+    useEffect(() => { inputTranscriptRef.current = inputTranscript; }, [inputTranscript]);
+    useEffect(() => { outputTranscriptRef.current = outputTranscript; }, [outputTranscript]);
+    useEffect(() => { mediaResultsRef.current = mediaResults; }, [mediaResults]);
 
     const stopPlayback = useCallback(() => {
-        audioQueueRef.current = [];
         const gain = gainNodeRef.current;
-        if (currentSourceRef.current && gain) {
+        if (scheduledSourcesRef.current.length > 0 && gain) {
             // 50ms fade-out to avoid audio pop
             const now = gain.context.currentTime;
             gain.gain.setValueAtTime(gain.gain.value, now);
             gain.gain.linearRampToValueAtTime(0, now + 0.05);
-            const srcToStop = currentSourceRef.current;
-            currentSourceRef.current = null;
+            
+            const sourcesToStop = [...scheduledSourcesRef.current];
+            scheduledSourcesRef.current = [];
+            nextAudioTimeRef.current = 0;
+            
             setTimeout(() => {
-                try { srcToStop.stop(); } catch { /* ignore */ }
+                sourcesToStop.forEach(s => {
+                    try { s.stop(); } catch { /* ignore */ }
+                });
                 gain.gain.setValueAtTime(1, gain.context.currentTime);
             }, 60);
-        } else if (currentSourceRef.current) {
-            try { currentSourceRef.current.stop(); } catch { /* ignore */ }
-            currentSourceRef.current = null;
+        } else {
+            scheduledSourcesRef.current.forEach(s => {
+                try { s.stop(); } catch { /* ignore */ }
+            });
+            scheduledSourcesRef.current = [];
+            nextAudioTimeRef.current = 0;
         }
-        isPlayingRef.current = false;
     }, []);
 
     // Cleanup all audio resources (reusable for error/close paths)
@@ -168,12 +135,16 @@ export function useGeminiLive({ namespace, lang = 'es', onSources }) {
     }, [stopPlayback]);
 
     const connect = useCallback(async () => {
+        if (statusRef.current !== 'idle') return;
         if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
 
+        statusRef.current = 'connecting';
         setStatus('connecting');
         setError(null);
         setInputTranscript('');
+        inputTranscriptRef.current = '';
         setOutputTranscript('');
+        outputTranscriptRef.current = '';
         setSources([]);
         setMediaResults([]);
 
@@ -291,41 +262,72 @@ export function useGeminiLive({ namespace, lang = 'es', onSources }) {
                     case 'audio': {
                         statusRef.current = 'speaking'; // Sync ref — blocks mic immediately
                         setStatus('speaking');
-                        const inputRate = 24000;
-                        const outputRate = playbackCtx.sampleRate;
-                        const float32 = base64ToFloat32(msg.data, inputRate, outputRate);
-                        // Cap queue to prevent unbounded growth during RAG delays
-                        const MAX_QUEUE = 20;
-                        if (audioQueueRef.current.length >= MAX_QUEUE) {
-                            audioQueueRef.current.splice(0, audioQueueRef.current.length - MAX_QUEUE + 1);
+                        const float32 = base64ToFloat32(msg.data);
+                        
+                        const ctx = playbackCtxRef.current;
+                        if (!ctx) break;
+
+                        const buffer = ctx.createBuffer(1, float32.length, 24000);
+                        buffer.getChannelData(0).set(float32);
+
+                        const source = ctx.createBufferSource();
+                        source.buffer = buffer;
+                        source.connect(gainNodeRef.current || ctx.destination);
+
+                        // If audio engine is hungry, skip slightly ahead of current time to prevent underrun
+                        if (nextAudioTimeRef.current < ctx.currentTime) {
+                            nextAudioTimeRef.current = ctx.currentTime + 0.1; // 100ms jitter buffer
                         }
-                        audioQueueRef.current.push(float32);
-                        if (!isPlayingRef.current) playNext();
+
+                        source.start(nextAudioTimeRef.current);
+                        nextAudioTimeRef.current += buffer.duration;
+                        
+                        scheduledSourcesRef.current.push(source);
+                        
+                        // Cleanup old sources to prevent memory leaks
+                        source.onended = () => {
+                            const idx = scheduledSourcesRef.current.indexOf(source);
+                            if (idx > -1) scheduledSourcesRef.current.splice(idx, 1);
+                        };
                         break;
                     }
 
                     case 'input-transcript':
                         setInputTranscript(msg.text);
+                        inputTranscriptRef.current = msg.text;
                         break;
 
                     case 'output-transcript':
-                        setOutputTranscript(prev => prev + msg.text);
+                        setOutputTranscript(prev => {
+                            const next = prev + msg.text;
+                            outputTranscriptRef.current = next;
+                            return next;
+                        });
                         break;
 
-                    case 'turn-complete':
-                        turnCompleteRef.current = true;
-                        // Don't clear transcripts here — wait for audio queue to drain in playNext()
-                        if (!isPlayingRef.current) {
-                            setInputTranscript('');
-                            setOutputTranscript('');
-                            turnCompleteRef.current = false;
-                            // Delay before reopening mic to let residual speaker audio dissipate
-                            setTimeout(() => {
+                    case 'turn-complete': {
+                        const ctx = playbackCtxRef.current;
+                        let delayMs = 0;
+                        if (ctx && nextAudioTimeRef.current > ctx.currentTime) {
+                            delayMs = (nextAudioTimeRef.current - ctx.currentTime) * 1000;
+                        }
+                        
+                        setTimeout(() => {
+                            // As long as the user hasn't disconnected
+                            if (statusRef.current !== 'idle') {
+                                if (inputTranscriptRef.current || outputTranscriptRef.current) {
+                                    onTurnCompleteRef.current?.(inputTranscriptRef.current, outputTranscriptRef.current, mediaResultsRef.current);
+                                    setInputTranscript('');
+                                    inputTranscriptRef.current = '';
+                                    setOutputTranscript('');
+                                    outputTranscriptRef.current = '';
+                                }
                                 statusRef.current = 'listening';
                                 setStatus('listening');
-                            }, 400);
-                        }
+                            }
+                        }, delayMs + 500); // Slight extra padding guarantees the trailing voice is completely done
                         break;
+                    }
 
                     case 'interrupted':
                         stopPlayback();
@@ -380,7 +382,7 @@ export function useGeminiLive({ namespace, lang = 'es', onSources }) {
             }
             cleanupAudio();
         };
-    }, [namespace, lang, playNext, stopPlayback, cleanupAudio]);
+    }, [namespace, lang, stopPlayback, cleanupAudio]);
 
     const disconnect = useCallback(() => {
         // Close WebSocket first

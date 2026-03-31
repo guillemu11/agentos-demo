@@ -7,7 +7,7 @@ const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 const DEPARTMENTS = ['data', 'seo', 'dev', 'content', 'sales', 'marketing', 'design', 'product'];
 
-export default function InboxPanel({ department, selectedId, onSelectItem, onDeleted, readOnly = false }) {
+export default function InboxPanel({ department, selectedId, onSelectItem, onDeleted, onClose, readOnly = false }) {
     const { t, lang } = useLanguage();
     const [items, setItems] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -15,11 +15,11 @@ export default function InboxPanel({ department, selectedId, onSelectItem, onDel
     const [quickTitle, setQuickTitle] = useState('');
     const [quickDept, setQuickDept] = useState(department || '');
 
-    const STATUS_FILTERS = [
+    const STATUS_OPTIONS = [
         { value: 'all', label: t('inboxPanel.all') },
-        { value: 'chat', label: <>{InboxIcons.chat} {t('inboxPanel.chat')}</> },
-        { value: 'borrador', label: <>{InboxIcons.draft} {t('inboxPanel.draft')}</> },
-        { value: 'proyecto', label: <>{InboxIcons.project} {t('inboxPanel.project')}</> },
+        { value: 'chat', label: t('inboxPanel.chat') },
+        { value: 'borrador', label: t('inboxPanel.draft') },
+        { value: 'proyecto', label: t('inboxPanel.project') },
         { value: 'discarded', label: t('inboxPanel.discarded') },
     ];
 
@@ -78,21 +78,36 @@ export default function InboxPanel({ department, selectedId, onSelectItem, onDel
 
     return (
         <div>
-            <div className="inbox-header-row">
+            {/* Drawer header */}
+            <div className="inbox-drawer-header">
                 <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)', margin: 0 }}>
                     {t('inboxPanel.inbox')}
                 </h2>
-                {!readOnly && (
-                    <button
-                        className="back-button"
-                        style={{ background: '#FF385C', color: '#fff', fontSize: '0.82rem', padding: '8px 16px' }}
-                        onClick={() => onSelectItem(null)}
-                    >
-                        {t('inboxPanel.newIdea')}
-                    </button>
-                )}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {!readOnly && (
+                        <button
+                            className="inbox-new-idea-btn"
+                            onClick={() => onSelectItem(null)}
+                        >
+                            + {t('inboxPanel.newIdea')}
+                        </button>
+                    )}
+                    {onClose && (
+                        <button className="inbox-drawer-close" onClick={onClose} aria-label="Close">&times;</button>
+                    )}
+                </div>
             </div>
 
+            {/* Status filter dropdown */}
+            <select
+                className="inbox-drawer-filter"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+            >
+                {STATUS_OPTIONS.map(f => (
+                    <option key={f.value} value={f.value}>{f.label}</option>
+                ))}
+            </select>
             {/* Quick add */}
             {!readOnly && (
                 <form className="inbox-quick-add" onSubmit={handleQuickAdd}>
@@ -110,19 +125,6 @@ export default function InboxPanel({ department, selectedId, onSelectItem, onDel
                     <button type="submit">{t('inboxPanel.add')}</button>
                 </form>
             )}
-
-            {/* Status filters */}
-            <div className="inbox-filters">
-                {STATUS_FILTERS.map(f => (
-                    <button
-                        key={f.value}
-                        className={`inbox-filter-pill ${statusFilter === f.value ? 'active' : ''}`}
-                        onClick={() => setStatusFilter(f.value)}
-                    >
-                        {f.label}
-                    </button>
-                ))}
-            </div>
 
             {/* Items list */}
             {loading ? (

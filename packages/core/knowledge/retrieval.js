@@ -5,11 +5,11 @@
  */
 
 import { embedText, isGeminiReady } from '../ai-providers/gemini.js';
-import { queryVectors, isPineconeReady } from '../ai-providers/pinecone.js';
+import { queryVectors, isPineconeReady, rerankResults } from '../ai-providers/pinecone.js';
 
 const DEFAULT_TOP_K = 5;
-const DEFAULT_MIN_SCORE = 0.3;
-const DEFAULT_MAX_TOKENS = 2000;
+const DEFAULT_MIN_SCORE = 0.45;
+const DEFAULT_MAX_TOKENS = 3000;
 
 // ─── Search ─────────────────────────────────────────────────────────────────
 
@@ -34,7 +34,20 @@ export async function searchKnowledge(pool, query, options = {}) {
     const matches = await queryVectors(searchNamespace, embedding, { topK, filter });
 
     // 3. Filter by minimum score
-    const filtered = matches.filter(m => m.score >= minScore);
+    let filtered = matches.filter(m => m.score >= minScore);
+
+    // 3.5 Rerank with cross-encoder for better precision
+    if (filtered.length > 1) {
+        try {
+            const docs = filtered.map(m => ({ text: m.metadata?.content_preview || m.id, _match: m }));
+            const reranked = await rerankResults(query, docs.map(d => ({ text: d.text })), { topN: topK });
+            if (reranked?.data?.length) {
+                filtered = reranked.data.map(r => docs[r.index]._match);
+            }
+        } catch (err) {
+            console.warn('[KB] Reranking failed, using cosine order:', err.message);
+        }
+    }
 
     // 4. Enrich with chunk content from DB
     const results = [];
@@ -98,9 +111,25 @@ export async function searchMultiNamespace(pool, query, namespaces, { topK = DEF
         }
     }
 
-    // Sort by score descending, deduplicate by document_id
+    // Sort by score descending
     allMatches.sort((a, b) => b.score - a.score);
 
+    // Rerank with cross-encoder for better precision
+    if (allMatches.length > 1) {
+        try {
+            const docs = allMatches.map(m => ({ text: m.metadata?.content_preview || m.id, _match: m }));
+            const reranked = await rerankResults(query, docs.map(d => ({ text: d.text })), { topN: Math.min(allMatches.length, topK * 2) });
+            if (reranked?.data?.length) {
+                const rerankedMatches = reranked.data.map(r => docs[r.index]._match);
+                allMatches.length = 0;
+                allMatches.push(...rerankedMatches);
+            }
+        } catch (err) {
+            console.warn('[KB] Multi-namespace reranking failed, using cosine order:', err.message);
+        }
+    }
+
+    // Deduplicate by document_id
     const seen = new Set();
     const deduped = [];
     for (const match of allMatches) {
@@ -112,8 +141,8 @@ export async function searchMultiNamespace(pool, query, namespaces, { topK = DEF
         }
     }
 
-    // Ensure namespace diversity: take top-2 per namespace, then fill remaining slots by score
-    const maxPerNamespace = 2;
+    // Ensure namespace diversity: dynamic cap per namespace based on search breadth
+    const maxPerNamespace = Math.max(2, Math.ceil(topK / namespaces.length));
     const nsCounts = {};
     const diverseResults = [];
     const overflow = [];
@@ -187,15 +216,21 @@ export async function buildRAGContext(pool, query, options = {}) {
 
     // When user asks for visual content, cast a wider net and lower threshold
     const topK = visualQuery ? 20 : 12;
-    const minScore = visualQuery ? 0.2 : 0.3;
+    const minScore = visualQuery ? 0.3 : 0.45;
 
     let results = await searchMultiNamespace(pool, query, namespaces, { topK, filter, minScore });
 
-    // Boost visual results (pdf_page, image) to top when user asks for diagrams/visuals
+    // Adaptive threshold: if top result is very strong, filter out comparatively weak results
+    if (results.length > 1 && results[0].score > 0.8) {
+        const adaptiveMin = results[0].score * 0.5;
+        results = results.filter(r => r.score >= adaptiveMin);
+    }
+
+    // Boost visual results to top when user asks for visuals (images > pdf_page > text)
     if (visualQuery && results.length > 0) {
         results.sort((a, b) => {
-            const aVisual = (a.mediaType === 'pdf_page' || a.mediaType === 'image') ? 1 : 0;
-            const bVisual = (b.mediaType === 'pdf_page' || b.mediaType === 'image') ? 1 : 0;
+            const aVisual = a.mediaType === 'image' ? 2 : (a.mediaType === 'pdf_page' ? 1 : 0);
+            const bVisual = b.mediaType === 'image' ? 2 : (b.mediaType === 'pdf_page' ? 1 : 0);
             if (bVisual !== aVisual) return bVisual - aVisual;
             return b.score - a.score;
         });
@@ -212,25 +247,30 @@ export async function buildRAGContext(pool, query, options = {}) {
     const usedSources = [];
     const mediaResults = [];
 
-    const MEDIA_SCORE_THRESHOLD = 0.7;
+    const MEDIA_SCORE_THRESHOLD = 0.5;
 
     for (const result of results) {
+        const sourceNum = usedSources.length + 1;
         let block;
         if (result.mediaType === 'image') {
             const hasDesc = result.content && !result.content.startsWith('[Image:');
-            block = `---\nSource: ${result.documentTitle} (score: ${result.score})\n${hasDesc ? result.content + '\n' : ''}${result.filePath ? `[IMAGE: /api/kb-files/${result.filePath}]` : ''}\n`;
-            // Only attach image if: visualQuery OR (text mode + high score)
+            block = `---\n[${sourceNum}] Source: ${result.documentTitle} (score: ${result.score})\n${hasDesc ? result.content + '\n' : ''}${result.filePath ? `[IMAGE: /api/kb-files/${result.filePath}]` : ''}\n`;
+            // Attach image if: visualQuery OR high score (images show on screen even in voice mode)
             const shouldAttach = result.filePath && mediaResults.length < maxMedia && (
-                visualQuery || (mode !== 'voice' && result.score >= MEDIA_SCORE_THRESHOLD)
+                visualQuery || result.score >= MEDIA_SCORE_THRESHOLD
             );
             if (shouldAttach) mediaResults.push({ filePath: result.filePath, mediaType: 'image', score: result.score, title: result.documentTitle });
         } else if (result.mediaType === 'pdf_page') {
             const hasText = result.content && !result.content.startsWith('[PDF:');
             const pageNum = result.metadata?.page_number || '?';
-            block = `---\nSource: ${result.documentTitle} - Page ${pageNum} (score: ${result.score})\n`;
+            block = `---\n[${sourceNum}] Source: ${result.documentTitle} - Page ${pageNum} (score: ${result.score})\n`;
             if (hasText) block += result.content + '\n';
             // Voice mode: NEVER attach PDF pages. Text mode: only if visualQuery or very high score
-            const shouldAttach = result.filePath && mode !== 'voice' && mediaResults.length < maxMedia && (
+            // Reserve 1 slot for images — PDFs can only fill up to (maxMedia - 1) unless no images exist
+            const pdfCount = mediaResults.filter(m => m.mediaType === 'pdf_page').length;
+            const hasImageInResults = results.some(r => r.mediaType === 'image' && r.filePath);
+            const pdfLimit = hasImageInResults ? maxMedia - 1 : maxMedia;
+            const shouldAttach = result.filePath && mode !== 'voice' && pdfCount < pdfLimit && mediaResults.length < maxMedia && (
                 visualQuery || result.score >= MEDIA_SCORE_THRESHOLD
             );
             if (shouldAttach) {
@@ -238,12 +278,22 @@ export async function buildRAGContext(pool, query, options = {}) {
                 mediaResults.push({ filePath: result.filePath, mediaType: 'pdf_page', score: result.score, title: result.documentTitle, pageNumber: pageNum });
             }
         } else {
-            block = `---\nSource: ${result.documentTitle} (score: ${result.score})\n${result.content}\n`;
+            block = `---\n[${sourceNum}] Source: ${result.documentTitle} (score: ${result.score})\n${result.content}\n`;
+            if (result.htmlSource) {
+                const shouldAttachMedia = mediaResults.length < maxMedia && (
+                    visualQuery || (mode !== 'voice' && result.score >= MEDIA_SCORE_THRESHOLD)
+                );
+                if (shouldAttachMedia) {
+                    block += `[ATTACHED EMAIL VISUALLY SHOWN TO USER ON SCREEN]\n`;
+                    mediaResults.push({ mediaType: 'email_html', htmlSource: result.htmlSource, title: result.documentTitle, score: result.score });
+                }
+            }
         }
         if (currentChars + block.length > maxChars) break;
         context += block;
         currentChars += block.length;
         usedSources.push({
+            sourceIndex: sourceNum,
             title: result.documentTitle,
             score: result.score,
             namespace: result.metadata?.namespace || '',
