@@ -2856,15 +2856,6 @@ app.delete('/api/settings/users/:id', requireOwnerOrAdmin, async (req, res) => {
     }
 });
 
-// ─── Static Files (production) ───────────────────────────────────────────────
-
-if (process.env.NODE_ENV === 'production') {
-    app.use(express.static(path.join(__dirname, 'dist')));
-    app.get('/{*splat}', (req, res) => {
-        res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-    });
-}
-
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 // Auto-create agent_conversations table if missing
@@ -4249,6 +4240,14 @@ app.delete('/api/meetings/:id', requireAuth, async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// ─── Static Files (production) — MUST be after all API routes ───────────────
+if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(path.join(__dirname, 'dist')));
+    app.get('/{*splat}', (req, res) => {
+        res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    });
+}
 
 server.listen(port, () => {
     console.log(`AgentOS API running at http://localhost:${port}`);
