@@ -404,11 +404,21 @@ export async function ingestPdfFile(pool, { filePath, relativePath, title, names
         const pageBase64s = await splitPdfPages(fileBuffer);
         console.log(`[KB] PDF has ${pageBase64s.length} pages — embedding each one`);
 
+        // Save each page as a separate PDF file for inline display
+        const pagesDir = path.join(PROJECT_ROOT, 'assets/kb/pdfs/pages');
+        fs.mkdirSync(pagesDir, { recursive: true });
+
         const vectors = [];
         const chunkRows = [];
 
         // 3. Extract text and embed each page (sequentially to respect rate limits)
         for (let i = 0; i < pageBase64s.length; i++) {
+            // Save individual page PDF to disk
+            const pageFilename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-page-${i + 1}.pdf`;
+            const pageFilePath = path.join(pagesDir, pageFilename);
+            fs.writeFileSync(pageFilePath, Buffer.from(pageBase64s[i], 'base64'));
+            const pageRelativePath = `pdfs/pages/${pageFilename}`;
+
             console.log(`[KB]   Extracting text from page ${i + 1}/${pageBase64s.length}...`);
             const pageText = await extractTextFromPdfPage(pageBase64s[i]);
             const content = pageText.trim() || `[PDF: ${title} — page ${i + 1}/${pageBase64s.length}]`;
@@ -428,7 +438,7 @@ export async function ingestPdfFile(pool, { filePath, relativePath, title, names
                     source_type: sourceType,
                     title,
                     media_type: 'pdf_page',
-                    file_path: relativePath,
+                    file_path: pageRelativePath,
                     page_number: i + 1,
                     extraction_method: 'gemini-vision',
                     content_preview: content.slice(0, 200),
@@ -441,18 +451,19 @@ export async function ingestPdfFile(pool, { filePath, relativePath, title, names
                 content,
                 pineconeId,
                 pageNumber: i + 1,
+                pageRelativePath,
             });
         }
 
         // 4. Upsert all page vectors to Pinecone
         await upsertVectors(namespace, vectors);
 
-        // 5. Save chunks to PostgreSQL
+        // 5. Save chunks to PostgreSQL (each chunk points to its individual page file)
         for (const row of chunkRows) {
             await pool.query(
                 `INSERT INTO knowledge_chunks (document_id, chunk_index, content, pinecone_id, metadata, media_type, file_path)
                  VALUES ($1, $2, $3, $4, $5, 'pdf_page', $6)`,
-                [row.documentId, row.chunkIndex, row.content, row.pineconeId, JSON.stringify({ page_number: row.pageNumber, extraction_method: 'gemini-vision' }), relativePath]
+                [row.documentId, row.chunkIndex, row.content, row.pineconeId, JSON.stringify({ page_number: row.pageNumber, extraction_method: 'gemini-vision' }), row.pageRelativePath]
             );
         }
 

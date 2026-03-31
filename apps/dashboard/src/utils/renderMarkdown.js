@@ -47,9 +47,17 @@ export default function renderMarkdown(text) {
     return storePlaceholder(`<code>${code}</code>`);
   });
 
-  // 4. Images — only allow safe URLs
+  // 4. Images & PDF pages — only allow safe URLs
   result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, url) => {
     if (url.startsWith('/api/') || url.startsWith('http://') || url.startsWith('https://')) {
+      if (url.toLowerCase().endsWith('.pdf')) {
+        return storePlaceholder(
+          `<div class="pdf-page-embed">` +
+          `<embed src="${url}" type="application/pdf" />` +
+          `<a href="${url}" target="_blank" rel="noopener noreferrer" class="pdf-page-link">${alt || 'Ver página PDF'}</a>` +
+          `</div>`
+        );
+      }
       return `<img src="${url}" alt="${alt}" loading="lazy">`;
     }
     return match;

@@ -3751,10 +3751,10 @@ app.post('/api/knowledge/ingest-campaigns', requireAuth, async (req, res) => {
 
         // Dynamic import of campaign data
         const { CAMPAIGNS, CAMPAIGN_GROUPS } = await import('../../apps/dashboard/src/data/emiratesCampaigns.js');
-        const { BAU_TYPES, BAU_CATEGORIES } = await import('../../apps/dashboard/src/data/emiratesBauTypes.js');
+        const { BAU_CAMPAIGN_TYPES, BAU_CATEGORIES } = await import('../../apps/dashboard/src/data/emiratesBauTypes.js');
 
         const campaignResult = await ingestCampaigns(pool, CAMPAIGNS, CAMPAIGN_GROUPS);
-        const bauResult = await ingestBauTypes(pool, BAU_TYPES, BAU_CATEGORIES);
+        const bauResult = await ingestBauTypes(pool, BAU_CAMPAIGN_TYPES, BAU_CATEGORIES);
 
         res.json({
             documentsCreated: campaignResult.documentsCreated + bauResult.documentsCreated,
@@ -3836,12 +3836,14 @@ app.post('/api/chat/knowledge', requireAuth, async (req, res) => {
 2. When you find relevant information, explain what it is and why it matters.
 3. Cite your sources naturally by document title in your response.
 4. For images in the knowledge base, embed them inline using markdown: ![Document Title](/api/kb-files/{filePath})
-5. For PDFs, link them using markdown: [Document Title](/api/kb-files/{filePath})
-6. If multiple results are relevant, summarize the key findings and highlight the best matches.
-7. If nothing relevant is found, say so honestly and suggest what the user could try instead.
-8. Respond in the same language the user writes to you.
-9. Be concise but thorough. Under 400 words unless the user asks for more detail.
-10. Use markdown formatting (bold, lists, headers) to make your responses easy to scan.` +
+5. For PDF pages with diagrams or visual content, embed them inline using: ![Page X - Document Title](/api/kb-files/{filePath})
+   When the context includes [PÁGINA VISUAL: url], ALWAYS embed that page using ![description](url) so the user can see the actual diagram or visual content.
+6. For full PDFs (not individual pages), link them: [Document Title](/api/kb-files/{filePath})
+7. If multiple results are relevant, summarize the key findings and highlight the best matches.
+8. If nothing relevant is found, say so honestly and suggest what the user could try instead.
+9. Respond in the same language the user writes to you.
+10. Be concise but thorough. Under 400 words unless the user asks for more detail.
+11. Use markdown formatting (bold, lists, headers) to make your responses easy to scan.` +
             (ragResult.context ? '\n\n' + ragResult.context : '');
 
         // Build messages array from history (cap at last 10 pairs = 20 messages)

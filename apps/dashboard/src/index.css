@@ -7118,6 +7118,52 @@ h1 {
   font-family: monospace; white-space: pre-wrap; word-break: break-all;
 }
 
+/* PDF Page Inline Embeds */
+.pdf-page-embed {
+  margin: 8px 0; border: 1px solid var(--border-light); border-radius: 8px;
+  overflow: hidden; background: var(--bg-secondary);
+}
+.pdf-page-embed embed {
+  width: 100%; height: 400px; border: none; display: block;
+}
+.pdf-page-link {
+  display: block; text-align: center; padding: 6px;
+  font-size: 0.78rem; color: var(--primary); text-decoration: none;
+  border-top: 1px solid var(--border-light);
+}
+.pdf-page-link:hover { background: var(--bg-hover); }
+
+/* KB Media Gallery */
+.kb-chat-media-gallery {
+  padding: 8px 12px; border-top: 1px solid var(--border-light);
+}
+.kb-chat-media-label {
+  font-size: 0.72rem; font-weight: 600; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.kb-chat-media-items {
+  display: flex; gap: 8px; margin-top: 6px; overflow-x: auto; padding-bottom: 4px;
+}
+.kb-chat-media-item {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  text-decoration: none; color: var(--text-secondary); min-width: 80px;
+}
+.kb-chat-media-item img {
+  width: 80px; height: 60px; object-fit: cover; border-radius: 6px;
+  border: 1px solid var(--border-light);
+}
+.kb-chat-media-pdf-thumb {
+  width: 80px; height: 60px; border-radius: 6px; border: 1px solid var(--border-light);
+  background: var(--bg-hover); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 2px;
+  font-size: 0.7rem; font-weight: 700; color: var(--primary);
+}
+.kb-chat-media-page { font-size: 0.65rem; font-weight: 400; opacity: 0.7; }
+.kb-chat-media-title {
+  font-size: 0.68rem; text-align: center; max-width: 80px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 /* Knowledge Search Component */
 .kb-search-container { position: relative; width: 100%; }
 .kb-search-input-wrap {

@@ -65,7 +65,7 @@ export async function embedBatch(texts) {
                 model: EMBEDDING_MODEL,
                 contents: text,
                 config: { outputDimensionality: EMBEDDING_DIMENSIONS, taskType: 'RETRIEVAL_DOCUMENT' },
-            }).then(r => { results[i + j] = r.embedding.values; })
+            }).then(r => { results[i + j] = r.embeddings[0].values; })
         );
         await Promise.all(promises);
     }
@@ -136,7 +136,7 @@ export async function extractTextFromPdfPage(base64Data) {
         contents: [{
             parts: [
                 { inlineData: { mimeType: 'application/pdf', data: base64Data } },
-                { text: 'Extract ALL text from this document page. Preserve the original structure including headings, lists, tables, and paragraphs. Return only the extracted text, no commentary.' },
+                { text: 'Extract ALL text from this document page. Preserve the original structure including headings, lists, tables, and paragraphs. If the page contains diagrams, flowcharts, screenshots, or other visual elements, describe them in detail (what they show, the flow, connections, labels). Return the extracted text and visual descriptions together.' },
             ],
         }],
     });

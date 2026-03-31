@@ -229,6 +229,8 @@ export const translations = {
         viewCode: 'Ver codigo',
         hideCode: 'Ocultar codigo',
         copyHtml: 'Copiar HTML',
+        viewPage: 'Ver pagina',
+        mediaResults: 'Contenido visual',
       },
     },
 
@@ -1369,6 +1371,8 @@ export const translations = {
         viewCode: 'View code',
         hideCode: 'Hide code',
         copyHtml: 'Copy HTML',
+        viewPage: 'View page',
+        mediaResults: 'Visual content',
       },
     },
 

@@ -21,6 +21,7 @@ export default function KBChat() {
     const [lastSources, setLastSources] = useState([]);
     const [sourcesExpanded, setSourcesExpanded] = useState(false);
     const [htmlSources, setHtmlSources] = useState([]);
+    const [mediaResults, setMediaResults] = useState([]);
     const messagesEndRef = useRef(null);
 
     // Persist messages to localStorage
@@ -81,6 +82,13 @@ export default function KBChat() {
                 try { setHtmlSources(JSON.parse(htmlHeader)); } catch { /* ignore */ }
             } else {
                 setHtmlSources([]);
+            }
+
+            const mediaHeader = res.headers.get('X-RAG-Media');
+            if (mediaHeader) {
+                try { setMediaResults(JSON.parse(mediaHeader)); } catch { /* ignore */ }
+            } else {
+                setMediaResults([]);
             }
 
             const reader = res.body.getReader();
@@ -269,6 +277,23 @@ export default function KBChat() {
             {htmlSources.length > 0 && htmlSources.map((hs, i) => (
                 <EmailPreview key={i} html={hs.htmlSource} title={hs.title} />
             ))}
+
+            {mediaResults.length > 0 && (
+                <div className="kb-chat-media-gallery">
+                    <span className="kb-chat-media-label">{t('knowledge.chat.mediaResults')}</span>
+                    <div className="kb-chat-media-items">
+                        {mediaResults.map((m, i) => (
+                            <a key={i} href={`${API_URL.replace('/api', '')}/api/kb-files/${m.filePath}`} target="_blank" rel="noopener noreferrer" className="kb-chat-media-item" title={m.title}>
+                                {m.mediaType === 'image'
+                                    ? <img src={`${API_URL.replace('/api', '')}/api/kb-files/${m.filePath}`} alt={m.title} />
+                                    : <div className="kb-chat-media-pdf-thumb"><span>PDF</span><span className="kb-chat-media-page">p.{m.pageNumber || '?'}</span></div>
+                                }
+                                <span className="kb-chat-media-title">{m.title?.slice(0, 25)}</span>
+                            </a>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Input */}
             <div className="kb-chat-input-row">

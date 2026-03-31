@@ -203,10 +203,15 @@ export async function buildRAGContext(pool, query, options = {}) {
             block = `---\nFuente: ${result.documentTitle} (score: ${result.score})\n${hasDesc ? result.content + '\n' : ''}${result.filePath ? `[IMAGEN: /api/kb-files/${result.filePath}]` : ''}\n`;
             if (result.filePath) mediaResults.push({ filePath: result.filePath, mediaType: 'image', score: result.score, title: result.documentTitle });
         } else if (result.mediaType === 'pdf_page') {
-            // Use extracted text if available, fall back to PDF link
+            // Include extracted text AND page-specific visual reference
             const hasText = result.content && !result.content.startsWith('[PDF:');
-            block = `---\nFuente: ${result.documentTitle} (score: ${result.score})\n${hasText ? result.content : `[PDF: /api/kb-files/${result.filePath}]`}\n`;
-            if (result.filePath) mediaResults.push({ filePath: result.filePath, mediaType: 'pdf_page', score: result.score, title: result.documentTitle });
+            const pageNum = result.metadata?.page_number || '?';
+            block = `---\nFuente: ${result.documentTitle} - Página ${pageNum} (score: ${result.score})\n`;
+            if (hasText) block += result.content + '\n';
+            if (result.filePath) {
+                block += `[PÁGINA VISUAL: /api/kb-files/${result.filePath}]\n`;
+                mediaResults.push({ filePath: result.filePath, mediaType: 'pdf_page', score: result.score, title: result.documentTitle, pageNumber: pageNum });
+            }
         } else {
             block = `---\nFuente: ${result.documentTitle} (score: ${result.score})\n${result.content}\n`;
         }
