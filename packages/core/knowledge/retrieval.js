@@ -172,7 +172,7 @@ export async function searchMultiNamespace(pool, query, namespaces, { topK = DEF
  *
  * @param {import('pg').Pool} pool
  * @param {string} query - The user's message
- * @param {{ namespaces?: string[], maxTokens?: number, filter?: object }} options
+ * @param {{ namespaces?: string[], maxTokens?: number, filter?: object, visualQuery?: boolean }} options
  * @returns {Promise<{ context: string, sources: object[] }>}
  */
 export async function buildRAGContext(pool, query, options = {}) {
@@ -180,9 +180,26 @@ export async function buildRAGContext(pool, query, options = {}) {
         namespaces = ['campaigns', 'emails', 'kpis', 'research'],
         maxTokens = DEFAULT_MAX_TOKENS,
         filter,
+        visualQuery = false,
+        mode = 'text',     // 'text' | 'voice'
+        maxMedia = 4,
     } = options;
 
-    const results = await searchMultiNamespace(pool, query, namespaces, { topK: 12, filter, minScore: 0.3 });
+    // When user asks for visual content, cast a wider net and lower threshold
+    const topK = visualQuery ? 20 : 12;
+    const minScore = visualQuery ? 0.2 : 0.3;
+
+    let results = await searchMultiNamespace(pool, query, namespaces, { topK, filter, minScore });
+
+    // Boost visual results (pdf_page, image) to top when user asks for diagrams/visuals
+    if (visualQuery && results.length > 0) {
+        results.sort((a, b) => {
+            const aVisual = (a.mediaType === 'pdf_page' || a.mediaType === 'image') ? 1 : 0;
+            const bVisual = (b.mediaType === 'pdf_page' || b.mediaType === 'image') ? 1 : 0;
+            if (bVisual !== aVisual) return bVisual - aVisual;
+            return b.score - a.score;
+        });
+    }
 
     if (results.length === 0) {
         return { context: '', sources: [], mediaResults: [] };
@@ -190,30 +207,38 @@ export async function buildRAGContext(pool, query, options = {}) {
 
     // Build context block with token budget
     const maxChars = maxTokens * 4;
-    let context = '[CONOCIMIENTO RELEVANTE - Base de Datos Interna]\n';
+    let context = '[RELEVANT KNOWLEDGE - Internal Database]\n';
     let currentChars = context.length;
     const usedSources = [];
     const mediaResults = [];
 
+    const MEDIA_SCORE_THRESHOLD = 0.7;
+
     for (const result of results) {
         let block;
         if (result.mediaType === 'image') {
-            // Use description if available, include image link for display
             const hasDesc = result.content && !result.content.startsWith('[Image:');
-            block = `---\nFuente: ${result.documentTitle} (score: ${result.score})\n${hasDesc ? result.content + '\n' : ''}${result.filePath ? `[IMAGEN: /api/kb-files/${result.filePath}]` : ''}\n`;
-            if (result.filePath) mediaResults.push({ filePath: result.filePath, mediaType: 'image', score: result.score, title: result.documentTitle });
+            block = `---\nSource: ${result.documentTitle} (score: ${result.score})\n${hasDesc ? result.content + '\n' : ''}${result.filePath ? `[IMAGE: /api/kb-files/${result.filePath}]` : ''}\n`;
+            // Only attach image if: visualQuery OR (text mode + high score)
+            const shouldAttach = result.filePath && mediaResults.length < maxMedia && (
+                visualQuery || (mode !== 'voice' && result.score >= MEDIA_SCORE_THRESHOLD)
+            );
+            if (shouldAttach) mediaResults.push({ filePath: result.filePath, mediaType: 'image', score: result.score, title: result.documentTitle });
         } else if (result.mediaType === 'pdf_page') {
-            // Include extracted text AND page-specific visual reference
             const hasText = result.content && !result.content.startsWith('[PDF:');
             const pageNum = result.metadata?.page_number || '?';
-            block = `---\nFuente: ${result.documentTitle} - Página ${pageNum} (score: ${result.score})\n`;
+            block = `---\nSource: ${result.documentTitle} - Page ${pageNum} (score: ${result.score})\n`;
             if (hasText) block += result.content + '\n';
-            if (result.filePath) {
-                block += `[PÁGINA VISUAL: /api/kb-files/${result.filePath}]\n`;
+            // Voice mode: NEVER attach PDF pages. Text mode: only if visualQuery or very high score
+            const shouldAttach = result.filePath && mode !== 'voice' && mediaResults.length < maxMedia && (
+                visualQuery || result.score >= MEDIA_SCORE_THRESHOLD
+            );
+            if (shouldAttach) {
+                block += `[VISUAL PAGE: /api/kb-files/${result.filePath}]\n`;
                 mediaResults.push({ filePath: result.filePath, mediaType: 'pdf_page', score: result.score, title: result.documentTitle, pageNumber: pageNum });
             }
         } else {
-            block = `---\nFuente: ${result.documentTitle} (score: ${result.score})\n${result.content}\n`;
+            block = `---\nSource: ${result.documentTitle} (score: ${result.score})\n${result.content}\n`;
         }
         if (currentChars + block.length > maxChars) break;
         context += block;
@@ -229,7 +254,7 @@ export async function buildRAGContext(pool, query, options = {}) {
         });
     }
 
-    context += '---\n[FIN CONOCIMIENTO RELEVANTE]\n';
+    context += '---\n[END RELEVANT KNOWLEDGE]\n';
 
     return { context, sources: usedSources, mediaResults };
 }

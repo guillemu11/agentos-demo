@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import renderMarkdown from '../utils/renderMarkdown.js';
-import { Send, Trash2, ChevronDown, ChevronUp, Database, Loader } from 'lucide-react';
+import { Send, Trash2, ChevronDown, ChevronUp, Database, Loader, Mic } from 'lucide-react';
+import KBVoiceOverlay from './KBVoiceOverlay.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const NAMESPACES = ['campaigns', 'emails', 'images', 'kpis', 'research', 'brand'];
 const STORAGE_KEY = 'kb-chat-messages';
 
 export default function KBChat() {
-    const { t } = useLanguage();
+    const { t, lang } = useLanguage();
     const [messages, setMessages] = useState(() => {
         try {
             const saved = localStorage.getItem(STORAGE_KEY);
@@ -21,7 +22,7 @@ export default function KBChat() {
     const [lastSources, setLastSources] = useState([]);
     const [sourcesExpanded, setSourcesExpanded] = useState(false);
     const [htmlSources, setHtmlSources] = useState([]);
-    const [mediaResults, setMediaResults] = useState([]);
+    const [voiceActive, setVoiceActive] = useState(false);
     const messagesEndRef = useRef(null);
 
     // Persist messages to localStorage
@@ -51,21 +52,28 @@ export default function KBChat() {
         setStreaming(true);
         setSourcesExpanded(false);
 
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60000);
+
         try {
             // Build history from existing messages (last 20)
             const history = messages.slice(-20);
+
+            // Detect visual intent
+            const visualKeywords = /diagrama|diagram|imagen|image|esquema|schema|flujo|flow|chart|screenshot|captura|visual|grafico|gráfico/i;
+            const visualQuery = visualKeywords.test(msg);
 
             const res = await fetch(`${API_URL}/chat/knowledge`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
-                body: JSON.stringify({ message: msg, history, namespace: namespace || undefined }),
+                signal: controller.signal,
+                body: JSON.stringify({ message: msg, history, namespace: namespace || undefined, visualQuery, lang }),
             });
 
             if (!res.ok) {
                 const err = await res.json().catch(() => ({ error: 'Unknown error' }));
                 setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.error}` }]);
-                setStreaming(false);
                 return;
             }
 
@@ -84,48 +92,64 @@ export default function KBChat() {
                 setHtmlSources([]);
             }
 
+            let parsedMedia = [];
             const mediaHeader = res.headers.get('X-RAG-Media');
             if (mediaHeader) {
-                try { setMediaResults(JSON.parse(mediaHeader)); } catch { /* ignore */ }
-            } else {
-                setMediaResults([]);
+                try { parsedMedia = JSON.parse(mediaHeader); } catch { /* ignore */ }
             }
 
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
             let fullResponse = '';
 
-            setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+            setMessages(prev => [...prev, { role: 'assistant', content: '', media: parsedMedia }]);
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
 
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = chunk.split('\n');
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n');
 
-                for (const line of lines) {
-                    if (!line.startsWith('data: ')) continue;
-                    const data = line.slice(6);
-                    if (data === '[DONE]') continue;
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        const data = line.slice(6);
+                        if (data === '[DONE]') continue;
 
-                    try {
-                        const parsed = JSON.parse(data);
-                        if (parsed.text) {
-                            fullResponse += parsed.text;
-                            const captured = fullResponse;
-                            setMessages(prev => {
-                                const updated = [...prev];
-                                updated[updated.length - 1] = { role: 'assistant', content: captured };
-                                return updated;
-                            });
-                        }
-                    } catch { /* ignore parse errors */ }
+                        try {
+                            const parsed = JSON.parse(data);
+                            if (parsed.text) {
+                                fullResponse += parsed.text;
+                                const captured = fullResponse;
+                                setMessages(prev => {
+                                    const updated = [...prev];
+                                    const last = updated[updated.length - 1];
+                                    updated[updated.length - 1] = { ...last, content: captured };
+                                    return updated;
+                                });
+                            }
+                        } catch { /* ignore parse errors */ }
+                    }
                 }
+            } finally {
+                reader.cancel().catch(() => {});
             }
         } catch (err) {
-            setMessages(prev => [...prev, { role: 'assistant', content: `${t('knowledge.chat.errorStream')}: ${err.message}` }]);
+            const errorMsg = err.name === 'AbortError'
+                ? t('knowledge.chat.errorTimeout') || 'Request timed out (60s). Please try again.'
+                : `${t('knowledge.chat.errorStream')}: ${err.message}`;
+            setMessages(prev => {
+                // If last message is an empty assistant placeholder, replace it
+                if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && !prev[prev.length - 1].content) {
+                    const updated = [...prev];
+                    updated[updated.length - 1] = { role: 'assistant', content: errorMsg };
+                    return updated;
+                }
+                return [...prev, { role: 'assistant', content: errorMsg }];
+            });
         } finally {
+            clearTimeout(timeout);
             setStreaming(false);
         }
     }
@@ -184,6 +208,7 @@ export default function KBChat() {
     }
 
     return (
+        <>
         <div className="kb-chat-container">
             {/* Header */}
             <div className="kb-chat-header">
@@ -233,6 +258,18 @@ export default function KBChat() {
                                 ? <div className="md-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
                                 : (streaming && i === messages.length - 1 ? '' : '...')
                         }
+                        {msg.role === 'assistant' && msg.media?.length > 0 && (
+                            <div className="chat-inline-media">
+                                {msg.media.map((m, j) => (
+                                    <a key={j} href={`${API_URL.replace('/api', '')}/api/kb-files/${m.filePath}`} target="_blank" rel="noopener noreferrer" className="chat-inline-media-item" title={m.title}>
+                                        {m.mediaType === 'image'
+                                            ? <img src={`${API_URL.replace('/api', '')}/api/kb-files/${m.filePath}`} alt={m.title} />
+                                            : <div className="chat-inline-pdf"><span>PDF</span><span>p.{m.pageNumber || '?'}</span></div>
+                                        }
+                                    </a>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 ))}
 
@@ -278,23 +315,6 @@ export default function KBChat() {
                 <EmailPreview key={i} html={hs.htmlSource} title={hs.title} />
             ))}
 
-            {mediaResults.length > 0 && (
-                <div className="kb-chat-media-gallery">
-                    <span className="kb-chat-media-label">{t('knowledge.chat.mediaResults')}</span>
-                    <div className="kb-chat-media-items">
-                        {mediaResults.map((m, i) => (
-                            <a key={i} href={`${API_URL.replace('/api', '')}/api/kb-files/${m.filePath}`} target="_blank" rel="noopener noreferrer" className="kb-chat-media-item" title={m.title}>
-                                {m.mediaType === 'image'
-                                    ? <img src={`${API_URL.replace('/api', '')}/api/kb-files/${m.filePath}`} alt={m.title} />
-                                    : <div className="kb-chat-media-pdf-thumb"><span>PDF</span><span className="kb-chat-media-page">p.{m.pageNumber || '?'}</span></div>
-                                }
-                                <span className="kb-chat-media-title">{m.title?.slice(0, 25)}</span>
-                            </a>
-                        ))}
-                    </div>
-                </div>
-            )}
-
             {/* Input */}
             <div className="kb-chat-input-row">
                 <input
@@ -304,6 +324,14 @@ export default function KBChat() {
                     placeholder={t('knowledge.chat.placeholder')}
                     disabled={streaming}
                 />
+                <button
+                    className="kb-voice-btn"
+                    onClick={() => setVoiceActive(true)}
+                    disabled={streaming}
+                    title={t('knowledge.voice.mode')}
+                >
+                    <Mic size={16} />
+                </button>
                 <button
                     className="kb-action-btn"
                     onClick={() => sendMessage()}
@@ -315,5 +343,13 @@ export default function KBChat() {
                 </button>
             </div>
         </div>
+
+        {voiceActive && (
+            <KBVoiceOverlay
+                namespace={namespace}
+                onClose={() => setVoiceActive(false)}
+            />
+        )}
+        </>
     );
 }

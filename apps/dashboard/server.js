@@ -207,7 +207,7 @@ initDatabase();
 
 // ─── Session Middleware ──────────────────────────────────────────────────────
 
-app.use(session({
+const sessionMiddleware = session({
     store: new PgSession({ pool, tableName: 'sessions' }),
     secret: process.env.SESSION_SECRET || 'agentos-dev-secret-change-me',
     resave: false,
@@ -218,7 +218,8 @@ app.use(session({
         sameSite: 'lax',
         secure: process.env.NODE_ENV === 'production',
     },
-}));
+});
+app.use(sessionMiddleware);
 
 // ─── Auth: Setup Check ──────────────────────────────────────────────────────
 
@@ -3845,7 +3846,7 @@ app.post('/api/knowledge/search', requireAuth, async (req, res) => {
 // POST /api/chat/knowledge — Conversational KB assistant (SSE streaming)
 app.post('/api/chat/knowledge', requireAuth, async (req, res) => {
     try {
-        const { message, history, namespace, visualQuery } = req.body;
+        const { message, history, namespace, visualQuery, lang } = req.body;
         if (!message) return res.status(400).json({ error: 'message is required' });
         if (!isKBReady()) return res.status(503).json({ error: 'Knowledge base not configured.' });
 
@@ -3854,19 +3855,25 @@ app.post('/api/chat/knowledge', requireAuth, async (req, res) => {
         const namespaces = namespace ? [namespace] : allNamespaces;
 
         // Build RAG context (pass visualQuery flag for boosted visual retrieval)
-        const ragResult = await buildRAGContext(pool, message, { namespaces, maxTokens: visualQuery ? 3000 : 2000, visualQuery: !!visualQuery });
+        const ragResult = await buildRAGContext(pool, message, { namespaces, maxTokens: visualQuery ? 3000 : 2000, visualQuery: !!visualQuery, mode: 'text', maxMedia: visualQuery ? 4 : 2 });
 
         // System prompt for conversational KB assistant
         const visualInstruction = visualQuery ? `
 
 ## CRITICAL: Visual Query Detected
 The user is asking for a diagram, image, schema, or visual content. You MUST:
-- Embed ALL matching [PÁGINA VISUAL: url] and [IMAGEN: url] references as inline images using ![description](url)
+- Embed ALL matching [VISUAL PAGE: url] and [IMAGE: url] references as inline images using ![description](url)
 - Show the visual FIRST, then explain what it contains
 - NEVER describe a diagram with text when the actual visual page is available in the context
 - If multiple visual pages match, embed ALL of them` : '';
 
-        const systemPrompt = `You are the Knowledge Base Assistant for AgentOS. You help users explore and understand the organization's knowledge base.
+        const langDirective = lang === 'en'
+            ? '\n\nCRITICAL LANGUAGE RULE: You MUST respond in English at all times, regardless of the language of the knowledge base content.'
+            : lang === 'es'
+            ? '\n\nREGLA CRITICA DE IDIOMA: DEBES responder en español siempre, sin importar el idioma del contenido de la base de conocimiento.'
+            : '';
+
+        const systemPrompt = `You are the Knowledge Base Assistant for AgentOS. You help users explore and understand the organization's knowledge base.${langDirective}
 
 ## Response Rules
 1. Answer conversationally. Synthesize and explain the information — do NOT just list documents or raw data.
@@ -3874,11 +3881,11 @@ The user is asking for a diagram, image, schema, or visual content. You MUST:
 3. Cite your sources naturally by document title in your response.
 4. For images in the knowledge base, embed them inline using markdown: ![Document Title](/api/kb-files/{filePath})
 5. For PDF pages with diagrams or visual content, embed them inline using: ![Page X - Document Title](/api/kb-files/{filePath})
-   When the context includes [PÁGINA VISUAL: url], ALWAYS embed that page using ![description](url) so the user can see the actual diagram or visual content.
+   When the context includes [VISUAL PAGE: url], ALWAYS embed that page using ![description](url) so the user can see the actual diagram or visual content.
 6. For full PDFs (not individual pages), link them: [Document Title](/api/kb-files/{filePath})
 7. If multiple results are relevant, summarize the key findings and highlight the best matches.
 8. If nothing relevant is found, say so honestly and suggest what the user could try instead.
-9. Respond in the same language the user writes to you.
+9. Respond in the same language the user writes to you. If a language directive is provided above, follow it strictly.
 10. Be concise but thorough. Under 400 words unless the user asks for more detail.
 11. Use markdown formatting (bold, lists, headers) to make your responses easy to scan.` +
             visualInstruction +
@@ -3978,8 +3985,24 @@ const wss = new WebSocketServer({ noServer: true });
 server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname === '/ws/voice' || url.pathname === '/ws/voice-meeting' || url.pathname === '/ws/voice-kb') {
-        wss.handleUpgrade(req, socket, head, (ws) => {
-            wss.emit('connection', ws, req);
+        // Validate session before allowing WebSocket upgrade
+        // express-session needs a response-like object with header methods
+        const fakeRes = Object.create(http.ServerResponse.prototype);
+        fakeRes.getHeader = () => {};
+        fakeRes.setHeader = () => fakeRes;
+        fakeRes.writeHead = () => {};
+        fakeRes.end = () => {};
+        fakeRes.on = () => fakeRes;
+
+        sessionMiddleware(req, fakeRes, () => {
+            if (!req.session?.userId) {
+                console.log('[WS] Rejected: no authenticated session');
+                socket.destroy();
+                return;
+            }
+            wss.handleUpgrade(req, socket, head, (ws) => {
+                wss.emit('connection', ws, req);
+            });
         });
     } else {
         socket.destroy();
@@ -4259,7 +4282,7 @@ async function handleVoiceMeeting(ws, url) {
 
 // ─── Voice KB Handler (Gemini Live Speech-to-Speech + RAG) ──────────────────
 
-const GEMINI_LIVE_MODEL = 'gemini-2.0-flash-live-001';
+const GEMINI_LIVE_MODEL = 'gemini-2.5-flash-native-audio-latest';
 const KB_NAMESPACES = ['campaigns', 'emails', 'images', 'kpis', 'research', 'brand'];
 
 const SEARCH_KNOWLEDGE_TOOL = {
@@ -4269,13 +4292,15 @@ const SEARCH_KNOWLEDGE_TOOL = {
         type: 'OBJECT',
         properties: {
             query: { type: 'STRING', description: 'The search query based on what the user is asking about' },
+            needsVisuals: { type: 'BOOLEAN', description: 'Set to true ONLY if the user explicitly asks to SEE a document, image, picture, PDF, or email visually. If they just ask for information, data, or a list, set to false.' }
         },
         required: ['query']
     }
 };
 
 async function handleVoiceKB(ws, url) {
-    const namespace = url.searchParams.get('namespace') || '';
+    const rawNs = url.searchParams.get('namespace') || '';
+    const namespace = KB_NAMESPACES.includes(rawNs) ? rawNs : '';
     const lang = url.searchParams.get('lang') || 'es';
 
     console.log(`[Voice KB] Connected: namespace=${namespace || 'all'}, lang=${lang}`);
@@ -4288,11 +4313,19 @@ async function handleVoiceKB(ws, url) {
         return;
     }
 
-    const systemPromptKB = `You are the Knowledge Base voice assistant for AgentOS. You help users find and understand information from their knowledge base which includes campaigns, emails, KPIs, research, and brand guidelines.
+    const voiceLangName = lang === 'en' ? 'English' : 'Spanish';
 
-When the user asks a question, use the searchKnowledge tool to find relevant information before answering. Base your responses on the retrieved knowledge. If no relevant information is found, say so honestly.
+    const systemPromptKB = `LANGUAGE: You MUST speak in ${voiceLangName}. All your responses must be in ${voiceLangName} only. Even if the knowledge base content is in another language, translate and respond in ${voiceLangName}.
 
-Keep responses concise and conversational (2-4 sentences). Respond in the same language the user speaks.`;
+You are the Knowledge Base voice assistant for AgentOS. You help users find and understand information from their knowledge base which includes campaigns, emails, KPIs, research, and brand guidelines.
+
+CRITICAL INSTRUCTIONS:
+1. ALWAYS respond in ${voiceLangName}. This is non-negotiable.
+2. ALWAYS use the searchKnowledge tool to find relevant information BEFORE answering.
+3. Base your responses ONLY on the retrieved knowledge. If no relevant information is found, say so honestly. Do not hallucinate.
+4. Keep responses extremely concise, conversational, and direct (1-3 short sentences MAX).
+5. DO NOT ramble, over-explain, or repeat yourself. Avoid long lists in voice; summarize them.
+6. If the user asks for data (like a seed list), just read the data clearly. Only set needsVisuals to true if they explicitly ask to SEE the file/image/email.`;
 
     let session = null;
 
@@ -4360,15 +4393,33 @@ Keep responses concise and conversational (2-4 sentences). Respond in the same l
                             for (const fc of message.toolCall.functionCalls) {
                                 if (fc.name === 'searchKnowledge') {
                                     const query = fc.args?.query || '';
-                                    console.log(`[Voice KB] RAG search: "${query}"`);
+                                    const needsVisuals = fc.args?.needsVisuals || false;
+                                    console.log(`[Voice KB] RAG search: "${query}", visuals: ${needsVisuals}`);
                                     ws.send(JSON.stringify({ type: 'searching' }));
 
                                     try {
                                         const namespaces = namespace ? [namespace] : KB_NAMESPACES;
-                                        const { context, sources } = await buildRAGContext(pool, query, {
+                                        const RAG_TIMEOUT_MS = 15000;
+                                        const ragPromise = buildRAGContext(pool, query, {
                                             namespaces,
                                             maxTokens: 1500,
+                                            visualQuery: needsVisuals,
+                                            mode: 'voice',
+                                            maxMedia: 2,
                                         });
+                                        const timeoutPromise = new Promise((_, reject) =>
+                                            setTimeout(() => reject(new Error('RAG timeout')), RAG_TIMEOUT_MS)
+                                        );
+
+                                        let context, sources, mediaResults;
+                                        try {
+                                            ({ context, sources, mediaResults } = await Promise.race([ragPromise, timeoutPromise]));
+                                        } catch (timeoutErr) {
+                                            console.warn(`[Voice KB] RAG timed out after ${RAG_TIMEOUT_MS}ms for: "${query}"`);
+                                            context = 'Knowledge base search timed out. Please try a simpler question.';
+                                            sources = [];
+                                            mediaResults = [];
+                                        }
 
                                         session.sendToolResponse({
                                             functionResponses: [{
@@ -4379,6 +4430,13 @@ Keep responses concise and conversational (2-4 sentences). Respond in the same l
                                         });
 
                                         ws.send(JSON.stringify({ type: 'rag-sources', sources: sources || [] }));
+                                        
+                                        // Only send media results back to the frontend if the AI requested visual content
+                                        if (needsVisuals && mediaResults && mediaResults.length > 0) {
+                                            ws.send(JSON.stringify({ type: 'rag-media', media: mediaResults }));
+                                        } else {
+                                            ws.send(JSON.stringify({ type: 'rag-media', media: [] }));
+                                        }
                                     } catch (ragErr) {
                                         console.error('[Voice KB] RAG error:', ragErr.message);
                                         session.sendToolResponse({
@@ -4426,7 +4484,7 @@ Keep responses concise and conversational (2-4 sentences). Respond in the same l
         });
     } catch (err) {
         console.error('[Voice KB] Failed to create Gemini Live session:', err.message);
-        ws.send(JSON.stringify({ type: 'error', message: `Failed to start voice session: ${err.message}` }));
+        ws.send(JSON.stringify({ type: 'error', message: 'Failed to start voice session. Please try again.' }));
         ws.close();
         return;
     }
