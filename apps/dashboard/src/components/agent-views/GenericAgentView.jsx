@@ -1,6 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
-import AgentChat from '../AgentChat.jsx';
+import AgentSettingsPanel from './AgentSettingsPanel.jsx';
+import AgentWorkHistory from './AgentWorkHistory.jsx';
+import ActiveTicketIndicator from './shared/ActiveTicketIndicator.jsx';
+import AgentTicketsPanel from './shared/AgentTicketsPanel.jsx';
+import AgentChatSwitcher from './shared/AgentChatSwitcher.jsx';
+import HandoffModal from '../HandoffModal.jsx';
+import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
 import { AgentTabIcons, StatusDots, MoodIcons } from '../icons.jsx';
 import { Wrench } from 'lucide-react';
 
@@ -25,9 +31,23 @@ function formatEventTime(timestamp, lang) {
   return d.toLocaleTimeString(lang === 'en' ? 'en-US' : 'es-ES', { hour: '2-digit', minute: '2-digit' });
 }
 
-export default function GenericAgentView({ agent }) {
+export default function GenericAgentView({ agent, activeTab: activeTabProp, onTabChange }) {
   const { t, lang } = useLanguage();
-  const [activeTab, setActiveTab] = useState('chat');
+  const [localTab, setLocalTab] = useState('chat');
+  const activeTab = activeTabProp !== undefined ? activeTabProp : localTab;
+  const setActiveTab = (tab) => {
+    setLocalTab(tab);
+    if (onTabChange) onTabChange(tab);
+  };
+  useEffect(() => {
+    if (onTabChange) onTabChange(localTab);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const pipeline = useAgentPipelineSession(agent.id);
+
+  const handleWorkOnTicket = (ticket) => {
+      pipeline.selectTicket(ticket);
+      setActiveTab('chat');
+  };
 
   const skills = agent.skills || [];
   const tools = agent.tools || [];
@@ -44,15 +64,19 @@ export default function GenericAgentView({ agent }) {
 
   const tabs = [
     { id: 'chat', label: t('agentChat.tab'), icon: AgentTabIcons.chat },
+    { id: 'tickets', label: t('tickets.tab'), icon: AgentTabIcons.tickets, count: pipeline.tickets.length, urgent: pipeline.hasUrgentTickets },
     { id: 'skills', label: 'Skills', icon: AgentTabIcons.skills, count: skills.length },
     { id: 'tools', label: 'Tools', icon: AgentTabIcons.tools, count: tools.length },
-    { id: 'workflows', label: 'Workflows', icon: AgentTabIcons.workflows, count: 0 },
+    { id: 'history', label: t('pipeline.completedWork'), icon: AgentTabIcons.history, count: pipeline.completedWorkCount },
     { id: 'activity', label: t('agentDetail.activity'), icon: AgentTabIcons.activity, count: recentEvents.length },
     { id: 'eod', label: 'EOD Reports', icon: AgentTabIcons.eod, count: eodReports.length },
+    { id: 'settings', label: t('agentSettings.tab'), icon: AgentTabIcons.settings },
   ];
 
   return (
     <>
+      <ActiveTicketIndicator selectedTicket={pipeline.selectedTicket} onClear={pipeline.clearTicket} />
+
       <div className="agent-tabs">
         {tabs.map((tab) => (
           <button
@@ -62,14 +86,33 @@ export default function GenericAgentView({ agent }) {
           >
             <span>{tab.icon}</span>
             <span>{tab.label}</span>
-            {tab.count != null && <span className="agent-tab-count">{tab.count}</span>}
+            {tab.count != null && (
+              <span className={`agent-tab-count${tab.urgent ? ' urgent' : ''}`}>{tab.count}</span>
+            )}
           </button>
         ))}
       </div>
 
       <section className="agent-tab-content">
         {activeTab === 'chat' && (
-          <AgentChat agentId={agent.id} agentName={agent.name} agentAvatar={agent.avatar} />
+          <AgentChatSwitcher
+            agent={agent}
+            selectedTicket={pipeline.selectedTicket}
+            pipelineData={pipeline.pipelineData}
+            currentSession={pipeline.currentSession}
+            completedSessions={pipeline.completedSessions}
+            agents={pipeline.agents}
+            onClearTicket={pipeline.clearTicket}
+            onHandoffRequest={pipeline.setHandoffSession}
+          />
+        )}
+
+        {activeTab === 'tickets' && (
+          <AgentTicketsPanel
+            tickets={pipeline.tickets}
+            selectedTicket={pipeline.selectedTicket}
+            onSelectTicket={handleWorkOnTicket}
+          />
         )}
 
         {activeTab === 'skills' && (
@@ -104,10 +147,8 @@ export default function GenericAgentView({ agent }) {
           </div>
         )}
 
-        {activeTab === 'workflows' && (
-          <div className="agent-workflows-list">
-            <div className="empty-state">{t('agentDetail.noWorkflows')}</div>
-          </div>
+        {activeTab === 'history' && (
+          <AgentWorkHistory agentId={agent.id} />
         )}
 
         {activeTab === 'activity' && (
@@ -204,7 +245,22 @@ export default function GenericAgentView({ agent }) {
             )}
           </div>
         )}
+
+        {activeTab === 'settings' && (
+          <AgentSettingsPanel agentId={agent.id} />
+        )}
       </section>
+
+      {pipeline.handoffSession && (
+        <HandoffModal
+          projectId={pipeline.selectedTicket?.project_id}
+          session={pipeline.handoffSession}
+          stages={pipeline.stages}
+          agents={pipeline.agents}
+          onClose={() => pipeline.setHandoffSession(null)}
+          onComplete={pipeline.onHandoffComplete}
+        />
+      )}
     </>
   );
 }

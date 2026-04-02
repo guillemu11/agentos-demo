@@ -1,16 +1,34 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { legalAgentData } from '../../data/agentViewMocks.js';
-import AgentChat from '../AgentChat.jsx';
+import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
+import ActiveTicketIndicator from './shared/ActiveTicketIndicator.jsx';
+import AgentTicketsPanel from './shared/AgentTicketsPanel.jsx';
+import AgentChatSwitcher from './shared/AgentChatSwitcher.jsx';
+import HandoffModal from '../HandoffModal.jsx';
 import StatusBadge from './shared/StatusBadge.jsx';
 import { AgentTabIcons, StatusIcons, LegalIcons } from '../icons.jsx';
+import AgentSettingsPanel from './AgentSettingsPanel.jsx';
 
 const statusIconMap = { pass: StatusIcons.pass, warning: StatusIcons.warning, fail: StatusIcons.fail };
 const severityColor = { critical: '#ef4444', warning: '#f59e0b', info: '#6366f1' };
 
-export default function LegalAgentView({ agent }) {
+export default function LegalAgentView({ agent, activeTab: activeTabProp, onTabChange }) {
   const { t, lang } = useLanguage();
-  const [activeTab, setActiveTab] = useState('compliance');
+  const [localTab, setLocalTab] = useState('compliance');
+  const activeTab = activeTabProp !== undefined ? activeTabProp : localTab;
+  const setActiveTab = (tab) => {
+    setLocalTab(tab);
+    if (onTabChange) onTabChange(tab);
+  };
+  useEffect(() => {
+    if (onTabChange) onTabChange(localTab);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const pipeline = useAgentPipelineSession(agent.id);
+  const handleWorkOnTicket = (ticket) => {
+    pipeline.selectTicket(ticket);
+    setActiveTab('chat');
+  };
   const data = legalAgentData;
 
   const regulations = ['GDPR', 'CAN-SPAM', 'UAE Local', 'Consent'];
@@ -20,10 +38,12 @@ export default function LegalAgentView({ agent }) {
 
   const tabs = [
     { id: 'compliance', label: 'Compliance', icon: AgentTabIcons.compliance },
+    { id: 'tickets', label: t('tickets.tab'), icon: AgentTabIcons.tickets, count: pipeline.tickets.length, urgent: pipeline.hasUrgentTickets },
     { id: 'risks', label: 'Risk Assessment', icon: AgentTabIcons.risks, count: failCount + warnCount },
     { id: 'audit', label: 'Audit Trail', icon: AgentTabIcons.audit },
     { id: 'chat', label: 'Chat', icon: AgentTabIcons.chat },
     { id: 'activity', label: 'Activity', icon: AgentTabIcons.activity },
+    { id: 'settings', label: t('agentSettings.tab'), icon: AgentTabIcons.settings },
   ];
 
   const recentEvents = agent.recent_events || [];
@@ -48,13 +68,15 @@ export default function LegalAgentView({ agent }) {
         </div>
       </div>
 
+      <ActiveTicketIndicator selectedTicket={pipeline.selectedTicket} onClear={pipeline.clearTicket} />
+
       {/* Tabs */}
       <div className="agent-tabs">
         {tabs.map((tab) => (
           <button key={tab.id} className={`agent-tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
             <span>{tab.icon}</span>
             <span>{tab.label}</span>
-            {tab.count != null && <span className="agent-tab-count">{tab.count}</span>}
+            {tab.count != null && <span className={`agent-tab-count${tab.urgent ? ' urgent' : ''}`}>{tab.count}</span>}
           </button>
         ))}
       </div>
@@ -162,7 +184,24 @@ export default function LegalAgentView({ agent }) {
         )}
 
         {activeTab === 'chat' && (
-          <AgentChat agentId={agent.id} agentName={agent.name} agentAvatar={agent.avatar} />
+          <AgentChatSwitcher
+            agent={agent}
+            selectedTicket={pipeline.selectedTicket}
+            pipelineData={pipeline.pipelineData}
+            currentSession={pipeline.currentSession}
+            completedSessions={pipeline.completedSessions}
+            agents={pipeline.agents}
+            onClearTicket={pipeline.clearTicket}
+            onHandoffRequest={pipeline.setHandoffSession}
+          />
+        )}
+
+        {activeTab === 'tickets' && (
+          <AgentTicketsPanel
+            tickets={pipeline.tickets}
+            selectedTicket={pipeline.selectedTicket}
+            onSelectTicket={handleWorkOnTicket}
+          />
         )}
 
         {activeTab === 'activity' && (
@@ -184,7 +223,21 @@ export default function LegalAgentView({ agent }) {
             )}
           </div>
         )}
+
+        {activeTab === 'settings' && (
+          <AgentSettingsPanel agentId={agent.id} />
+        )}
       </section>
+      {pipeline.handoffSession && (
+        <HandoffModal
+          projectId={pipeline.selectedTicket?.project_id}
+          session={pipeline.handoffSession}
+          stages={pipeline.stages}
+          agents={pipeline.agents}
+          onClose={() => pipeline.setHandoffSession(null)}
+          onComplete={pipeline.onHandoffComplete}
+        />
+      )}
     </>
   );
 }

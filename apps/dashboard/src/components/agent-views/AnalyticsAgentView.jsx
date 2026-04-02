@@ -1,27 +1,47 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { analyticsAgentData } from '../../data/agentViewMocks.js';
-import AgentChat from '../AgentChat.jsx';
+import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
+import ActiveTicketIndicator from './shared/ActiveTicketIndicator.jsx';
+import AgentTicketsPanel from './shared/AgentTicketsPanel.jsx';
+import AgentChatSwitcher from './shared/AgentChatSwitcher.jsx';
+import HandoffModal from '../HandoffModal.jsx';
 import KpiCard from './shared/KpiCard.jsx';
 import StatusBadge from './shared/StatusBadge.jsx';
 import { AgentTabIcons, ReportTypeIcons } from '../icons.jsx';
+import AgentSettingsPanel from './AgentSettingsPanel.jsx';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 const trendArrow = { up: '↑', down: '↓', stable: '→' };
 const trendColor = { up: 'var(--accent-green)', down: '#ef4444', stable: '#f59e0b' };
 
-export default function AnalyticsAgentView({ agent }) {
+export default function AnalyticsAgentView({ agent, activeTab: activeTabProp, onTabChange }) {
   const { t, lang } = useLanguage();
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [localTab, setLocalTab] = useState('dashboard');
+  const activeTab = activeTabProp !== undefined ? activeTabProp : localTab;
+  const setActiveTab = (tab) => {
+    setLocalTab(tab);
+    if (onTabChange) onTabChange(tab);
+  };
+  useEffect(() => {
+    if (onTabChange) onTabChange(localTab);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const pipeline = useAgentPipelineSession(agent.id);
+  const handleWorkOnTicket = (ticket) => {
+    pipeline.selectTicket(ticket);
+    setActiveTab('chat');
+  };
   const data = analyticsAgentData;
 
   const tabs = [
     { id: 'dashboard', label: 'Performance Dashboard', icon: AgentTabIcons.dashboard },
+    { id: 'tickets', label: t('tickets.tab'), icon: AgentTabIcons.tickets, count: pipeline.tickets.length, urgent: pipeline.hasUrgentTickets },
     { id: 'bau', label: 'BAU Metrics', icon: AgentTabIcons.bau },
     { id: 'attribution', label: 'Channel Attribution', icon: AgentTabIcons.attribution },
     { id: 'reports', label: 'Reports', icon: AgentTabIcons.reports, count: data.reports.length },
     { id: 'chat', label: 'Chat', icon: AgentTabIcons.chat },
     { id: 'activity', label: 'Activity', icon: AgentTabIcons.activity },
+    { id: 'settings', label: t('agentSettings.tab'), icon: AgentTabIcons.settings },
   ];
 
   const recentEvents = agent.recent_events || [];
@@ -53,13 +73,15 @@ export default function AnalyticsAgentView({ agent }) {
         />
       </div>
 
+      <ActiveTicketIndicator selectedTicket={pipeline.selectedTicket} onClear={pipeline.clearTicket} />
+
       {/* Tabs */}
       <div className="agent-tabs">
         {tabs.map((tab) => (
           <button key={tab.id} className={`agent-tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
             <span>{tab.icon}</span>
             <span>{tab.label}</span>
-            {tab.count != null && <span className="agent-tab-count">{tab.count}</span>}
+            {tab.count != null && <span className={`agent-tab-count${tab.urgent ? ' urgent' : ''}`}>{tab.count}</span>}
           </button>
         ))}
       </div>
@@ -230,7 +252,24 @@ export default function AnalyticsAgentView({ agent }) {
         )}
 
         {activeTab === 'chat' && (
-          <AgentChat agentId={agent.id} agentName={agent.name} agentAvatar={agent.avatar} />
+          <AgentChatSwitcher
+            agent={agent}
+            selectedTicket={pipeline.selectedTicket}
+            pipelineData={pipeline.pipelineData}
+            currentSession={pipeline.currentSession}
+            completedSessions={pipeline.completedSessions}
+            agents={pipeline.agents}
+            onClearTicket={pipeline.clearTicket}
+            onHandoffRequest={pipeline.setHandoffSession}
+          />
+        )}
+
+        {activeTab === 'tickets' && (
+          <AgentTicketsPanel
+            tickets={pipeline.tickets}
+            selectedTicket={pipeline.selectedTicket}
+            onSelectTicket={handleWorkOnTicket}
+          />
         )}
 
         {activeTab === 'activity' && (
@@ -252,7 +291,21 @@ export default function AnalyticsAgentView({ agent }) {
             )}
           </div>
         )}
+
+        {activeTab === 'settings' && (
+          <AgentSettingsPanel agentId={agent.id} />
+        )}
       </section>
+      {pipeline.handoffSession && (
+        <HandoffModal
+          projectId={pipeline.selectedTicket?.project_id}
+          session={pipeline.handoffSession}
+          stages={pipeline.stages}
+          agents={pipeline.agents}
+          onClose={() => pipeline.setHandoffSession(null)}
+          onComplete={pipeline.onHandoffComplete}
+        />
+      )}
     </>
   );
 }

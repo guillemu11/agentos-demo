@@ -30,9 +30,17 @@ const TYPE_TO_CATEGORY = {
 
 const BLOCK_CATEGORIES = ['All', 'Header', 'Hero', 'Content', 'CTA', 'Footer'];
 
-export default function HtmlDeveloperView({ agent }) {
+export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onTabChange }) {
   const { t, lang } = useLanguage();
-  const [activeTab, setActiveTab] = useState('templates');
+  const [localTab, setLocalTab] = useState('templates');
+  const activeTab = activeTabProp !== undefined ? activeTabProp : localTab;
+  const setActiveTab = (tab) => {
+    setLocalTab(tab);
+    if (onTabChange) onTabChange(tab);
+  };
+  useEffect(() => {
+    if (onTabChange) onTabChange(localTab);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [showSource, setShowSource] = useState(false);
   const [blockFilter, setBlockFilter] = useState('All');

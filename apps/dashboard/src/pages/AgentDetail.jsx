@@ -36,7 +36,7 @@ export default function AgentDetail() {
     const [error, setError] = useState(null);
 
     const [showModal, setShowModal] = useState(false);
-    const [activeTab, setActiveTab] = useState('chat');
+    const [activeTab, setActiveTab] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [formData, setFormData] = useState({
         name: '',
@@ -134,7 +134,6 @@ export default function AgentDetail() {
             {/* Agent Profile Header */}
             <section
                 className={`agent-profile-header${activeTab === 'chat' ? ' agent-profile-header--compact' : ''}`}
-                style={activeTab === 'chat' ? {} : { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}
             >
                 <div className="agent-profile-left">
                     <div className="agent-profile-avatar-wrapper">

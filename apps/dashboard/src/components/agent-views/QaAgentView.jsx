@@ -1,10 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { qaAgentData } from '../../data/agentViewMocks.js';
-import AgentChat from '../AgentChat.jsx';
+import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
+import ActiveTicketIndicator from './shared/ActiveTicketIndicator.jsx';
+import AgentTicketsPanel from './shared/AgentTicketsPanel.jsx';
+import AgentChatSwitcher from './shared/AgentChatSwitcher.jsx';
+import HandoffModal from '../HandoffModal.jsx';
 import KpiCard from './shared/KpiCard.jsx';
 import StatusBadge from './shared/StatusBadge.jsx';
 import { AgentTabIcons, QaIcons } from '../icons.jsx';
+import AgentSettingsPanel from './AgentSettingsPanel.jsx';
 import { CheckCircle2, XCircle } from 'lucide-react';
 
 const severityColor = { critical: '#ef4444', major: '#f59e0b', minor: '#94a3b8' };
@@ -14,18 +19,33 @@ function RenderScore({ score }) {
   return <span style={{ fontWeight: 600, color }}>{score}</span>;
 }
 
-export default function QaAgentView({ agent }) {
+export default function QaAgentView({ agent, activeTab: activeTabProp, onTabChange }) {
   const { t, lang } = useLanguage();
-  const [activeTab, setActiveTab] = useState('results');
+  const [localTab, setLocalTab] = useState('results');
+  const activeTab = activeTabProp !== undefined ? activeTabProp : localTab;
+  const setActiveTab = (tab) => {
+    setLocalTab(tab);
+    if (onTabChange) onTabChange(tab);
+  };
+  useEffect(() => {
+    if (onTabChange) onTabChange(localTab);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [expandedRow, setExpandedRow] = useState(null);
+  const pipeline = useAgentPipelineSession(agent.id);
+  const handleWorkOnTicket = (ticket) => {
+    pipeline.selectTicket(ticket);
+    setActiveTab('chat');
+  };
   const data = qaAgentData;
 
   const tabs = [
     { id: 'results', label: 'Test Results', icon: AgentTabIcons.results },
+    { id: 'tickets', label: t('tickets.tab'), icon: AgentTabIcons.tickets, count: pipeline.tickets.length, urgent: pipeline.hasUrgentTickets },
     { id: 'queue', label: 'QA Queue', icon: AgentTabIcons.queue, count: data.queue.length },
     { id: 'bugs', label: 'Bug Tracker', icon: AgentTabIcons.bugs, count: data.bugs.filter((b) => b.status !== 'fixed').length },
     { id: 'chat', label: 'Chat', icon: AgentTabIcons.chat },
     { id: 'activity', label: 'Activity', icon: AgentTabIcons.activity },
+    { id: 'settings', label: t('agentSettings.tab'), icon: AgentTabIcons.settings },
   ];
 
   const recentEvents = agent.recent_events || [];
@@ -52,13 +72,15 @@ export default function QaAgentView({ agent }) {
         />
       </div>
 
+      <ActiveTicketIndicator selectedTicket={pipeline.selectedTicket} onClear={pipeline.clearTicket} />
+
       {/* Tabs */}
       <div className="agent-tabs">
         {tabs.map((tab) => (
           <button key={tab.id} className={`agent-tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
             <span>{tab.icon}</span>
             <span>{tab.label}</span>
-            {tab.count != null && <span className="agent-tab-count">{tab.count}</span>}
+            {tab.count != null && <span className={`agent-tab-count${tab.urgent ? ' urgent' : ''}`}>{tab.count}</span>}
           </button>
         ))}
       </div>
@@ -169,7 +191,24 @@ export default function QaAgentView({ agent }) {
         )}
 
         {activeTab === 'chat' && (
-          <AgentChat agentId={agent.id} agentName={agent.name} agentAvatar={agent.avatar} />
+          <AgentChatSwitcher
+            agent={agent}
+            selectedTicket={pipeline.selectedTicket}
+            pipelineData={pipeline.pipelineData}
+            currentSession={pipeline.currentSession}
+            completedSessions={pipeline.completedSessions}
+            agents={pipeline.agents}
+            onClearTicket={pipeline.clearTicket}
+            onHandoffRequest={pipeline.setHandoffSession}
+          />
+        )}
+
+        {activeTab === 'tickets' && (
+          <AgentTicketsPanel
+            tickets={pipeline.tickets}
+            selectedTicket={pipeline.selectedTicket}
+            onSelectTicket={handleWorkOnTicket}
+          />
         )}
 
         {activeTab === 'activity' && (
@@ -191,7 +230,21 @@ export default function QaAgentView({ agent }) {
             )}
           </div>
         )}
+
+        {activeTab === 'settings' && (
+          <AgentSettingsPanel agentId={agent.id} />
+        )}
       </section>
+      {pipeline.handoffSession && (
+        <HandoffModal
+          projectId={pipeline.selectedTicket?.project_id}
+          session={pipeline.handoffSession}
+          stages={pipeline.stages}
+          agents={pipeline.agents}
+          onClose={() => pipeline.setHandoffSession(null)}
+          onComplete={pipeline.onHandoffComplete}
+        />
+      )}
     </>
   );
 }

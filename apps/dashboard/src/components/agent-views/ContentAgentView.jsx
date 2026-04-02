@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { contentAgentData } from '../../data/agentViewMocks.js';
 import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
@@ -29,9 +29,17 @@ const langFlags = {
   ar: '🇦🇪',
 };
 
-export default function ContentAgentView({ agent }) {
+export default function ContentAgentView({ agent, activeTab: activeTabProp, onTabChange }) {
   const { t, lang } = useLanguage();
-  const [activeTab, setActiveTab] = useState('portfolio');
+  const [localTab, setLocalTab] = useState('portfolio');
+  const activeTab = activeTabProp !== undefined ? activeTabProp : localTab;
+  const setActiveTab = (tab) => {
+    setLocalTab(tab);
+    if (onTabChange) onTabChange(tab);
+  };
+  useEffect(() => {
+    if (onTabChange) onTabChange(localTab);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [typeFilter, setTypeFilter] = useState('all');
   const data = contentAgentData;
 

@@ -1,36 +1,49 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { campaignManagerData } from '../../data/agentViewMocks.js';
-import { getBauTypeById, getBauCategoryById } from '../../data/emiratesBauTypes.js';
-import AgentChat from '../AgentChat.jsx';
-import KpiCard from './shared/KpiCard.jsx';
+import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
+import ActiveTicketIndicator from './shared/ActiveTicketIndicator.jsx';
+import AgentTicketsPanel from './shared/AgentTicketsPanel.jsx';
+import AgentChatSwitcher from './shared/AgentChatSwitcher.jsx';
+import HandoffModal from '../HandoffModal.jsx';
 import StatusBadge from './shared/StatusBadge.jsx';
 import DataTable from './shared/DataTable.jsx';
 import ProgressBar from './shared/ProgressBar.jsx';
 import { AgentTabIcons } from '../icons.jsx';
+import AgentSettingsPanel from './AgentSettingsPanel.jsx';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
 
-export default function CampaignManagerView({ agent }) {
-  const navigate = useNavigate();
+export default function CampaignManagerView({ agent, activeTab: activeTabProp, onTabChange }) {
   const { t, lang } = useLanguage();
-  const [activeTab, setActiveTab] = useState('campaigns');
+  const [localTab, setLocalTab] = useState('campaigns');
+  const activeTab = activeTabProp !== undefined ? activeTabProp : localTab;
+  const setActiveTab = (tab) => {
+    setLocalTab(tab);
+    if (onTabChange) onTabChange(tab);
+  };
+  useEffect(() => {
+    if (onTabChange) onTabChange(localTab);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [metricsChart, setMetricsChart] = useState('line');
   const data = campaignManagerData;
 
-  const activeCampaigns = data.campaigns.filter(c => c.status !== 'launched').length;
-  const completedCampaigns = data.campaigns.filter(c => c.status === 'launched').length;
-  const avgProgress = Math.round(data.campaigns.reduce((s, c) => s + c.progress, 0) / data.campaigns.length);
+  const pipeline = useAgentPipelineSession(agent.id);
+  const handleWorkOnTicket = (ticket) => {
+    pipeline.selectTicket(ticket);
+    setActiveTab('chat');
+  };
 
   const tabs = [
     { id: 'campaigns', label: 'Active Campaigns', icon: AgentTabIcons.campaigns },
+    { id: 'tickets', label: t('tickets.tab'), icon: AgentTabIcons.tickets, count: pipeline.tickets.length, urgent: pipeline.hasUrgentTickets },
     { id: 'dependencies', label: 'Dependencies', icon: AgentTabIcons.dependencies, count: data.dependencies.filter(d => d.status !== 'resolved').length },
     { id: 'metrics', label: 'Campaign Metrics', icon: AgentTabIcons.metrics },
     { id: 'chat', label: 'Chat', icon: AgentTabIcons.chat },
     { id: 'activity', label: 'Activity', icon: AgentTabIcons.activity },
+    { id: 'settings', label: t('agentSettings.tab'), icon: AgentTabIcons.settings },
   ];
 
   const depColumns = [
@@ -68,63 +81,7 @@ export default function CampaignManagerView({ agent }) {
 
   return (
     <>
-      {/* Hero KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-        <KpiCard label={t('campaignManager.activeCampaigns') || 'Active Campaigns'} value={activeCampaigns} color="#6366f1" />
-        <KpiCard label={t('campaignManager.completed') || 'Completed'} value={completedCampaigns} color="#10b981" />
-        <KpiCard label={t('campaignManager.avgProgress') || 'Avg Progress'} value={`${avgProgress}%`} color="#f59e0b" />
-      </div>
-
-      {/* Campaign Pipeline Hero */}
-      <div className="card" style={{ padding: '20px', marginBottom: '24px' }}>
-        <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '16px' }}>{t('campaignManager.pipeline') || 'Campaign Pipeline'}</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {data.campaigns.map((campaign) => (
-            <div key={campaign.id} className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                  <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{campaign.name}</span>
-                  <StatusBadge status={campaign.status === 'launched' ? 'success' : campaign.status === 'qa' ? 'warning' : campaign.status === 'content' ? 'in-progress' : 'draft'} label={campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1)} />
-                  {campaign.bauType && (() => {
-                    const bt = getBauTypeById(campaign.bauType);
-                    const cat = bt ? getBauCategoryById(bt.category) : null;
-                    return bt && cat ? (
-                      <span
-                        onClick={(e) => { e.stopPropagation(); navigate(`/app/campaigns/bau/${bt.id}`); }}
-                        style={{ padding: '2px 8px', borderRadius: '6px', fontSize: '0.65rem', fontWeight: 600, background: `${cat.color}15`, color: cat.color, cursor: 'pointer' }}
-                      >
-                        {cat.icon} {bt.name}
-                      </span>
-                    ) : null;
-                  })()}
-                </div>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  {t('campaignManager.target') || 'Target'}: {new Date(campaign.targetDate).toLocaleDateString(lang === 'en' ? 'en-US' : 'es-ES', { month: 'short', day: 'numeric' })}
-                </span>
-              </div>
-              <ProgressBar percent={campaign.progress} color={getStatusColor(campaign.status)} />
-              {/* Phase indicators */}
-              <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                {campaign.phases.map((phase, i) => (
-                  <React.Fragment key={phase.name}>
-                    <span style={{
-                      display: 'inline-flex', alignItems: 'center', gap: '4px',
-                      padding: '2px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600,
-                      background: phase.done ? 'rgba(16,185,129,0.15)' : phase.current ? 'rgba(99,102,241,0.15)' : 'rgba(0,0,0,0.05)',
-                      color: getPhaseColor(phase),
-                    }}>
-                      {phase.done ? '✓' : phase.current ? '●' : '○'} {phase.name}
-                    </span>
-                    {i < campaign.phases.length - 1 && (
-                      <span style={{ color: '#d1d5db', fontSize: '0.7rem' }}>→</span>
-                    )}
-                  </React.Fragment>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+      <ActiveTicketIndicator selectedTicket={pipeline.selectedTicket} onClear={pipeline.clearTicket} />
 
       {/* Tabs */}
       <div className="agent-tabs">
@@ -132,7 +89,7 @@ export default function CampaignManagerView({ agent }) {
           <button key={tab.id} className={`agent-tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
             <span>{tab.icon}</span>
             <span>{tab.label}</span>
-            {tab.count != null && <span className="agent-tab-count">{tab.count}</span>}
+            {tab.count != null && <span className={`agent-tab-count${tab.urgent ? ' urgent' : ''}`}>{tab.count}</span>}
           </button>
         ))}
       </div>
@@ -280,7 +237,24 @@ export default function CampaignManagerView({ agent }) {
         )}
 
         {activeTab === 'chat' && (
-          <AgentChat agentId={agent.id} agentName={agent.name} agentAvatar={agent.avatar} />
+          <AgentChatSwitcher
+            agent={agent}
+            selectedTicket={pipeline.selectedTicket}
+            pipelineData={pipeline.pipelineData}
+            currentSession={pipeline.currentSession}
+            completedSessions={pipeline.completedSessions}
+            agents={pipeline.agents}
+            onClearTicket={pipeline.clearTicket}
+            onHandoffRequest={pipeline.setHandoffSession}
+          />
+        )}
+
+        {activeTab === 'tickets' && (
+          <AgentTicketsPanel
+            tickets={pipeline.tickets}
+            selectedTicket={pipeline.selectedTicket}
+            onSelectTicket={handleWorkOnTicket}
+          />
         )}
 
         {activeTab === 'activity' && (
@@ -302,7 +276,22 @@ export default function CampaignManagerView({ agent }) {
             )}
           </div>
         )}
+
+        {activeTab === 'settings' && (
+          <AgentSettingsPanel agentId={agent.id} />
+        )}
       </section>
+
+      {pipeline.handoffSession && (
+        <HandoffModal
+          projectId={pipeline.selectedTicket?.project_id}
+          session={pipeline.handoffSession}
+          stages={pipeline.stages}
+          agents={pipeline.agents}
+          onClose={() => pipeline.setHandoffSession(null)}
+          onComplete={pipeline.onHandoffComplete}
+        />
+      )}
     </>
   );
 }
