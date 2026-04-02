@@ -1,39 +1,71 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
-import { useVoice } from '../hooks/useVoice.js';
-import { MicButton, SpeakerButton, TtsToggle, VoiceModeButton } from './VoiceControls.jsx';
-import VoiceOverlay from './VoiceOverlay.jsx';
+import { useGeminiLive } from '../hooks/useGeminiLive.js';
+import renderMarkdown from '../utils/renderMarkdown.js';
+import { Mic, MicOff, PhoneOff, Loader, Send, FileText } from 'lucide-react';
+import EmailPreview from './EmailPreview.jsx';
+
+const FILE_URL = (path) => `${import.meta.env.VITE_API_URL || '/api'}/kb-files/${path}`;
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-export default function AgentChat({ agentId, agentName, agentAvatar }) {
+export default function AgentChat({ agentId, agentName, agentAvatar, externalInput, onExternalInputConsumed }) {
     const { t, lang } = useLanguage();
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [streaming, setStreaming] = useState(false);
     const [ragSources, setRagSources] = useState([]);
-    const [voiceMode, setVoiceMode] = useState(false);
+    const [expandedMedia, setExpandedMedia] = useState(null);
     const messagesEndRef = useRef(null);
 
-    const handleTranscript = useCallback((transcript) => {
-        setInput(prev => prev ? prev + ' ' + transcript : transcript);
+    // ─── Voice (Gemini Live) ──────────────────────────────────────────────
+
+    const handleVoiceTurnComplete = useCallback((userText, assistantText, media) => {
+        if (!userText && !assistantText) return;
+        const newMessages = [];
+        if (userText) newMessages.push({ role: 'user', content: userText });
+        if (assistantText || (media && media.length > 0)) {
+            newMessages.push({ role: 'assistant', content: assistantText || '', media: media || [] });
+        }
+        if (newMessages.length > 0) {
+            setMessages(prev => [...prev, ...newMessages]);
+        }
     }, []);
 
     const {
-        sttSupported, isListening, toggleListening,
-        ttsSupported, ttsEnabled, setTtsEnabled, isSpeaking, speak, stopSpeaking,
-    } = useVoice({ lang, onTranscript: handleTranscript });
+        status: voiceStatus,
+        inputTranscript,
+        outputTranscript,
+        error: voiceError,
+        isMuted,
+        connect: connectVoice,
+        disconnect: disconnectVoice,
+        toggleMute,
+    } = useGeminiLive({
+        wsPath: '/ws/voice-agent',
+        wsParams: { agentId },
+        lang,
+        onTurnComplete: handleVoiceTurnComplete,
+        onSources: (newSources) => { if (newSources.length > 0) setRagSources(newSources); },
+    });
 
-    const prevStreamingRef = useRef(false);
-    useEffect(() => {
-        if (prevStreamingRef.current && !streaming && ttsEnabled) {
-            const lastMsg = messages[messages.length - 1];
-            if (lastMsg?.role === 'assistant' && lastMsg.content) {
-                speak(lastMsg.content);
-            }
+    const isVoiceConnected = voiceStatus !== 'idle' && voiceStatus !== 'error';
+
+    function toggleVoiceSession() {
+        if (isVoiceConnected) {
+            disconnectVoice();
+        } else {
+            connectVoice();
         }
-        prevStreamingRef.current = streaming;
-    }, [streaming, ttsEnabled, messages, speak]);
+    }
+
+    async function clearConversation() {
+        await fetch(`${API_URL}/agents/${agentId}/conversation`, { method: 'DELETE' });
+        setMessages([]);
+        setRagSources([]);
+    }
+
+    // ─── Text Chat ────────────────────────────────────────────────────────
 
     // Load existing conversation on mount / agentId change
     useEffect(() => {
@@ -51,10 +83,17 @@ export default function AgentChat({ agentId, agentName, agentAvatar }) {
         return () => { cancelled = true; };
     }, [agentId]);
 
+    // Consume external input (e.g. from block click in preview)
+    useEffect(() => {
+        if (!externalInput) return;
+        setInput(prev => externalInput + prev);
+        onExternalInputConsumed?.();
+    }, [externalInput]);
+
     // Auto-scroll
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, streaming]);
+    }, [messages, streaming, inputTranscript, outputTranscript]);
 
     async function sendMessage() {
         const msg = input.trim();
@@ -73,17 +112,29 @@ export default function AgentChat({ agentId, agentName, agentAvatar }) {
                 body: JSON.stringify({ message: msg }),
             });
 
-            // Extract RAG sources from header
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ error: 'Request failed' }));
+                setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.error || res.statusText}` }]);
+                return;
+            }
+
             const ragHeader = res.headers.get('X-RAG-Sources');
             if (ragHeader) {
                 try { setRagSources(JSON.parse(ragHeader)); } catch { /* ignore */ }
+            }
+
+            // email HTML comes via SSE event (html_sources) — too large for HTTP headers
+            let parsedMedia = [];
+            const mediaHeader = res.headers.get('X-RAG-Media');
+            if (mediaHeader) {
+                try { parsedMedia = JSON.parse(mediaHeader); } catch { /* ignore */ }
             }
 
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
             let fullResponse = '';
 
-            setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+            setMessages(prev => [...prev, { role: 'assistant', content: '', media: parsedMedia }]);
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -99,12 +150,35 @@ export default function AgentChat({ agentId, agentName, agentAvatar }) {
 
                     try {
                         const parsed = JSON.parse(data);
-                        if (parsed.text) {
+                        if (parsed.error) {
+                            fullResponse = `Error: ${parsed.error}`;
+                            setMessages(prev => {
+                                const updated = [...prev];
+                                const last = updated[updated.length - 1];
+                                updated[updated.length - 1] = { ...last, content: fullResponse };
+                                return updated;
+                            });
+                        } else if (parsed.html_sources) {
+                            const newMedia = parsed.html_sources
+                                .filter(s => s.htmlSource)
+                                .map(s => ({ mediaType: 'email_html', htmlSource: s.htmlSource, title: s.title }));
+                            if (newMedia.length > 0) {
+                                setMessages(prev => {
+                                    const updated = [...prev];
+                                    const last = updated[updated.length - 1];
+                                    const existing = last.media || [];
+                                    const merged = [...existing, ...newMedia.filter(m => !existing.find(e => e.title === m.title))];
+                                    updated[updated.length - 1] = { ...last, media: merged };
+                                    return updated;
+                                });
+                            }
+                        } else if (parsed.text) {
                             fullResponse += parsed.text;
                             const captured = fullResponse;
                             setMessages(prev => {
                                 const updated = [...prev];
-                                updated[updated.length - 1] = { role: 'assistant', content: captured };
+                                const last = updated[updated.length - 1];
+                                updated[updated.length - 1] = { ...last, content: captured };
                                 return updated;
                             });
                         }
@@ -122,6 +196,7 @@ export default function AgentChat({ agentId, agentName, agentAvatar }) {
         try {
             await fetch(`${API_URL}/agents/${agentId}/conversation`, { method: 'DELETE' });
             setMessages([]);
+            setRagSources([]);
         } catch { /* ignore */ }
     }
 
@@ -132,15 +207,17 @@ export default function AgentChat({ agentId, agentName, agentAvatar }) {
         }
     }
 
+
+    // ─── Render ───────────────────────────────────────────────────────────
+
     return (
+        <>
         <div className="chat-container">
             <div className="chat-header">
                 <span className="chat-header-title">
                     {agentAvatar} {t('agentChat.chatWith')} {agentName}
                 </span>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <VoiceModeButton onClick={() => setVoiceMode(true)} />
-                    <TtsToggle ttsEnabled={ttsEnabled} setTtsEnabled={setTtsEnabled} ttsSupported={ttsSupported} />
                     {messages.length > 0 && !streaming && (
                         <button
                             onClick={clearConversation}
@@ -162,7 +239,7 @@ export default function AgentChat({ agentId, agentName, agentAvatar }) {
             </div>
 
             <div className="chat-messages">
-                {messages.length === 0 && (
+                {messages.length === 0 && !isVoiceConnected && (
                     <div className="chat-empty">
                         <div className="chat-empty-icon">{agentAvatar}</div>
                         <div className="chat-empty-text">
@@ -173,15 +250,69 @@ export default function AgentChat({ agentId, agentName, agentAvatar }) {
 
                 {messages.map((msg, i) => (
                     <div key={i} className={`chat-bubble ${msg.role}`}>
-                        {msg.content || (streaming && i === messages.length - 1 ? '' : '...')}
-                        {msg.role === 'assistant' && msg.content && ttsSupported && (
-                            <SpeakerButton
-                                onClick={() => isSpeaking ? stopSpeaking() : speak(msg.content)}
-                                isSpeaking={isSpeaking}
-                            />
+                        {msg.role === 'assistant'
+                            ? <div className="md-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content || '') }} />
+                            : (msg.content || '...')}
+                        {msg.role === 'assistant' && msg.media?.length > 0 && (
+                            <div className="chat-inline-media">
+                                {msg.media.map((m, j) => (
+                                    m.mediaType === 'email_html' ? (
+                                        <div key={j} style={{ width: '100%', marginTop: 8 }}>
+                                            <EmailPreview html={m.htmlSource} title={m.title} />
+                                        </div>
+                                    ) : (
+                                        <div key={j} className="chat-inline-media-item" onClick={() => {
+                                            if (m.mediaType === 'image') {
+                                                setExpandedMedia({ type: 'image', src: FILE_URL(m.filePath), title: m.title });
+                                            } else {
+                                                setExpandedMedia({ type: 'pdf', src: FILE_URL(m.filePath), title: m.title, pageNumber: m.pageNumber });
+                                            }
+                                        }}>
+                                            {m.mediaType === 'image'
+                                                ? <div className="chat-inline-img-wrap">
+                                                    <img src={FILE_URL(m.filePath)} alt={m.title} loading="lazy"
+                                                        onLoad={e => e.target.parentElement.classList.add('loaded')}
+                                                        onError={e => { e.target.style.display = 'none'; e.target.parentElement.classList.add('error'); }}
+                                                    />
+                                                  </div>
+                                                : <div className="chat-inline-pdf"><FileText size={20} /><span className="chat-inline-pdf-title">{m.title?.slice(0, 20) || 'PDF'}</span><span>p.{m.pageNumber || '?'}</span></div>
+                                            }
+                                        </div>
+                                    )
+                                ))}
+                            </div>
                         )}
                     </div>
                 ))}
+
+                {/* Live Voice Transcripts */}
+                {isVoiceConnected && (inputTranscript || outputTranscript || voiceStatus === 'listening' || voiceStatus === 'speaking' || voiceStatus === 'searching') && (
+                    <div className="voice-transcripts-live">
+                        {inputTranscript && (
+                            <div className="chat-line-wrapper user voice-preview">
+                                <div className="chat-bubble user">
+                                    {inputTranscript}
+                                </div>
+                            </div>
+                        )}
+                        {(outputTranscript || voiceStatus === 'searching' || voiceStatus === 'speaking') && (
+                            <div className="chat-line-wrapper assistant voice-preview">
+                                <div className="chat-bubble assistant">
+                                    {outputTranscript
+                                        ? <div className="md-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(outputTranscript) }} />
+                                        : ''}
+                                    {voiceStatus === 'searching' && !outputTranscript && (
+                                        <span style={{ opacity: 0.6, fontStyle: 'italic' }}>
+                                            <Loader size={12} className="spin" style={{ display: 'inline-block', marginRight: 4 }} />
+                                            {t('agentChat.voiceSearching')}
+                                        </span>
+                                    )}
+                                    {voiceStatus === 'speaking' && <span className="voice-pulsing-dot" />}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {streaming && messages[messages.length - 1]?.content === '' && (
                     <div className="chat-typing">
@@ -194,24 +325,7 @@ export default function AgentChat({ agentId, agentName, agentAvatar }) {
                 <div ref={messagesEndRef} />
             </div>
 
-            <div className="chat-input-row">
-                <MicButton
-                    isListening={isListening}
-                    onClick={toggleListening}
-                    disabled={streaming}
-                    sttSupported={sttSupported}
-                />
-                <input
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder={t('agentChat.placeholder').replace('{name}', agentName)}
-                    disabled={streaming}
-                />
-                <button onClick={() => sendMessage()} disabled={streaming || !input.trim()}>
-                    {t('agentChat.send')}
-                </button>
-            </div>
+            {/* RAG Sources */}
             {ragSources.length > 0 && (
                 <div className="chat-rag-sources">
                     <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -226,17 +340,71 @@ export default function AgentChat({ agentId, agentName, agentAvatar }) {
                     </div>
                 </div>
             )}
-            {voiceMode && (
-                <VoiceOverlay
-                    agentId={agentId}
-                    agentName={agentName}
-                    agentAvatar={agentAvatar}
-                    onClose={() => setVoiceMode(false)}
-                    onMessage={(role, text) => {
-                        setMessages(prev => [...prev, { role, content: text }]);
-                    }}
-                />
-            )}
+
+            {/* Input */}
+            <div className="chat-input-row">
+                {isVoiceConnected ? (
+                    <div className="voice-active-bar" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px', background: 'var(--primary-soft)', borderRadius: 12, color: 'var(--primary)', fontWeight: 600 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span className={`voice-status-dot ${voiceStatus === 'listening' ? 'pulsing' : ''}`}></span>
+                            {voiceStatus === 'listening' ? t('agentChat.voiceListening') :
+                             voiceStatus === 'speaking' ? t('agentChat.voiceSpeaking') :
+                             voiceStatus === 'searching' ? t('agentChat.voiceSearching') : t('agentChat.voiceReady')}
+                            {voiceError && <span style={{ color: 'red', fontSize: '0.8rem', marginLeft: 8 }}>{voiceError}</span>}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                            <button className={`kb-voice-btn-inner ${isMuted ? 'muted' : ''}`} onClick={toggleMute} title={t('agentChat.voiceMute')}>
+                                {isMuted ? <MicOff size={16} /> : <Mic size={16} />}
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <textarea
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder={t('agentChat.placeholder').replace('{name}', agentName)}
+                        disabled={streaming}
+                        rows={1}
+                    />
+                )}
+
+                <button
+                    className={`kb-voice-btn ${isVoiceConnected ? 'active' : ''}`}
+                    onClick={toggleVoiceSession}
+                    disabled={streaming}
+                    title={isVoiceConnected ? t('agentChat.voiceEndCall') : t('agentChat.voiceStart')}
+                    style={isVoiceConnected ? { background: '#ef4444', color: 'white', borderColor: '#ef4444' } : {}}
+                >
+                    {isVoiceConnected ? <PhoneOff size={16} /> : <Mic size={16} />}
+                </button>
+
+                {!isVoiceConnected && (
+                    <button
+                        onClick={() => sendMessage()}
+                        disabled={streaming || !input.trim()}
+                    >
+                        {streaming ? <Loader size={14} className="spin" /> : <Send size={14} />}
+                        {t('agentChat.send')}
+                    </button>
+                )}
+            </div>
         </div>
+
+            {expandedMedia && (
+                <div className="kb-media-modal-overlay" onClick={() => setExpandedMedia(null)}>
+                    <div className="kb-media-modal" onClick={e => e.stopPropagation()}>
+                        <button className="kb-media-modal-close" onClick={() => setExpandedMedia(null)}>✕</button>
+                        {expandedMedia.type === 'image' && (
+                            <img src={expandedMedia.src} alt={expandedMedia.title} className="kb-media-modal-img" />
+                        )}
+                        {expandedMedia.type === 'pdf' && (
+                            <iframe src={expandedMedia.src} title={expandedMedia.title} className="kb-media-modal-pdf" />
+                        )}
+                        <div className="kb-media-modal-title">{expandedMedia.title}</div>
+                    </div>
+                </div>
+            )}
+        </>
     );
 }
