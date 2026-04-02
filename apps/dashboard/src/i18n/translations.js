@@ -1382,6 +1382,11 @@ export const translations = {
       statusDraft: 'Draft',
       openEditor: 'Abrir editor',
       noEmailVersions: 'No hay versiones de email para este proyecto',
+      metaStatus: 'Estado',
+      metaCreated: 'Creado',
+      metaGeneratedBy: 'Por',
+      metaVariants: 'Variantes',
+      noVersionsForCombination: 'No hay versiones para esta combinación',
     },
   },
 
@@ -2734,6 +2739,11 @@ export const translations = {
       statusDraft: 'Draft',
       openEditor: 'Open editor',
       noEmailVersions: 'No email versions for this project',
+      metaStatus: 'Status',
+      metaCreated: 'Created',
+      metaGeneratedBy: 'By',
+      metaVariants: 'Variants',
+      noVersionsForCombination: 'No versions for this combination',
     },
   },
 };

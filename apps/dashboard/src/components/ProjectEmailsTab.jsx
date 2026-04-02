@@ -210,25 +210,25 @@ export default function ProjectEmailsTab({ projectId }) {
               <span className="email-meta-value">v{currentEmail.version}</span>
             </div>
             <div className="email-meta-row">
-              <span className="email-meta-label">Estado</span>
+              <span className="email-meta-label">{t('emailBuilder.metaStatus')}</span>
               <span className={`email-status-badge ${currentEmail.status}`}>
                 ● {t(`emailBuilder.status${currentEmail.status.charAt(0).toUpperCase() + currentEmail.status.slice(1)}`) || currentEmail.status}
               </span>
             </div>
             <div className="email-meta-row">
-              <span className="email-meta-label">Creado</span>
+              <span className="email-meta-label">{t('emailBuilder.metaCreated')}</span>
               <span className="email-meta-value" style={{ fontSize: '0.75rem' }}>
                 {new Date(currentEmail.created_at).toLocaleString()}
               </span>
             </div>
             <div className="email-meta-row">
-              <span className="email-meta-label">Por</span>
+              <span className="email-meta-label">{t('emailBuilder.metaGeneratedBy')}</span>
               <span className="email-meta-value" style={{ fontSize: '0.75rem' }}>
                 {currentEmail.generated_by || 'HTML Agent'}
               </span>
             </div>
             <div className="email-meta-row">
-              <span className="email-meta-label">Variantes</span>
+              <span className="email-meta-label">{t('emailBuilder.metaVariants')}</span>
               <span className="email-meta-value" style={{ fontSize: '0.75rem' }}>
                 {matchingVersions.length} versión{matchingVersions.length !== 1 ? 'es' : ''}
               </span>
@@ -242,7 +242,7 @@ export default function ProjectEmailsTab({ projectId }) {
           </div>
         </div>
       ) : (
-        <div className="empty-state">No hay versiones para esta combinación</div>
+        <div className="empty-state">{t('emailBuilder.noVersionsForCombination')}</div>
       )}
     </div>
   );
