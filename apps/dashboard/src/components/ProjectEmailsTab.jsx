@@ -50,7 +50,7 @@ export default function ProjectEmailsTab({ projectId }) {
     if (selectedMarket && !validLanguages.includes(selectedLanguage)) {
       setSelectedLanguage(validLanguages[0] || null);
     }
-  }, [selectedMarket, validLanguages]);
+  }, [selectedMarket, validLanguages, selectedLanguage]);
 
   useEffect(() => {
     if ((selectedMarket || selectedLanguage) && selectedTier && !validTiers.includes(selectedTier)) {
@@ -91,7 +91,7 @@ export default function ProjectEmailsTab({ projectId }) {
   const invalidLanguages = allLanguages.filter(l => !validLanguages.includes(l));
   const invalidTiers = allTiers.filter(t => !validTiers.includes(t));
 
-  if (loading) return <div className="empty-state">Cargando emails...</div>;
+  if (loading) return <div className="empty-state">{t('emailBuilder.loading')}</div>;
   if (emails.length === 0) return <div className="empty-state">{t('emailBuilder.noEmailVersions')}</div>;
 
   return (
@@ -176,11 +176,11 @@ export default function ProjectEmailsTab({ projectId }) {
             <button
               onClick={() => setVersionIndex(i => Math.min(i + 1, matchingVersions.length - 1))}
               disabled={versionIndex >= matchingVersions.length - 1}
-            >‹ anterior</button>
+            >{t('emailBuilder.navPrev')}</button>
             <button
               onClick={() => setVersionIndex(i => Math.max(i - 1, 0))}
               disabled={versionIndex === 0}
-            >siguiente ›</button>
+            >{t('emailBuilder.navNext')}</button>
           </div>
         </div>
       )}
@@ -230,7 +230,7 @@ export default function ProjectEmailsTab({ projectId }) {
             <div className="email-meta-row">
               <span className="email-meta-label">{t('emailBuilder.metaVariants')}</span>
               <span className="email-meta-value" style={{ fontSize: '0.75rem' }}>
-                {matchingVersions.length} versión{matchingVersions.length !== 1 ? 'es' : ''}
+                {matchingVersions.length} {matchingVersions.length !== 1 ? t('emailBuilder.versionsCount') : t('emailBuilder.versionCount')}
               </span>
             </div>
             <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>

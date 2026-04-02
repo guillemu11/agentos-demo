@@ -366,6 +366,20 @@ export default function HtmlDeveloperView({ agent }) {
                 agents={pipeline.agents}
                 onClearTicket={pipeline.clearTicket}
                 onHandoffRequest={pipeline.setHandoffSession}
+                externalInput={chatInput}
+                onExternalInputConsumed={() => setChatInput('')}
+                onHtmlGenerated={(html) => {
+                  setBuilderHtml(html);
+                  setPatchedBlock(null);
+                  setBuilderStatus('Email generado');
+                  setTimeout(() => setBuilderStatus(''), 3000);
+                }}
+                onHtmlPatched={(blockName, html) => {
+                  setBuilderHtml(html);
+                  setPatchedBlock(blockName);
+                  setBuilderStatus(`${blockName} actualizado`);
+                  setTimeout(() => { setPatchedBlock(null); setBuilderStatus(''); }, 2000);
+                }}
               />
             </div>
             <EmailBuilderPreview

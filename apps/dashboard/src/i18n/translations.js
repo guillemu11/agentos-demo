@@ -1387,6 +1387,11 @@ export const translations = {
       metaGeneratedBy: 'Por',
       metaVariants: 'Variantes',
       noVersionsForCombination: 'No hay versiones para esta combinación',
+      loading: 'Cargando emails...',
+      navPrev: '‹ anterior',
+      navNext: 'siguiente ›',
+      versionCount: 'versión',
+      versionsCount: 'versiones',
     },
   },
 
@@ -2744,6 +2749,11 @@ export const translations = {
       metaGeneratedBy: 'By',
       metaVariants: 'Variants',
       noVersionsForCombination: 'No versions for this combination',
+      loading: 'Loading emails...',
+      navPrev: '‹ previous',
+      navNext: 'next ›',
+      versionCount: 'version',
+      versionsCount: 'versions',
     },
   },
 };

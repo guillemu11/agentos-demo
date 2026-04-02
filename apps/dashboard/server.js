@@ -510,7 +510,7 @@ app.post('/api/projects/:id/emails', requireAuth, async (req, res) => {
     const versionRes = await pool.query(
       `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
        FROM email_proposals
-       WHERE project_id = $1 AND market = $2 AND language = $3 AND tier = $4`,
+       WHERE project_id = $1 AND market = $2 AND language = $3 AND tier IS NOT DISTINCT FROM $4`,
       [id, market, language, tier || null]
     );
     const version = versionRes.rows[0].next_version;
