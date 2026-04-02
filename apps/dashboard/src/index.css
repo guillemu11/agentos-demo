@@ -10592,5 +10592,4 @@ body.sidebar-collapsed > .inbox-drawer {
 .email-status-badge.review   { background: rgba(245,158,11,0.15); color: #f59e0b; }
 .email-status-badge.draft    { background: rgba(156,163,175,0.15); color: #9ca3af; }
 .email-status-badge.rejected { background: rgba(239,68,68,0.15);  color: #ef4444; }
-    .handoff-modal { padding: 20px; margin: 16px; }
-}
+.handoff-modal { padding: 20px; margin: 16px; }
