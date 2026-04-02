@@ -1396,7 +1396,7 @@ export const translations = {
 
     contentAgent: {
       briefSidebar: 'Brief en construcción',
-      blocksProgress: '{done}/{total} bloques',
+      blocksProgress: '{completed}/{total} bloques',
       handoffButton: 'Pasar a HTML Developer',
       handoffIncomplete: 'Completa todos los bloques primero',
       handoffForce: 'Enviar de todas formas',
@@ -2778,7 +2778,7 @@ export const translations = {
 
     contentAgent: {
       briefSidebar: 'Brief in progress',
-      blocksProgress: '{done}/{total} blocks',
+      blocksProgress: '{completed}/{total} blocks',
       handoffButton: 'Send to HTML Developer',
       handoffIncomplete: 'Complete all blocks first',
       handoffForce: 'Send anyway',
