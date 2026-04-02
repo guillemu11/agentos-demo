@@ -1256,6 +1256,54 @@ h1 {
   box-shadow: var(--shadow-sm);
 }
 
+/* ─── Agent header compact (chat mode) ─────────────────────────────────── */
+
+.agent-profile-header--compact {
+  padding: 12px 20px;
+  margin-bottom: 16px;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  border-radius: 14px;
+}
+
+.agent-profile-header--compact .agent-profile-avatar {
+  width: 36px;
+  height: 36px;
+  font-size: 1.2rem;
+  border-radius: 10px;
+}
+
+.agent-profile-header--compact .agent-profile-role,
+.agent-profile-header--compact .agent-profile-badges,
+.agent-profile-header--compact .agent-profile-metrics {
+  display: none;
+}
+
+.agent-profile-header--compact h1 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0;
+}
+
+.agent-profile-header--compact .agent-profile-left {
+  gap: 10px;
+  flex: 1;
+}
+
+/* Dashboard container en modo chat: menos padding vertical */
+.dashboard-container--chat-mode {
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+
+@media (min-width: 768px) {
+  .dashboard-container--chat-mode {
+    padding-top: 20px;
+    padding-bottom: 20px;
+  }
+}
+
 @media (min-width: 768px) {
   .agent-profile-header {
     flex-direction: row;
@@ -4270,7 +4318,7 @@ body.sidebar-collapsed > .inbox-drawer {
   display: flex;
   flex-direction: column;
   height: 100%;
-  max-height: calc(100vh - 160px);
+  max-height: calc(100vh - 220px);
   border-radius: 16px;
   background: var(--bg-card);
   border: 1px solid var(--border-light);
