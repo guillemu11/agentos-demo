@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { contentAgentData } from '../../data/agentViewMocks.js';
 import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
@@ -50,10 +50,19 @@ export default function ContentAgentView({ agent, activeTab: activeTabProp, onTa
     cta:       { status: 'pending', value: null },
   });
 
+  const [markets, setMarkets] = useState(DEFAULT_MARKETS);
   const [brief, setBrief] = useState(() =>
     Object.fromEntries(DEFAULT_MARKETS.map(m => [m, emptyMarket()]))
   );
-  const [markets] = useState(DEFAULT_MARKETS);
+
+  // Update markets and reset brief when active ticket changes
+  useEffect(() => {
+    const m = pipeline.selectedTicket?.markets
+      || pipeline.selectedTicket?.metadata?.markets
+      || DEFAULT_MARKETS;
+    setMarkets(m);
+    setBrief(Object.fromEntries(m.map(mk => [mk, emptyMarket()])));
+  }, [pipeline.selectedTicket?.id]);
 
   const handleBriefUpdate = useCallback((market, block, blockState) => {
     setBrief(prev => ({

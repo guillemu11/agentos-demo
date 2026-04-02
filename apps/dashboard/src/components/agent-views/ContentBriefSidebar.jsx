@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 
-const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪' };
-const MARKET_LABELS = { en: 'EN', es: 'ES', ar: 'AR' };
+const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', de: '🇩🇪', fr: '🇫🇷', ru: '🇷🇺', it: '🇮🇹', zh: '🇨🇳', ja: '🇯🇵', pt: '🇧🇷', nl: '🇳🇱', pl: '🇵🇱', tr: '🇹🇷', ko: '🇰🇷' };
+const MARKET_LABELS = { en: 'EN', es: 'ES', ar: 'AR', de: 'DE', fr: 'FR', ru: 'RU', it: 'IT', zh: 'ZH', ja: 'JA', pt: 'PT', nl: 'NL', pl: 'PL', tr: 'TR', ko: 'KO' };
 const BLOCK_KEYS = ['subject', 'heroImage', 'bodyCopy', 'cta'];
 
 export default function ContentBriefSidebar({ brief, markets, onBriefUpdate, onHandoff }) {

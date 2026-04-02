@@ -38,7 +38,7 @@ export default function ContentChatPanel({ agent, ticket, onBriefUpdate }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Load conversation history on mount
+  // Load conversation history on mount; inject welcome message when chat is fresh and a ticket is active
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -46,11 +46,21 @@ export default function ContentChatPanel({ agent, ticket, onBriefUpdate }) {
         const res = await fetch(`${API_URL}/agents/${agent.id}/conversation`, { credentials: 'include' });
         if (!res.ok || cancelled) return;
         const data = await res.json();
-        if (!cancelled) setMessages(Array.isArray(data.messages) ? data.messages : []);
+        const loaded = Array.isArray(data.messages) ? data.messages : [];
+        if (!cancelled) {
+          if (loaded.length === 0 && ticket) {
+            setMessages([{
+              role: 'assistant',
+              content: `Hola! Estoy listo para trabajar en **${ticket.project_name}**.\n\nPuedo generar copies e imágenes para los mercados configurados. Dime por dónde empezamos — ¿subject lines, hero image, body copy o CTA?`,
+            }]);
+          } else {
+            setMessages(loaded);
+          }
+        }
       } catch (_) { /* network error — start fresh */ }
     })();
     return () => { cancelled = true; };
-  }, [agent.id]);
+  }, [agent.id, ticket?.id]);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
