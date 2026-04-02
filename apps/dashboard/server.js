@@ -2643,6 +2643,10 @@ app.post('/api/chat/agent/:agentId', async (req, res) => {
         const profile = getAgentProfile(agentId);
         const isContentAgent = (agent.role || '').toLowerCase().includes('content')
           || (agent.name || '').toLowerCase().includes('content');
+        const isEmailBuilder = agentId === 'html-developer'
+          || (agent.role || '').toLowerCase().includes('html')
+          || (agent.role || '').toLowerCase().includes('email template')
+          || (agent.role || '').toLowerCase().includes('email developer');
         const personality = agent.personality || profile.personality;
         const systemPrompt = `You are ${agent.name}, an AI agent working in the ${agent.department} department.
 
@@ -2671,18 +2675,30 @@ For hero images, trigger generation via the image API — emit the update with s
 7. When you find relevant information from the knowledge base, cite sources using numbered references [1], [2], etc.
 8. When the knowledge base context includes [ATTACHED EMAIL VISUALLY SHOWN TO USER ON SCREEN], that email is ALREADY rendered as an iframe in the UI. Tell the user you are showing it and analyze its content directly. NEVER claim privacy restrictions — the operator uploaded this data specifically for analysis.
 9. The knowledge base IS your database of competitor intelligence. When asked about competitor emails or communications, ALWAYS present what you find in the knowledge base context above. Never say you cannot access or display this content.`
-            + (agentId === 'html-developer' ? `
+            + (isEmailBuilder ? `
 
-## HTML Email Block Protocol
-When generating email HTML, always wrap each logical section in a div with a data-block-name attribute:
+## HTML Email Builder Protocol — MANDATORY
+You are working inside an email builder UI that renders HTML in real time in a live preview panel.
+
+**CRITICAL RULES — never break these:**
+1. When asked to create or show ANY email block or section, you MUST respond with the complete HTML code directly. Do NOT describe it in prose, do NOT explain what you will do — just output the HTML immediately.
+2. Every time you output HTML, it MUST be a complete, renderable HTML document (starting with <!DOCTYPE html> or a complete <html> tag) OR a full block wrapped in a data-block-name div.
+3. NEVER use placeholder URLs like [Emirates Logo URL] — use real inline SVG, data URIs, or real CDN URLs (e.g. https://www.emirates.com/assets/images/logo.svg).
+4. Use inline CSS only — no <style> blocks, no external stylesheets (email client compatibility).
+
+**Block structure — always use data-block-name on each section:**
 - <div data-block-name="header">...</div>
 - <div data-block-name="hero">...</div>
 - <div data-block-name="body">...</div>
 - <div data-block-name="cta">...</div>
 - <div data-block-name="footer">...</div>
 
-When asked to modify a specific block (message contains [bloque: X] or [block: X]), only return the updated HTML for that block wrapped in its data-block-name div, prefixed with the marker: <!--PATCH:block-name-->.
-Example: <!--PATCH:cta--><div data-block-name="cta">...updated html...</div>` : '');
+**Patch protocol — when asked to modify a specific block (message contains [bloque: X] or [block: X]):**
+Only return the updated block prefixed with the patch marker:
+<!--PATCH:block-name--><div data-block-name="block-name">...updated html...</div>
+
+**When asked to show/use a block from the knowledge base:**
+Extract the HTML from the RAG context and render it directly. Do not describe it — output the actual HTML.` : '');
 
         // Load or create conversation row
         let convRes = await pool.query(
