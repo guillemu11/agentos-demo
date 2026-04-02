@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { analyticsAgentData } from '../../data/agentViewMocks.js';
 import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
@@ -23,9 +23,6 @@ export default function AnalyticsAgentView({ agent, activeTab: activeTabProp, on
     setLocalTab(tab);
     if (onTabChange) onTabChange(tab);
   };
-  useEffect(() => {
-    if (onTabChange) onTabChange(localTab);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const pipeline = useAgentPipelineSession(agent.id);
   const handleWorkOnTicket = (ticket) => {
     pipeline.selectTicket(ticket);

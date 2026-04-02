@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { campaignManagerData } from '../../data/agentViewMocks.js';
 import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
@@ -24,9 +24,6 @@ export default function CampaignManagerView({ agent, activeTab: activeTabProp, o
     setLocalTab(tab);
     if (onTabChange) onTabChange(tab);
   };
-  useEffect(() => {
-    if (onTabChange) onTabChange(localTab);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [metricsChart, setMetricsChart] = useState('line');
   const data = campaignManagerData;
 

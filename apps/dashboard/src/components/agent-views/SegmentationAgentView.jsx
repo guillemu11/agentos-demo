@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { segmentationAgentData } from '../../data/agentViewMocks.js';
 import { getBauTypeById, getBauCategoryById } from '../../data/emiratesBauTypes.js';
@@ -26,9 +26,6 @@ export default function SegmentationAgentView({ agent, activeTab: activeTabProp,
     setLocalTab(tab);
     if (onTabChange) onTabChange(tab);
   };
-  useEffect(() => {
-    if (onTabChange) onTabChange(localTab);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const data = segmentationAgentData;
 
   const pipeline = useAgentPipelineSession(agent.id);

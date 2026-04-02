@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { calendarAgentData } from '../../data/agentViewMocks.js';
 import { getBauTypeById, getBauCategoryById } from '../../data/emiratesBauTypes.js';
@@ -27,9 +27,6 @@ export default function CalendarAgentView({ agent, activeTab: activeTabProp, onT
     setLocalTab(tab);
     if (onTabChange) onTabChange(tab);
   };
-  useEffect(() => {
-    if (onTabChange) onTabChange(localTab);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [selectedDay, setSelectedDay] = useState(null);
   const pipeline = useAgentPipelineSession(agent.id);
   const handleWorkOnTicket = (ticket) => {

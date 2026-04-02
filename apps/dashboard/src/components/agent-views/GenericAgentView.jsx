@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import AgentSettingsPanel from './AgentSettingsPanel.jsx';
 import AgentWorkHistory from './AgentWorkHistory.jsx';
@@ -39,9 +39,6 @@ export default function GenericAgentView({ agent, activeTab: activeTabProp, onTa
     setLocalTab(tab);
     if (onTabChange) onTabChange(tab);
   };
-  useEffect(() => {
-    if (onTabChange) onTabChange(localTab);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const pipeline = useAgentPipelineSession(agent.id);
 
   const handleWorkOnTicket = (ticket) => {

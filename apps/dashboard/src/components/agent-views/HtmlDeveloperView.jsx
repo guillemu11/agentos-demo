@@ -38,9 +38,6 @@ export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onT
     setLocalTab(tab);
     if (onTabChange) onTabChange(tab);
   };
-  useEffect(() => {
-    if (onTabChange) onTabChange(localTab);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [showSource, setShowSource] = useState(false);
   const [blockFilter, setBlockFilter] = useState('All');

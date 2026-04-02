@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { competitiveIntelData } from '../../data/agentViewMocks.js';
 import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
@@ -56,9 +56,6 @@ export default function CompetitiveIntelView({ agent, activeTab: activeTabProp, 
     setLocalTab(tab);
     if (onTabChange) onTabChange(tab);
   };
-  useEffect(() => {
-    if (onTabChange) onTabChange(localTab);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [feedFilter, setFeedFilter] = useState('all');
   const [feedSourceFilter, setFeedSourceFilter] = useState('all');
   const pipeline = useAgentPipelineSession(agent.id);
