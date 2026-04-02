@@ -32,6 +32,13 @@ CREATE TABLE IF NOT EXISTS projects (
     future_improvements JSONB DEFAULT '[]',
     status TEXT DEFAULT 'Planning', -- Planning, In Progress, Completed, Paused
     type TEXT DEFAULT 'general', -- general, campaign, etc.
+    objective TEXT,
+    target_audience TEXT,
+    bau_type TEXT,
+    markets JSONB DEFAULT '[]',
+    pm_notes TEXT,
+    key_metrics JSONB DEFAULT '[]',
+    compliance_notes JSONB DEFAULT '[]',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -602,4 +609,111 @@ ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS file_path TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_kd_content_type ON knowledge_documents(content_type);
 
+-- ═══════════ PIPELINE SYSTEM ═══════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS project_pipeline (
+    id SERIAL PRIMARY KEY,
+    project_id INT NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+    template_id TEXT,
+    current_stage_order INT NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'paused', 'completed', 'failed')),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_project_pipeline_status ON project_pipeline(status);
+
+CREATE TABLE IF NOT EXISTS pipeline_stages (
+    id SERIAL PRIMARY KEY,
+    pipeline_id INT NOT NULL REFERENCES project_pipeline(id) ON DELETE CASCADE,
+    stage_order INT NOT NULL,
+    name TEXT NOT NULL,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    department TEXT,
+    description TEXT,
+    depends_on INT[] DEFAULT '{}',
+    gate_type TEXT DEFAULT 'none'
+        CHECK (gate_type IN ('none', 'human_approval')),
+    namespaces TEXT[] DEFAULT '{}',
+    UNIQUE(pipeline_id, stage_order)
+);
+CREATE INDEX IF NOT EXISTS idx_pipeline_stages_agent ON pipeline_stages(agent_id);
+CREATE INDEX IF NOT EXISTS idx_pipeline_stages_pipeline ON pipeline_stages(pipeline_id);
+
+CREATE TABLE IF NOT EXISTS project_agent_sessions (
+    id SERIAL PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    pipeline_id INT NOT NULL REFERENCES project_pipeline(id) ON DELETE CASCADE,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    stage_name TEXT NOT NULL,
+    stage_order INT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'active', 'awaiting_handoff', 'completed', 'skipped')),
+    summary TEXT,
+    summary_edited TEXT,
+    deliverables JSONB DEFAULT '{}',
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(project_id, agent_id, stage_order)
+);
+CREATE INDEX IF NOT EXISTS idx_pas_project ON project_agent_sessions(project_id);
+CREATE INDEX IF NOT EXISTS idx_pas_agent ON project_agent_sessions(agent_id);
+CREATE INDEX IF NOT EXISTS idx_pas_status ON project_agent_sessions(status);
+
+CREATE TABLE IF NOT EXISTS pipeline_session_messages (
+    id SERIAL PRIMARY KEY,
+    session_id INT NOT NULL REFERENCES project_agent_sessions(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+    content TEXT NOT NULL,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_psm_session ON pipeline_session_messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_psm_session_created ON pipeline_session_messages(session_id, created_at);
+
+ALTER TABLE collaboration_raises ADD COLUMN IF NOT EXISTS pipeline_session_id INT
+    REFERENCES project_agent_sessions(id) ON DELETE SET NULL;
+
+-- ═══════════ AGENT SETTINGS ═══════════════════════════════════════════════
+
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS personality TEXT;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_name TEXT;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_rules TEXT;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS rag_namespaces JSONB;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS budget_max NUMERIC;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS budget_period TEXT DEFAULT 'monthly';
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS budget_spent NUMERIC DEFAULT 0;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS connections JSONB DEFAULT '[]';
+
+-- Proyecto 007: Extended project details
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS objective TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS target_audience TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS bau_type TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS markets JSONB DEFAULT '[]';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS pm_notes TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS key_metrics JSONB DEFAULT '[]';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS compliance_notes JSONB DEFAULT '[]';
+
 -- Seed data is now in seed-emirates.sql
+
+-- Fix projects with department='General' that have pipeline stages with a real department
+UPDATE projects p
+SET department = (
+    SELECT ps.department
+    FROM project_pipeline pp
+    JOIN pipeline_stages ps ON ps.pipeline_id = pp.id
+    WHERE pp.project_id = p.id AND ps.department IS NOT NULL AND ps.department != ''
+    ORDER BY ps.stage_order ASC
+    LIMIT 1
+)
+WHERE p.department = 'General'
+  AND EXISTS (
+    SELECT 1 FROM project_pipeline pp
+    JOIN pipeline_stages ps ON ps.pipeline_id = pp.id
+    WHERE pp.project_id = p.id AND ps.department IS NOT NULL AND ps.department != ''
+  );
+
+-- Email Builder: link email_proposals to projects
+ALTER TABLE email_proposals ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_ep_project ON email_proposals(project_id);
