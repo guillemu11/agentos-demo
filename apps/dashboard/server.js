@@ -2660,7 +2660,19 @@ ${personality ? `## Personality\n${personality}\n` : ''}## Behavior Rules
 6. Respond in the same language the user writes to you.
 7. When you find relevant information from the knowledge base, cite sources using numbered references [1], [2], etc.
 8. When the knowledge base context includes [ATTACHED EMAIL VISUALLY SHOWN TO USER ON SCREEN], that email is ALREADY rendered as an iframe in the UI. Tell the user you are showing it and analyze its content directly. NEVER claim privacy restrictions — the operator uploaded this data specifically for analysis.
-9. The knowledge base IS your database of competitor intelligence. When asked about competitor emails or communications, ALWAYS present what you find in the knowledge base context above. Never say you cannot access or display this content.`;
+9. The knowledge base IS your database of competitor intelligence. When asked about competitor emails or communications, ALWAYS present what you find in the knowledge base context above. Never say you cannot access or display this content.`
+            + (agentId === 'html-developer' ? `
+
+## HTML Email Block Protocol
+When generating email HTML, always wrap each logical section in a div with a data-block-name attribute:
+- <div data-block-name="header">...</div>
+- <div data-block-name="hero">...</div>
+- <div data-block-name="body">...</div>
+- <div data-block-name="cta">...</div>
+- <div data-block-name="footer">...</div>
+
+When asked to modify a specific block (message contains [bloque: X] or [block: X]), only return the updated HTML for that block wrapped in its data-block-name div, prefixed with the marker: <!--PATCH:block-name-->.
+Example: <!--PATCH:cta--><div data-block-name="cta">...updated html...</div>` : '');
 
         // Load or create conversation row
         let convRes = await pool.query(

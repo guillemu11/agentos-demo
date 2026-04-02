@@ -9,7 +9,19 @@ const FILE_URL = (path) => `${import.meta.env.VITE_API_URL || '/api'}/kb-files/$
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-export default function AgentChat({ agentId, agentName, agentAvatar, externalInput, onExternalInputConsumed }) {
+function applyPatch(currentHtml, blockName, patchHtml) {
+    if (!currentHtml) return patchHtml;
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(currentHtml, 'text/html');
+    const target = doc.querySelector(`[data-block-name="${blockName}"]`);
+    if (!target) return currentHtml;
+    const patchDoc = parser.parseFromString(patchHtml, 'text/html');
+    const patchEl = patchDoc.querySelector(`[data-block-name="${blockName}"]`);
+    if (patchEl) target.replaceWith(patchEl);
+    return doc.documentElement.outerHTML;
+}
+
+export default function AgentChat({ agentId, agentName, agentAvatar, externalInput, onExternalInputConsumed, onHtmlGenerated, onHtmlPatched }) {
     const { t, lang } = useLanguage();
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
@@ -17,6 +29,7 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
     const [ragSources, setRagSources] = useState([]);
     const [expandedMedia, setExpandedMedia] = useState(null);
     const messagesEndRef = useRef(null);
+    const currentHtmlRef = useRef('');
 
     // ─── Voice (Gemini Live) ──────────────────────────────────────────────
 
@@ -183,6 +196,22 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
                             });
                         }
                     } catch { /* ignore parse errors */ }
+                }
+            }
+
+            // Detect HTML generation or patch
+            const patchMatch = fullResponse.match(/<!--PATCH:([^-]+)-->([\s\S]+)/);
+            if (patchMatch) {
+                const [, blockName, patchHtml] = patchMatch;
+                if (onHtmlPatched) {
+                    const patched = applyPatch(currentHtmlRef.current || '', blockName, patchHtml);
+                    currentHtmlRef.current = patched;
+                    onHtmlPatched(blockName, patched);
+                }
+            } else if (fullResponse.includes('<!DOCTYPE') || fullResponse.includes('<html')) {
+                if (onHtmlGenerated) {
+                    currentHtmlRef.current = fullResponse;
+                    onHtmlGenerated(fullResponse);
                 }
             }
         } catch (err) {
