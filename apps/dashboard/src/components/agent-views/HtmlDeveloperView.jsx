@@ -78,7 +78,7 @@ export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onT
 
   const handleWorkOnTicket = (ticket) => {
     pipeline.selectTicket(ticket);
-    setActiveTab('chat');
+    setActiveTab('builder');
   };
 
   const blocks = ragBlocks !== null ? ragBlocks : data.blocks;
