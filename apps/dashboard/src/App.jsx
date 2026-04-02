@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import DepartmentKanban from './components/DepartmentKanban';
+import ProjectPipelineView from './components/ProjectPipelineView.jsx';
+import WorkLogTab from './components/WorkLogTab.jsx';
+import ProjectEmailsTab from './components/ProjectEmailsTab.jsx';
+import { ActivePipelinesList } from './pages/WorkflowsHub.jsx';
 import { useLanguage } from './i18n/LanguageContext.jsx';
 import { ActionIcons, SectionIcons, TaskIcons } from './components/icons.jsx';
+import renderMarkdown from './utils/renderMarkdown.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -87,9 +92,20 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [editMode, setEditMode] = useState(false);
   const [viewMode, setViewMode] = useState('grid');
+  const [projectTab, setProjectTab] = useState('details');
+  const [pipelineData, setPipelineData] = useState(null);
 
   useEffect(() => {
     fetchProjects();
+  }, []);
+
+  useEffect(() => {
+    const handler = (e) => {
+      const { projectId } = e.detail;
+      if (projectId) fetchProjectDetail(projectId);
+    };
+    window.addEventListener('navigate-to-pipeline', handler);
+    return () => window.removeEventListener('navigate-to-pipeline', handler);
   }, []);
 
   // Re-sync projects when switching back to grid (kanban may have changed statuses)
@@ -119,6 +135,19 @@ function App() {
       const data = await res.json();
       setSelectedProject(data);
       setEditMode(false);
+      // Fetch pipeline for read-only view in Details tab
+      try {
+        const pRes = await fetch(`${API_URL}/projects/${id}/pipeline`, { credentials: 'include' });
+        setPipelineData(pRes.ok ? await pRes.json() : null);
+      } catch { setPipelineData(null); }
+
+      // Auto-switch to pipeline tab if project has active pipeline
+      const projectListData = projects.find(p => p.id === id);
+      if (projectListData?.has_active_pipeline) {
+        setProjectTab('pipeline');
+      } else {
+        setProjectTab('details');
+      }
     } catch (err) {
       console.error('Error fetching project detail:', err);
     } finally {
@@ -275,190 +304,273 @@ function App() {
           </div>
         </header>
 
-        <section className="card" style={{ marginBottom: '24px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px', background: 'var(--primary-soft)', border: '1px solid var(--primary-trans)' }}>
-          <div className="metric-item" style={{ background: 'transparent', border: 'none', boxShadow: 'none', padding: 0 }}>
-            <span className="metric-label">{t('dashboard.estimatedBudget')}</span>
-            {editMode ? (
-              <input
-                type="number"
-                className="edit-input-inline"
-                value={selectedProject.estimated_budget}
-                onChange={e => setSelectedProject({ ...selectedProject, estimated_budget: parseFloat(e.target.value) })}
-              />
-            ) : (
-              <span className="metric-value">{selectedProject.estimated_budget}€</span>
-            )}
-          </div>
-          <div className="metric-item" style={{ background: 'transparent', border: 'none', boxShadow: 'none', padding: 0 }}>
-            <span className="metric-label">{t('dashboard.estimatedTimeline')}</span>
-            {editMode ? (
-              <input
-                className="edit-input-inline"
-                value={selectedProject.estimated_timeline}
-                onChange={e => setSelectedProject({ ...selectedProject, estimated_timeline: e.target.value })}
-              />
-            ) : (
-              <span className="metric-value">{selectedProject.estimated_timeline}</span>
-            )}
-          </div>
-        </section>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px', marginBottom: '40px' }}>
-          <section className="card">
-            <h3 style={{ marginBottom: '16px', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent-red)' }}>{SectionIcons.painPoints} {t('dashboard.painPoints')}</h3>
-            {editMode ? (
-              <textarea
-                className="edit-textarea"
-                placeholder={t('dashboard.painPointsPlaceholder')}
-                value={Array.isArray(selectedProject.pain_points) ? selectedProject.pain_points.join('\n') : ''}
-                onChange={e => setSelectedProject({ ...selectedProject, pain_points: e.target.value.split('\n') })}
-              />
-            ) : (
-              <ul style={{ paddingLeft: '20px', color: 'var(--text-muted)' }}>
-                {selectedProject.pain_points?.map((p, i) => <li key={i}>{p}</li>)}
-              </ul>
-            )}
-          </section>
-
-          <section className="card">
-            <h3 style={{ marginBottom: '16px', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--primary)' }}>{SectionIcons.requirements} {t('dashboard.requirements')}</h3>
-            {editMode ? (
-              <textarea
-                className="edit-textarea"
-                placeholder={t('dashboard.requirementsPlaceholder')}
-                value={Array.isArray(selectedProject.requirements) ? selectedProject.requirements.join('\n') : ''}
-                onChange={e => setSelectedProject({ ...selectedProject, requirements: e.target.value.split('\n') })}
-              />
-            ) : (
-              <ul style={{ paddingLeft: '20px', color: 'var(--text-muted)' }}>
-                {selectedProject.requirements?.map((r, i) => <li key={i}>{r}</li>)}
-              </ul>
-            )}
-          </section>
-
-          <section className="card">
-            <h3 style={{ marginBottom: '16px', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent-yellow)' }}>{SectionIcons.risks} {t('dashboard.risks')}</h3>
-            {editMode ? (
-              <textarea
-                className="edit-textarea"
-                placeholder={t('dashboard.risksPlaceholder')}
-                value={Array.isArray(selectedProject.risks) ? selectedProject.risks.join('\n') : ''}
-                onChange={e => setSelectedProject({ ...selectedProject, risks: e.target.value.split('\n') })}
-              />
-            ) : (
-              <ul style={{ paddingLeft: '20px', color: 'var(--text-muted)' }}>
-                {selectedProject.risks?.map((r, i) => <li key={i}>{r}</li>)}
-              </ul>
-            )}
-          </section>
+        {/* Pipeline tab toggle */}
+        <div className="weekly-view-toggle" style={{ marginBottom: '20px' }}>
+          <button className={`weekly-toggle-btn ${projectTab === 'details' ? 'active' : ''}`}
+            onClick={() => setProjectTab('details')}>{t('pipeline.details')}</button>
+          <button className={`weekly-toggle-btn ${projectTab === 'pipeline' ? 'active' : ''}`}
+            onClick={() => setProjectTab('pipeline')}>{t('pipeline.title')}</button>
+          <button className={`weekly-toggle-btn ${projectTab === 'worklog' ? 'active' : ''}`}
+            onClick={() => setProjectTab('worklog')}>{t('pipeline.workLog')}</button>
+          <button className={`weekly-toggle-btn ${projectTab === 'emails' ? 'active' : ''}`}
+            onClick={() => setProjectTab('emails')}>{t('emailBuilder.emailsTab') || 'Emails'}</button>
         </div>
 
-        <section className="card" style={{ marginBottom: '40px', borderLeft: '4px solid var(--accent-green)' }}>
-          <h2 style={{ marginBottom: '16px' }}>{SectionIcons.roadmap} {t('dashboard.roadmap')}</h2>
-          <p className="subtitle" style={{ marginBottom: '20px' }}>{t('dashboard.roadmapSubtitle')}</p>
-          {editMode ? (
-            <textarea
-              className="edit-textarea"
-              placeholder={t('dashboard.roadmapPlaceholder')}
-              value={Array.isArray(selectedProject.future_improvements) ? selectedProject.future_improvements.join('\n') : ''}
-              onChange={e => setSelectedProject({ ...selectedProject, future_improvements: e.target.value.split('\n') })}
-            />
-          ) : (
+        {projectTab === 'pipeline' && (
+          <ProjectPipelineView projectId={selectedProject.id} />
+        )}
+
+        {projectTab === 'worklog' && (
+          <WorkLogTab projectId={selectedProject.id} />
+        )}
+
+        {projectTab === 'emails' && (
+          <ProjectEmailsTab projectId={selectedProject.id} />
+        )}
+
+        {projectTab === 'details' && <>
+          {/* Overview */}
+          <section className="card" style={{ marginBottom: '24px', background: 'var(--bg-section)', border: '1px solid var(--border-default)' }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: '1.2rem', color: 'var(--text-main)' }}>{selectedProject.name}</h3>
+            
+            <div className="draft-overview-grid">
+              {selectedProject.objective && (
+                <div className="draft-overview-item">
+                  <span className="draft-overview-label">{t('pmChat.objective')}</span>
+                  <span className="draft-overview-value">{selectedProject.objective}</span>
+                </div>
+              )}
+              {selectedProject.target_audience && (
+                <div className="draft-overview-item">
+                  <span className="draft-overview-label">{t('pmChat.audience')}</span>
+                  <span className="draft-overview-value">{selectedProject.target_audience}</span>
+                </div>
+              )}
+              {selectedProject.bau_type && (
+                <div className="draft-overview-item">
+                  <span className="draft-overview-label">{t('pmChat.bauType')}</span>
+                  <span className="draft-overview-value">{selectedProject.bau_type}</span>
+                </div>
+              )}
+              {selectedProject.estimated_timeline && selectedProject.estimated_timeline !== 'TBD' && (
+                <div className="draft-overview-item">
+                  <span className="draft-overview-label">{t('dashboard.estimatedTimeline')}</span>
+                  <span className="draft-overview-value">{selectedProject.estimated_timeline}</span>
+                </div>
+              )}
+              {selectedProject.estimated_budget > 0 && (
+                <div className="draft-overview-item">
+                  <span className="draft-overview-label">{t('dashboard.estimatedBudget')}</span>
+                  <span className="draft-overview-value">{selectedProject.estimated_budget}€</span>
+                </div>
+              )}
+              {selectedProject.markets?.length > 0 && (
+                <div className="draft-overview-item">
+                  <span className="draft-overview-label">{t('pmChat.markets')}</span>
+                  <span className="draft-overview-value">{selectedProject.markets.join(', ')}</span>
+                </div>
+              )}
+            </div>
+
+            {selectedProject.problem && (
+              <div style={{ marginTop: '16px' }}>
+                <span className="draft-overview-label">{t('pmChat.problem')}</span>
+                <p className="draft-overview-value" style={{ margin: '4px 0 0' }}>{selectedProject.problem}</p>
+              </div>
+            )}
+            {selectedProject.solution && (
+              <div style={{ marginTop: '16px' }}>
+                <span className="draft-overview-label">{t('dashboard.proposedSolution')}</span>
+                <p className="draft-overview-value" style={{ margin: '4px 0 0' }}>{selectedProject.solution}</p>
+              </div>
+            )}
+          </section>
+
+          {/* PM Notes */}
+          {selectedProject.pm_notes && (
+            <section className="card" style={{ marginBottom: '24px' }}>
+              <div className="draft-section-title" style={{ marginBottom: '12px' }}>
+                {t('pmChat.pmNotes')}
+              </div>
+              <div className="draft-pm-notes">
+                 <div className="md-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(selectedProject.pm_notes) }} />
+              </div>
+            </section>
+          )}
+
+          {/* Pipeline stages from endpoint */}
+          {pipelineData && pipelineData.stages && pipelineData.stages.length > 0 && (
+            <section className="card" style={{ marginBottom: '24px' }}>
+                <div className="draft-section-title" style={{ marginBottom: '12px' }}>
+                    {t('pmChat.pipelineProposal')} ({pipelineData.stages.length} {t('pmChat.stages')})
+                </div>
+                <div className="draft-stages">
+                    {pipelineData.stages.map((stage, idx) => (
+                        <div key={idx} className="draft-stage-row">
+                            <div className="draft-stage-order">{idx}</div>
+                            <div className="draft-stage-body">
+                                <div className="draft-stage-header">
+                                    <span className="draft-stage-name">{stage.name}</span>
+                                    {stage.agent_id && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--bg-section)', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>
+                                            {stage.agent_avatar} {stage.agent_name || stage.agent_id}
+                                        </div>
+                                    )}
+                                    <span className="draft-stage-dept">{stage.department}</span>
+                                    {stage.gate_type === 'human_approval' && (
+                                        <span className="draft-gate-tag" title={t('pmChat.gate')}>
+                                            🔒 {t('pmChat.gate')}
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="draft-stage-description">
+                                    {stage.description}
+                                </div>
+                                <div className="draft-stage-meta">
+                                    {stage.depends_on?.length > 0 && stage.depends_on.map(dep => (
+                                        <span key={dep} className="draft-dep-tag">
+                                            {t('pmChat.dependsOn')}: {pipelineData.stages[dep]?.name || dep}
+                                        </span>
+                                    ))}
+                                    {stage.namespaces?.map(ns => (
+                                        <span key={ns} className="draft-namespace-tag">{ns}</span>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </section>
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px', marginBottom: '24px' }}>
+            {selectedProject.risks?.length > 0 && (
+            <section className="card">
+              <h3 style={{ marginBottom: '16px', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent-yellow)' }}>{SectionIcons.risks} {t('dashboard.risks')}</h3>
+              <div className="draft-risks-list">
+                 {selectedProject.risks.map((r, i) => (
+                    typeof r === 'object' && r !== null ? (
+                        <div key={i} className="draft-risk-item">
+                            <span className="draft-risk-label">{r.risk}</span>
+                            <span className="draft-risk-mitigation">{r.mitigation}</span>
+                        </div>
+                    ) : (
+                        <div key={i} style={{ padding: '8px 12px', background: 'var(--bg-section)', borderRadius: '8px', marginBottom: '8px', fontSize: '0.85rem' }}>
+                           {r}
+                        </div>
+                    )
+                 ))}
+              </div>
+            </section>
+            )}
+
+            {selectedProject.compliance_notes?.length > 0 && (
+            <section className="card">
+              <h3 style={{ marginBottom: '16px', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent-red)' }}>{t('pmChat.compliance')}</h3>
+              <div className="draft-risks-list">
+                  {selectedProject.compliance_notes.map((c, i) => (
+                      <div key={i} style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', padding: '8px 12px', background: 'var(--bg-section)', borderRadius: 8 }}>
+                          {c}
+                      </div>
+                  ))}
+              </div>
+            </section>
+            )}
+
+            {/* Key Metrics */}
+            {selectedProject.key_metrics?.length > 0 && (
+                <section className="card">
+                    <h3 style={{ marginBottom: '16px', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent-green)' }}>{t('pmChat.metrics')}</h3>
+                    <div className="draft-metrics-list">
+                        {selectedProject.key_metrics.map((m, i) => (
+                            <span key={i} className="draft-metric-tag">{m}</span>
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {/* Legacy Success Metrics */}
+            {selectedProject.success_metrics?.length > 0 && !selectedProject.key_metrics?.length && (
+            <section className="card">
+              <h3 style={{ marginBottom: '16px', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent-green)' }}>{SectionIcons.successMetrics} {t('dashboard.successMetrics')}</h3>
+              <ul style={{ paddingLeft: '20px', color: 'var(--text-muted)' }}>
+                {selectedProject.success_metrics?.map((m, i) => <li key={i}>{m}</li>)}
+              </ul>
+            </section>
+            )}
+          </div>
+
+          {(selectedProject.pain_points?.length > 0 || selectedProject.requirements?.length > 0) && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px', marginBottom: '24px' }}>
+            {selectedProject.pain_points?.length > 0 && (
+                <section className="card">
+                <h3 style={{ marginBottom: '16px', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent-red)' }}>{SectionIcons.painPoints} {t('dashboard.painPoints')}</h3>
+                <ul style={{ paddingLeft: '20px', color: 'var(--text-muted)' }}>
+                    {selectedProject.pain_points?.map((p, i) => <li key={i}>{p}</li>)}
+                </ul>
+                </section>
+            )}
+
+            {selectedProject.requirements?.length > 0 && (
+                <section className="card">
+                <h3 style={{ marginBottom: '16px', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--primary)' }}>{SectionIcons.requirements} {t('dashboard.requirements')}</h3>
+                <ul style={{ paddingLeft: '20px', color: 'var(--text-muted)' }}>
+                    {selectedProject.requirements?.map((r, i) => <li key={i}>{r}</li>)}
+                </ul>
+                </section>
+            )}
+            </div>
+          )}
+
+          {selectedProject.future_improvements?.length > 0 && (
+          <section className="card" style={{ marginBottom: '40px', borderLeft: '4px solid var(--accent-green)' }}>
+            <h2 style={{ marginBottom: '16px' }}>{SectionIcons.roadmap} {t('dashboard.roadmap')}</h2>
+            <p className="subtitle" style={{ marginBottom: '20px' }}>{t('dashboard.roadmapSubtitle')}</p>
             <div className="roadmap-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px' }}>
-              {selectedProject.future_improvements?.map((imp, i) => (
+                {selectedProject.future_improvements?.map((imp, i) => (
                 <div key={i} className="card" style={{ background: 'var(--primary-trans)', border: 'none', padding: '16px' }}>
-                  <div style={{ fontWeight: '600', color: 'var(--primary)', marginBottom: '4px' }}>{t('dashboard.postMvpPhase')} {i + 1}</div>
-                  <p style={{ fontSize: '0.9rem', margin: 0 }}>{imp}</p>
+                    <div style={{ fontWeight: '600', color: 'var(--primary)', marginBottom: '4px' }}>{t('dashboard.postMvpPhase')} {i + 1}</div>
+                    <p style={{ fontSize: '0.9rem', margin: 0 }}>{imp}</p>
                 </div>
-              ))}
+                ))}
             </div>
+          </section>
           )}
-        </section>
 
-        <section className="card" style={{ marginBottom: '40px', borderLeft: '4px solid var(--primary)' }}>
-          <h2 style={{ marginBottom: '16px' }}>{SectionIcons.successMetrics} {t('dashboard.successMetrics')}</h2>
-          <p className="subtitle" style={{ marginBottom: '20px' }}>{t('dashboard.successMetricsSubtitle')}</p>
-          {editMode ? (
-            <textarea
-              className="edit-textarea"
-              placeholder={t('dashboard.successMetricsPlaceholder')}
-              value={Array.isArray(selectedProject.success_metrics) ? selectedProject.success_metrics.join('\n') : ''}
-              onChange={e => setSelectedProject({ ...selectedProject, success_metrics: e.target.value.split('\n') })}
-            />
-          ) : (
-            <ul style={{ paddingLeft: '20px', color: 'var(--text-muted)' }}>
-              {selectedProject.success_metrics?.map((m, i) => <li key={i} style={{ marginBottom: '8px' }}>{m}</li>)}
-            </ul>
-          )}
-        </section>
-
-        <section className="card" style={{ marginBottom: '40px' }}>
-          <h2 style={{ marginBottom: '16px' }}>{t('dashboard.proposedSolution')}</h2>
-          {editMode ? (
-            <textarea
-              className="edit-textarea"
-              value={selectedProject.solution}
-              onChange={e => setSelectedProject({ ...selectedProject, solution: e.target.value })}
-            />
-          ) : (
-            <p>{selectedProject.solution}</p>
-          )}
-        </section>
-
-        {/* Contenido dinámico (Notion-style Blocks) */}
-        <div className="dynamic-blocks" style={{ marginBottom: '40px' }}>
-          <BlockRenderer
-            blocks={selectedProject.blocks}
-            editMode={editMode}
-            onMove={handleBlockMove}
-            onDelete={handleBlockDelete}
-            onChange={handleBlockChange}
-          />
-          {editMode && (
-            <div className="add-block-controls">
-              <button onClick={() => addBlock('text')}>{t('dashboard.addText')}</button>
-              <button onClick={() => addBlock('callout')}>{t('dashboard.addCallout')}</button>
-              <button onClick={() => addBlock('metric_grid')}>{t('dashboard.addMetrics')}</button>
-              <button onClick={() => addBlock('link_list')}>{t('dashboard.addLinks')}</button>
-            </div>
-          )}
-        </div>
-
-        {selectedProject.phases?.map(phase => (
-          <div key={phase.id} className="phase-section">
-            <div className="phase-header">
-              <div className="phase-number">{phase.phase_number}</div>
-              <h2>{phase.name}</h2>
-            </div>
-            <p className="subtitle" style={{ marginBottom: '20px' }}>{phase.objective}</p>
-
-            <div className="tasks-list">
-              {phase.tasks?.map(task => (
-                <div key={task.id} className="task-item" style={{ borderLeft: `4px solid ${task.type === 'Bug' ? 'var(--accent-red)' : task.type === 'Enhancement' ? 'var(--accent-green)' : 'var(--border-light)'}` }}>
-                  <div className="task-info">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
-                      <span title={task.type} style={{ fontSize: '1.1rem' }}>{task.type === 'Bug' ? TaskIcons.bug : task.type === 'Enhancement' ? TaskIcons.enhancement : TaskIcons.task}</span>
-                      <strong style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>{task.description}</strong>
-                      <span className="dept-badge" style={{
-                        fontSize: '0.6rem',
-                        padding: '2px 8px',
-                        background: task.priority === 'Critical' ? 'var(--accent-red)' : task.priority === 'High' ? 'rgba(245, 158, 11, 0.2)' : 'var(--bg-main)',
-                        color: task.priority === 'Critical' ? 'white' : 'var(--text-main)',
-                        fontWeight: '700'
-                      }}>
-                        {task.priority}
-                      </span>
+          {/* Legacy Phases Fallback (si existe pero no tenemos pipeline) */}
+          {!pipelineData && selectedProject.phases?.length > 0 && (
+              <div style={{ marginTop: '24px' }}>
+              {selectedProject.phases.map((phase) => (
+                  <div key={phase.id} className="phase-section" style={{ marginBottom: '16px' }}>
+                    <div className="phase-header">
+                        <div className="phase-number">{phase.phase_number}</div>
+                        <h2>{phase.name}</h2>
                     </div>
-                    <div className="task-meta">
-                      <span className="task-agent">{task.agent}</span>
-                      <span className="effort-pill" title={t('dashboard.effort')}>{task.effort}</span>
-                    </div>
+                    {phase.objective && <p className="subtitle" style={{ marginBottom: '20px' }}>{phase.objective}</p>}
                   </div>
-                </div>
               ))}
-            </div>
+              </div>
+          )}
+
+          {/* Contenido dinámico (Notion-style Blocks) */}
+          <div className="dynamic-blocks" style={{ marginBottom: '40px' }}>
+            <BlockRenderer
+              blocks={selectedProject.blocks}
+              editMode={editMode}
+              onMove={handleBlockMove}
+              onDelete={handleBlockDelete}
+              onChange={handleBlockChange}
+            />
+            {editMode && (
+              <div className="add-block-controls">
+                <button onClick={() => addBlock('text')}>{t('dashboard.addText')}</button>
+                <button onClick={() => addBlock('callout')}>{t('dashboard.addCallout')}</button>
+                <button onClick={() => addBlock('metric_grid')}>{t('dashboard.addMetrics')}</button>
+                <button onClick={() => addBlock('link_list')}>{t('dashboard.addLinks')}</button>
+              </div>
+            )}
           </div>
-        ))}
+          </>}
       </div>
     );
   }
@@ -498,6 +610,11 @@ function App() {
           getDeptTheme={getDeptTheme}
         />
       ) : (
+        <>
+        <div className="active-pipelines-widget">
+            <h3>{t('pipeline.activePipelines')}</h3>
+            <ActivePipelinesList onSelectPipeline={(projectId) => fetchProjectDetail(projectId)} />
+        </div>
         <div className="departments-container">
           {[...new Set(projects.map(p => p.department))].sort().map(dept => {
             const deptProjects = projects.filter(p => p.department === dept);
@@ -517,6 +634,16 @@ function App() {
                         <div style={{ display: 'flex', gap: '4px' }}>
                           <span className="status-badge" style={{ fontSize: '0.65rem', padding: '2px 8px' }}>{project.status}</span>
                           <span className="dept-badge" style={{ fontSize: '0.65rem', padding: '2px 8px', background: 'var(--primary-trans)', color: 'var(--primary)' }}>{project.sub_area}</span>
+                          {project.has_active_pipeline && (
+                            <span className="pipeline-active-badge" style={{ fontSize: '0.65rem', padding: '2px 8px' }}>
+                              {t('pipeline.activePipelineBadge')}
+                              {project.pipeline_progress && (
+                                <span style={{ marginLeft: '4px', opacity: 0.8 }}>
+                                  {project.pipeline_progress.completed}/{project.pipeline_progress.total}
+                                </span>
+                              )}
+                            </span>
+                          )}
                         </div>
                         <button className="btn-icon-danger" onClick={(e) => deleteProject(project.id, e)} title={t('dashboard.delete')}>{ActionIcons.delete}</button>
                       </div>
@@ -536,6 +663,7 @@ function App() {
             </div>
           )}
         </div>
+        </>
       )}
     </div>
   );
