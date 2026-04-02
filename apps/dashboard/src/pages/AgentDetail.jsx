@@ -36,6 +36,7 @@ export default function AgentDetail() {
     const [error, setError] = useState(null);
 
     const [showModal, setShowModal] = useState(false);
+    const [activeTab, setActiveTab] = useState('chat');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [formData, setFormData] = useState({
         name: '',
@@ -125,13 +126,16 @@ export default function AgentDetail() {
     const ViewComponent = getViewForAgent(agent.id);
 
     return (
-        <div className={`dashboard-container animate-fade-in ${theme}`}>
+        <div className={`dashboard-container animate-fade-in ${theme}${activeTab === 'chat' ? ' dashboard-container--chat-mode' : ''}`}>
             <button className="back-button" onClick={() => navigate(`/app/workspace/${agent.department}`)}>
                 ← {t('agentDetail.backTo')} {agent.department}
             </button>
 
             {/* Agent Profile Header */}
-            <section className="agent-profile-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <section
+                className={`agent-profile-header${activeTab === 'chat' ? ' agent-profile-header--compact' : ''}`}
+                style={activeTab === 'chat' ? {} : { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}
+            >
                 <div className="agent-profile-left">
                     <div className="agent-profile-avatar-wrapper">
                         <span className="agent-profile-avatar">{agent.avatar}</span>
@@ -150,17 +154,19 @@ export default function AgentDetail() {
                         </div>
                     </div>
                 </div>
-                <button
-                    className="back-button"
-                    style={{ margin: 0, background: 'var(--primary)', color: 'white' }}
-                    onClick={() => setShowModal(true)}
-                >
-                    {t('agentDetail.editProfile')}
-                </button>
+                {activeTab !== 'chat' && (
+                    <button
+                        className="back-button"
+                        style={{ margin: 0, background: 'var(--primary)', color: 'white' }}
+                        onClick={() => setShowModal(true)}
+                    >
+                        {t('agentDetail.editProfile')}
+                    </button>
+                )}
             </section>
 
             {/* Agent-specific view (tabs + content) */}
-            <ViewComponent agent={agent} />
+            <ViewComponent agent={agent} activeTab={activeTab} onTabChange={setActiveTab} />
 
             {/* ════════ EDIT AGENT MODAL ════════ */}
             {showModal && (
