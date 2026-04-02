@@ -1,10 +1,17 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { contentAgentData } from '../../data/agentViewMocks.js';
-import AgentChat from '../AgentChat.jsx';
+import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
+import ActiveTicketIndicator from './shared/ActiveTicketIndicator.jsx';
+import AgentTicketsPanel from './shared/AgentTicketsPanel.jsx';
+import AgentChatSwitcher from './shared/AgentChatSwitcher.jsx';
+import HandoffModal from '../HandoffModal.jsx';
 import KpiCard from './shared/KpiCard.jsx';
 import StatusBadge from './shared/StatusBadge.jsx';
 import { AgentTabIcons, LangIcon, ContentTypeIcons, ContentIcons } from '../icons.jsx';
+import AgentSettingsPanel from './AgentSettingsPanel.jsx';
+import ContentChatPanel from './ContentChatPanel.jsx';
+import ContentBriefSidebar from './ContentBriefSidebar.jsx';
 import { Palette, Sparkles, Hourglass, ImageIcon, Ruler, Target, Clock } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
@@ -28,6 +35,42 @@ export default function ContentAgentView({ agent }) {
   const [typeFilter, setTypeFilter] = useState('all');
   const data = contentAgentData;
 
+  const pipeline = useAgentPipelineSession(agent.id);
+
+  const DEFAULT_MARKETS = ['en', 'es', 'ar'];
+  const emptyMarket = () => ({
+    subject:   { status: 'pending', value: null },
+    heroImage: { status: 'pending', value: null },
+    bodyCopy:  { status: 'pending', value: null },
+    cta:       { status: 'pending', value: null },
+  });
+
+  const [brief, setBrief] = useState(() =>
+    Object.fromEntries(DEFAULT_MARKETS.map(m => [m, emptyMarket()]))
+  );
+  const [markets] = useState(DEFAULT_MARKETS);
+
+  const handleBriefUpdate = useCallback((market, block, blockState) => {
+    setBrief(prev => ({
+      ...prev,
+      [market]: { ...prev[market], [block]: blockState },
+    }));
+  }, []);
+
+  const handleContentHandoff = useCallback(() => {
+    pipeline.setHandoffSession({
+      id: pipeline.selectedTicket?.id || 'content-brief',
+      stage_order: pipeline.currentSession?.stage_order,
+      brief,
+      markets,
+    });
+  }, [pipeline, brief, markets]);
+
+  const handleWorkOnTicket = (ticket) => {
+    pipeline.selectTicket(ticket);
+    setActiveTab('chat');
+  };
+
   // Image generation state
   const [imagePrompt, setImagePrompt] = useState('');
   const [imageSize, setImageSize] = useState('1200x628');
@@ -38,11 +81,13 @@ export default function ContentAgentView({ agent }) {
 
   const tabs = [
     { id: 'portfolio', label: 'Content Library', icon: AgentTabIcons.portfolio },
+    { id: 'tickets', label: t('tickets.tab'), icon: AgentTabIcons.tickets, count: pipeline.tickets.length, urgent: pipeline.hasUrgentTickets },
     { id: 'images', label: 'Image Studio', icon: AgentTabIcons.images, count: generatedImages.length },
     { id: 'ab', label: 'A/B Testing', icon: AgentTabIcons.ab },
     { id: 'quality', label: 'Quality Score', icon: AgentTabIcons.quality, count: data.quality.length },
     { id: 'chat', label: 'Chat', icon: AgentTabIcons.chat },
     { id: 'activity', label: 'Activity', icon: AgentTabIcons.activity },
+    { id: 'settings', label: t('agentSettings.tab'), icon: AgentTabIcons.settings },
   ];
 
   async function handleGenerateImage() {
@@ -98,13 +143,15 @@ export default function ContentAgentView({ agent }) {
         <KpiCard label={t('contentAgent.approvalRate') || 'Approval Rate'} value={`${data.kpis.approvalRate}%`} color="#10b981" />
       </div>
 
+      <ActiveTicketIndicator selectedTicket={pipeline.selectedTicket} onClear={pipeline.clearTicket} />
+
       {/* Tabs */}
       <div className="agent-tabs">
         {tabs.map((tab) => (
           <button key={tab.id} className={`agent-tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
             <span>{tab.icon}</span>
             <span>{tab.label}</span>
-            {tab.count != null && <span className="agent-tab-count">{tab.count}</span>}
+            {tab.count != null && <span className={`agent-tab-count${tab.urgent ? ' urgent' : ''}`}>{tab.count}</span>}
           </button>
         ))}
       </div>
@@ -355,7 +402,27 @@ export default function ContentAgentView({ agent }) {
         )}
 
         {activeTab === 'chat' && (
-          <AgentChat agentId={agent.id} agentName={agent.name} agentAvatar={agent.avatar} />
+          <div className="content-chat-split">
+            <ContentChatPanel
+              agent={agent}
+              ticket={pipeline.selectedTicket}
+              onBriefUpdate={handleBriefUpdate}
+            />
+            <ContentBriefSidebar
+              brief={brief}
+              markets={markets}
+              onBriefUpdate={handleBriefUpdate}
+              onHandoff={handleContentHandoff}
+            />
+          </div>
+        )}
+
+        {activeTab === 'tickets' && (
+          <AgentTicketsPanel
+            tickets={pipeline.tickets}
+            selectedTicket={pipeline.selectedTicket}
+            onSelectTicket={handleWorkOnTicket}
+          />
         )}
 
         {activeTab === 'activity' && (
@@ -377,7 +444,22 @@ export default function ContentAgentView({ agent }) {
             )}
           </div>
         )}
+
+        {activeTab === 'settings' && (
+          <AgentSettingsPanel agentId={agent.id} />
+        )}
       </section >
+
+      {pipeline.handoffSession && (
+        <HandoffModal
+          projectId={pipeline.selectedTicket?.project_id}
+          session={pipeline.handoffSession}
+          stages={pipeline.stages}
+          agents={pipeline.agents}
+          onClose={() => pipeline.setHandoffSession(null)}
+          onComplete={pipeline.onHandoffComplete}
+        />
+      )}
     </>
   );
 }
