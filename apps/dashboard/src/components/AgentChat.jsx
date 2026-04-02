@@ -200,7 +200,7 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
             }
 
             // Detect HTML generation or patch
-            const patchMatch = fullResponse.match(/<!--PATCH:([^-]+)-->([\s\S]+)/);
+            const patchMatch = fullResponse.match(/<!--PATCH:([^>]+)-->([\s\S]+)/);
             if (patchMatch) {
                 const [, blockName, patchHtml] = patchMatch;
                 if (onHtmlPatched) {
