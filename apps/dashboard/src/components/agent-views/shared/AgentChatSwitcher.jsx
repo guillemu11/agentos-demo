@@ -4,7 +4,7 @@ import AgentChat from '../../AgentChat.jsx';
 import ProjectAgentChat from '../../ProjectAgentChat.jsx';
 import { ArrowLeft, GitBranch } from 'lucide-react';
 
-export default function AgentChatSwitcher({ agent, selectedTicket, pipelineData, currentSession, completedSessions, agents, onClearTicket, onHandoffRequest, externalInput, onExternalInputConsumed, onHtmlGenerated, onHtmlPatched }) {
+export default function AgentChatSwitcher({ agent, selectedTicket, pipelineData, currentSession, completedSessions, agents, onClearTicket, onHandoffRequest, externalInput, onExternalInputConsumed, onHtmlGenerated, onHtmlPatched, onHtmlBlock }) {
     const { t } = useLanguage();
 
     // Pipeline chat mode — show when ticket selected and we have pipeline data
@@ -36,6 +36,7 @@ export default function AgentChatSwitcher({ agent, selectedTicket, pipelineData,
                         agents={agents}
                         pipelineStatus={pipelineData.status}
                         onHandoffRequest={onHandoffRequest}
+                        onHtmlBlock={onHtmlBlock}
                     />
                 </div>
             );

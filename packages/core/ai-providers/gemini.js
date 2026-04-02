@@ -8,6 +8,7 @@
 import { GoogleGenAI } from '@google/genai';
 
 let _client = null;
+let _apiKey = null;
 
 export const EMBEDDING_MODEL = 'gemini-embedding-2-preview';
 export const EMBEDDING_DIMENSIONS = 3072;
@@ -38,6 +39,7 @@ async function withRetry(fn, maxRetries = 3) {
  */
 export function initGemini(apiKey) {
     if (!apiKey) throw new Error('Gemini API key is required');
+    _apiKey = apiKey;
     _client = new GoogleGenAI({ apiKey });
     return _client;
 }
@@ -201,4 +203,37 @@ export async function extractTextFromDocument(base64Data, mimeType) {
  */
 export function isGeminiReady() {
     return _client !== null;
+}
+
+/**
+ * Generate an image using Imagen (Nano Banana) via Gemini API.
+ * @param {string} prompt - Image description
+ * @param {object} [options]
+ * @param {string} [options.aspectRatio='16:9'] - '1:1' | '3:4' | '4:3' | '9:16' | '16:9'
+ * @param {number} [options.numberOfImages=1] - 1-4
+ * @returns {Promise<string[]>} - Array of data URIs (data:image/png;base64,...)
+ */
+export async function generateImage(prompt, { aspectRatio = '16:9', numberOfImages = 1 } = {}) {
+    if (!_apiKey) throw new Error('Gemini not initialized. Call initGemini() first.');
+    const model = 'imagen-4.0-generate-001';
+    console.log(`[Gemini:imagen] model=${model} prompt="${prompt.slice(0, 60)}..."`);
+    const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${_apiKey}`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                instances: [{ prompt }],
+                parameters: { sampleCount: numberOfImages, aspectRatio },
+            }),
+        }
+    );
+    if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`Imagen API ${res.status}: ${err.slice(0, 200)}`);
+    }
+    const data = await res.json();
+    const urls = (data.predictions || []).map(p => `data:${p.mimeType};base64,${p.bytesBase64Encoded}`);
+    console.log(`[Gemini:imagen] success images=${urls.length}`);
+    return urls;
 }

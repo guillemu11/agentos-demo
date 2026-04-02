@@ -5,3 +5,21 @@ dist/
 .DS_Store
 Thumbs.db
 assets/kb/
+
+# Archivos temporales y de prueba
+*.png
+*.pdf
+email-blocks-preview.html
+qr_qatarairways_com.html
+view_e_emirates_email.html
+"view_e_emirates_email (1).html"
+tmp_pipeline.json
+apps/dashboard/fix_pwd.cjs
+apps/dashboard/public/temp-images/
+
+# Config local
+.vscode/
+.playwright-mcp/
+.superpowers/
+.agents/
+Usersgmunoz02.claudeplansadaptive-scribbling-otter-agent-abe0ba4420cfa68e7.md

@@ -60,20 +60,55 @@ export async function searchKnowledge(pool, query, options = {}) {
         let filePath = match.metadata?.file_path || null;
         let chunkMetadata = null;
 
+        let htmlSource = null;
         if (match.id) {
             const chunkRow = await pool.query(
-                `SELECT kc.content, kd.title, kc.media_type, kc.file_path, kc.metadata as chunk_metadata
+                `SELECT kc.content, kc.document_id, kc.chunk_index, kd.title, kc.media_type, kc.file_path, kc.metadata as chunk_metadata
                  FROM knowledge_chunks kc
                  JOIN knowledge_documents kd ON kd.id = kc.document_id
                  WHERE kc.pinecone_id = $1`,
                 [match.id]
             );
             if (chunkRow.rows.length > 0) {
-                content = chunkRow.rows[0].content;
-                documentTitle = chunkRow.rows[0].title;
-                mediaType = chunkRow.rows[0].media_type || mediaType;
-                filePath = chunkRow.rows[0].file_path || filePath;
-                chunkMetadata = chunkRow.rows[0].chunk_metadata || null;
+                const row = chunkRow.rows[0];
+                content = row.content;
+                documentTitle = row.title;
+                mediaType = row.media_type || mediaType;
+                filePath = row.file_path || filePath;
+                chunkMetadata = row.chunk_metadata || null;
+
+                // Check for stored html_source in metadata
+                htmlSource = chunkMetadata?.html_source || null;
+
+                // If not in metadata, try to reconstruct from content across all chunks
+                if (!htmlSource) {
+                    const HTML_MARKER = '\n\n--- HTML SOURCE ---\n';
+                    // Find which chunk has the marker (chunk 0 for email-blocks)
+                    let chunk0Content = row.chunk_index === 0 ? row.content : null;
+                    if (!chunk0Content) {
+                        const c0 = await pool.query(
+                            `SELECT content FROM knowledge_chunks WHERE document_id = $1 AND chunk_index = 0`,
+                            [row.document_id]
+                        );
+                        if (c0.rows.length > 0) chunk0Content = c0.rows[0].content;
+                    }
+                    if (chunk0Content && chunk0Content.includes(HTML_MARKER)) {
+                        // Fetch all chunks to reconstruct full HTML
+                        const allChunks = await pool.query(
+                            `SELECT chunk_index, content FROM knowledge_chunks WHERE document_id = $1 ORDER BY chunk_index`,
+                            [row.document_id]
+                        );
+                        const markerIdx = chunk0Content.indexOf(HTML_MARKER);
+                        // Description is everything before the marker in chunk 0
+                        content = chunk0Content.slice(0, markerIdx).trim();
+                        // HTML starts after the marker in chunk 0, continues in subsequent chunks
+                        const parts = [chunk0Content.slice(markerIdx + HTML_MARKER.length)];
+                        for (const c of allChunks.rows) {
+                            if (c.chunk_index > 0) parts.push(c.content);
+                        }
+                        htmlSource = parts.join('').trim();
+                    }
+                }
             }
         }
 
@@ -84,7 +119,7 @@ export async function searchKnowledge(pool, query, options = {}) {
             documentTitle,
             mediaType,
             filePath,
-            htmlSource: chunkMetadata?.html_source || null,
+            htmlSource,
         });
     }
 
@@ -115,12 +150,24 @@ export async function searchMultiNamespace(pool, query, namespaces, { topK = DEF
     allMatches.sort((a, b) => b.score - a.score);
 
     // Rerank with cross-encoder for better precision
+    // Save best match per namespace before reranking so diversity is preserved afterward
+    const bestPerNs = {};
+    for (const m of allMatches) {
+        const ns = m._namespace;
+        if (!bestPerNs[ns]) bestPerNs[ns] = m;
+    }
     if (allMatches.length > 1) {
         try {
             const docs = allMatches.map(m => ({ text: m.metadata?.content_preview || m.id, _match: m }));
             const reranked = await rerankResults(query, docs.map(d => ({ text: d.text })), { topN: Math.min(allMatches.length, topK * 2) });
             if (reranked?.data?.length) {
                 const rerankedMatches = reranked.data.map(r => docs[r.index]._match);
+                // Ensure every namespace that had results keeps at least its best match
+                for (const [ns, best] of Object.entries(bestPerNs)) {
+                    if (!rerankedMatches.some(m => m._namespace === ns)) {
+                        rerankedMatches.push(best);
+                    }
+                }
                 allMatches.length = 0;
                 allMatches.push(...rerankedMatches);
             }
@@ -157,7 +204,6 @@ export async function searchMultiNamespace(pool, query, namespaces, { topK = DEF
     }
     // Fill remaining slots from overflow (highest score first)
     const finalResults = [...diverseResults, ...overflow].slice(0, topK);
-
     // Enrich top results
     const results = [];
     for (const match of finalResults) {
@@ -166,18 +212,49 @@ export async function searchMultiNamespace(pool, query, namespaces, { topK = DEF
         let mediaType = match.metadata?.media_type || 'text';
         let filePath = match.metadata?.file_path || null;
 
+        let htmlSource = null;
         if (match.id) {
             const chunkRow = await pool.query(
-                `SELECT kc.content, kd.title, kc.media_type, kc.file_path FROM knowledge_chunks kc
+                `SELECT kc.content, kc.document_id, kc.chunk_index, kd.title, kc.media_type, kc.file_path, kc.metadata as chunk_metadata FROM knowledge_chunks kc
                  JOIN knowledge_documents kd ON kd.id = kc.document_id
                  WHERE kc.pinecone_id = $1`,
                 [match.id]
             );
             if (chunkRow.rows.length > 0) {
-                content = chunkRow.rows[0].content;
-                documentTitle = chunkRow.rows[0].title;
-                mediaType = chunkRow.rows[0].media_type || mediaType;
-                filePath = chunkRow.rows[0].file_path || filePath;
+                const row = chunkRow.rows[0];
+                content = row.content;
+                documentTitle = row.title;
+                mediaType = row.media_type || mediaType;
+                filePath = row.file_path || filePath;
+                const chunkMeta = row.chunk_metadata || null;
+
+                htmlSource = chunkMeta?.html_source || null;
+
+                // Reconstruct full HTML from all chunks when stored in content
+                if (!htmlSource) {
+                    const HTML_MARKER = '\n\n--- HTML SOURCE ---\n';
+                    let chunk0Content = row.chunk_index === 0 ? row.content : null;
+                    if (!chunk0Content) {
+                        const c0 = await pool.query(
+                            `SELECT content FROM knowledge_chunks WHERE document_id = $1 AND chunk_index = 0`,
+                            [row.document_id]
+                        );
+                        if (c0.rows.length > 0) chunk0Content = c0.rows[0].content;
+                    }
+                    if (chunk0Content && chunk0Content.includes(HTML_MARKER)) {
+                        const allChunks = await pool.query(
+                            `SELECT chunk_index, content FROM knowledge_chunks WHERE document_id = $1 ORDER BY chunk_index`,
+                            [row.document_id]
+                        );
+                        const markerIdx = chunk0Content.indexOf(HTML_MARKER);
+                        content = chunk0Content.slice(0, markerIdx).trim();
+                        const parts = [chunk0Content.slice(markerIdx + HTML_MARKER.length)];
+                        for (const c of allChunks.rows) {
+                            if (c.chunk_index > 0) parts.push(c.content);
+                        }
+                        htmlSource = parts.join('').trim();
+                    }
+                }
             }
         }
 
@@ -188,6 +265,7 @@ export async function searchMultiNamespace(pool, query, namespaces, { topK = DEF
             documentTitle,
             mediaType,
             filePath,
+            htmlSource,
         });
     }
 
@@ -212,11 +290,13 @@ export async function buildRAGContext(pool, query, options = {}) {
         visualQuery = false,
         mode = 'text',     // 'text' | 'voice'
         maxMedia = 4,
+        maxResults,        // hard cap on number of results included in context
+        minScore: minScoreOverride,
     } = options;
 
     // When user asks for visual content, cast a wider net and lower threshold
     const topK = visualQuery ? 20 : 12;
-    const minScore = visualQuery ? 0.3 : 0.45;
+    const minScore = minScoreOverride !== undefined ? minScoreOverride : (visualQuery ? 0.3 : 0.45);
 
     let results = await searchMultiNamespace(pool, query, namespaces, { topK, filter, minScore });
 
@@ -229,8 +309,8 @@ export async function buildRAGContext(pool, query, options = {}) {
     // Boost visual results to top when user asks for visuals (images > pdf_page > text)
     if (visualQuery && results.length > 0) {
         results.sort((a, b) => {
-            const aVisual = a.mediaType === 'image' ? 2 : (a.mediaType === 'pdf_page' ? 1 : 0);
-            const bVisual = b.mediaType === 'image' ? 2 : (b.mediaType === 'pdf_page' ? 1 : 0);
+            const aVisual = a.mediaType === 'image' ? 2 : (a.mediaType === 'pdf_page' || a.mediaType === 'html_email' ? 1 : 0);
+            const bVisual = b.mediaType === 'image' ? 2 : (b.mediaType === 'pdf_page' || b.mediaType === 'html_email' ? 1 : 0);
             if (bVisual !== aVisual) return bVisual - aVisual;
             return b.score - a.score;
         });
@@ -238,6 +318,11 @@ export async function buildRAGContext(pool, query, options = {}) {
 
     if (results.length === 0) {
         return { context: '', sources: [], mediaResults: [] };
+    }
+
+    // Hard cap on results when caller wants a single item (e.g. block queries)
+    if (maxResults && results.length > maxResults) {
+        results = results.slice(0, maxResults);
     }
 
     // Build context block with token budget
@@ -284,7 +369,7 @@ export async function buildRAGContext(pool, query, options = {}) {
                     visualQuery || (mode !== 'voice' && result.score >= MEDIA_SCORE_THRESHOLD)
                 );
                 if (shouldAttachMedia) {
-                    block += `[ATTACHED EMAIL VISUALLY SHOWN TO USER ON SCREEN]\n`;
+                    block += `[SYSTEM INSTRUCTION: The full HTML of this email/block is being rendered as an iframe directly in the user's chat UI. Respond with ONLY a short acknowledgment like "Here is [title]:" — do NOT describe, analyze, or list the content. The user can already see it.]\n`;
                     mediaResults.push({ mediaType: 'email_html', htmlSource: result.htmlSource, title: result.documentTitle, score: result.score });
                 }
             }

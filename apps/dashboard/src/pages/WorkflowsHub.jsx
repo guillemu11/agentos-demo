@@ -24,6 +24,48 @@ function formatDuration(ms) {
     return `${Math.round(ms / 60000)}min`;
 }
 
+export function ActivePipelinesList({ onSelectPipeline }) {
+    const { t } = useLanguage();
+    const [pipelines, setPipelines] = useState([]);
+
+    useEffect(() => {
+        fetch(`${API_URL}/pipelines/active`, { credentials: 'include' })
+            .then(r => r.json())
+            .then(data => setPipelines(Array.isArray(data) ? data : []))
+            .catch(() => {});
+    }, []);
+
+    if (pipelines.length === 0) {
+        return <div className="empty-state">{t('pipeline.noPipeline')}</div>;
+    }
+
+    return (
+        <div className="active-pipelines-list">
+            {pipelines.map(p => (
+                <div key={p.id} className="active-pipeline-card" onClick={() => onSelectPipeline?.(p.project_id)}>
+                    <div className="pipeline-info">
+                        <h4>{p.project_name}</h4>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                            {p.project_department} • {p.active_stages?.map(s => s.stage_name).join(', ') || 'No active stages'}
+                        </span>
+                    </div>
+                    <div className="pipeline-progress">
+                        <div className="progress-bar">
+                            <div className="progress-fill" style={{ width: `${(p.completed_stages / p.total_stages) * 100}%` }} />
+                        </div>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                            {p.completed_stages}/{p.total_stages}
+                        </span>
+                        <span className={`pipeline-status-badge ${p.status}`}>
+                            {t(`pipeline.${p.status}`) || p.status}
+                        </span>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
+
 export default function WorkflowsHub() {
     const { t } = useLanguage();
     const [view, setView] = useState('catalog');
@@ -381,6 +423,9 @@ export default function WorkflowsHub() {
                 <button className={`weekly-toggle-btn ${view === 'history' ? 'active' : ''}`} onClick={() => setView('history')}>
                     {t('workflows.history')}
                 </button>
+                <button className={`weekly-toggle-btn ${view === 'pipelines' ? 'active' : ''}`} onClick={() => setView('pipelines')}>
+                    {t('pipeline.activePipelines')}
+                </button>
             </div>
 
             {/* Category filter */}
@@ -522,6 +567,11 @@ export default function WorkflowsHub() {
                         </div>
                     )}
                 </div>
+            )}
+
+            {/* Active Pipelines view */}
+            {view === 'pipelines' && (
+                <ActivePipelinesList />
             )}
 
             {/* Confirmation modal */}

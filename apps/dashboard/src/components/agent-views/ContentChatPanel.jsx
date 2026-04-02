@@ -25,7 +25,12 @@ function parseBriefUpdates(chunk) {
   return { textChunk, briefUpdates };
 }
 
-export default function ContentChatPanel({ agent, ticket, onBriefUpdate }) {
+const MARKET_FLAGS_INLINE = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
+
+// Mirror of the backend regex — used only to show skeleton immediately
+const IMAGE_REQUEST_RE = /\b(imagen?|image|foto|photo|banner|hero|visual|picture|ilustra|generat|crea(?:r)?|diseña|design|make)\b.{0,80}\b(imagen?|image|foto|photo|banner|hero|avion|plane|aircraft|logo|background|fondo)\b/i;
+
+export default function ContentChatPanel({ agent, ticket, completedSessions, activeVariant, onBriefUpdate, onImageGenerated }) {
   const { t, lang } = useLanguage();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -38,29 +43,99 @@ export default function ContentChatPanel({ agent, ticket, onBriefUpdate }) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Load conversation history on mount; inject welcome message when chat is fresh and a ticket is active
+  // Load pipeline session messages OR call /initialize for the first message
   useEffect(() => {
     let cancelled = false;
+    if (!ticket) { setMessages([]); return; }
+
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/agents/${agent.id}/conversation`, { credentials: 'include' });
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        const loaded = Array.isArray(data.messages) ? data.messages : [];
-        if (!cancelled) {
-          if (loaded.length === 0 && ticket) {
-            setMessages([{
-              role: 'assistant',
-              content: `Hola! Estoy listo para trabajar en **${ticket.project_name}**.\n\nPuedo generar copies e imágenes para los mercados configurados. Dime por dónde empezamos — ¿subject lines, hero image, body copy o CTA?`,
-            }]);
-          } else {
-            setMessages(loaded);
+        // If ticket has a pipeline session id, load its messages from the pipeline endpoint
+        const sessionId = ticket.id; // pas.id is the session id
+        const projectId = ticket.project_id;
+
+        // Load existing session messages first
+        const msgsRes = await fetch(
+          `${API_URL}/projects/${projectId}/sessions/${sessionId}/messages`,
+          { credentials: 'include' }
+        );
+        if (cancelled) return;
+
+        let loaded = [];
+        if (msgsRes.ok) {
+          const msgsData = await msgsRes.json();
+          // Server returns { messages: [], total: N }
+          const arr = msgsData?.messages ?? msgsData;
+          loaded = Array.isArray(arr) ? arr : [];
+        }
+
+        if (loaded.length > 0) {
+          if (!cancelled) {
+            // Parse BRIEF_UPDATE tags from historical messages and rebuild sidebar state
+            const parsed = loaded.map(m => {
+              if (m.role !== 'assistant') return { role: m.role, content: m.content };
+              const { textChunk, briefUpdates } = parseBriefUpdates(m.content || '');
+              briefUpdates.forEach(u => onBriefUpdate({ variant: u.variant, block: u.block, status: u.status, value: u.value }));
+              return { role: m.role, content: textChunk };
+            });
+            setMessages(parsed);
+          }
+          return;
+        }
+
+        // No messages yet — call /initialize to get the rich first message via SSE
+        if (!cancelled) setStreaming(true);
+        if (!cancelled) setMessages([{ role: 'assistant', content: '', _loading: true }]);
+
+        const initRes = await fetch(
+          `${API_URL}/projects/${projectId}/sessions/${sessionId}/initialize`,
+          { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } }
+        );
+        if (cancelled) return;
+        if (!initRes.ok) {
+          // Fallback to simple welcome if initialize fails
+          if (!cancelled) setMessages([{
+            role: 'assistant',
+            content: `¡Hola! Estoy lista para trabajar en **${ticket.project_name}**.\n\nUsa el formulario **"New Variant"** del panel derecho para crear la primera variante y pídeme que genere el contenido.`,
+          }]);
+          return;
+        }
+
+        const reader = initRes.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done || cancelled) break;
+          const raw = decoder.decode(value, { stream: true });
+          for (const line of raw.split('\n')) {
+            if (!line.startsWith('data: ')) continue;
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') break;
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.text) {
+                fullText += parsed.text;
+                if (!cancelled) setMessages([{ role: 'assistant', content: fullText }]);
+              }
+            } catch (_) { /* skip */ }
           }
         }
-      } catch (_) { /* network error — start fresh */ }
+      } catch (_) {
+        if (!cancelled) {
+          setMessages([{
+            role: 'assistant',
+            content: `¡Hola! Estoy lista para trabajar en **${ticket.project_name || 'este proyecto'}**.\n\nUsa el formulario **"New Variant"** del panel derecho para crear la primera variante.`,
+          }]);
+        }
+      } finally {
+        // Guarantee streaming is always reset — prevents zombie-locked textarea
+        if (!cancelled) setStreaming(false);
+      }
     })();
     return () => { cancelled = true; };
-  }, [agent.id, ticket?.id]);
+  }, [agent.id, ticket?.id, onBriefUpdate]);
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
@@ -69,27 +144,36 @@ export default function ContentChatPanel({ agent, ticket, onBriefUpdate }) {
     setStreaming(true);
 
     const userMsg = { role: 'user', content: text };
-    setMessages(prev => [...prev, userMsg]);
+    const looksLikeImage = IMAGE_REQUEST_RE.test(text);
+    setMessages(prev => looksLikeImage
+      ? [...prev, userMsg, { role: 'assistant', isImageSkeleton: true }]
+      : [...prev, userMsg]
+    );
 
-    // Build ticket context prefix so the agent knows what campaign this is for
+    // Build ticket context prefix — includes active variant so the agent knows what to update
+    const variantContext = activeVariant ? ` — Active Variant: ${activeVariant}` : '';
     const contextPrefix = ticket
-      ? `[Campaign: ${ticket.project_name} — Stage: ${ticket.stage_name}]\n\n`
+      ? `[Campaign: ${ticket.project_name} — Stage: ${ticket.stage_name}${variantContext}]\n\n`
       : '';
 
     try {
-      const res = await fetch(`${API_URL}/chat/agent/${agent.id}`, {
+      // Use pipeline session endpoint when in a ticket context — provides full accumulated context,
+      // RAG with stage namespaces, and persists messages to pipeline_session_messages
+      const endpoint = ticket
+        ? `${API_URL}/projects/${ticket.project_id}/sessions/${ticket.id}/chat`
+        : `${API_URL}/chat/agent/${agent.id}`;
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ message: contextPrefix + text }),
+        body: JSON.stringify({ message: ticket ? text : contextPrefix + text }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let assistantText = '';
-      // Placeholder assistant message while streaming
-      setMessages(prev => [...prev, { role: 'assistant', content: '', briefUpdates: [] }]);
+      let textPlaceholderAdded = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -101,24 +185,50 @@ export default function ContentChatPanel({ agent, ticket, onBriefUpdate }) {
           if (data === '[DONE]') break;
           try {
             const parsed = JSON.parse(data);
+            if (parsed.image_error) {
+              // Replace skeleton with error message
+              setMessages(prev => {
+                const skeletonIdx = prev.findLastIndex(m => m.isImageSkeleton);
+                const errMsg = { role: 'assistant', content: `⚠️ ${parsed.image_error}` };
+                if (skeletonIdx !== -1) { const next = [...prev]; next[skeletonIdx] = errMsg; return next; }
+                return [...prev, errMsg];
+              });
+            }
+            if (parsed.image_url) {
+              const imageMsg = { role: 'assistant', content: '', image_url: parsed.image_url, image_prompt: parsed.image_prompt };
+              // Replace skeleton if present, otherwise append
+              setMessages(prev => {
+                const skeletonIdx = prev.findLastIndex(m => m.isImageSkeleton);
+                if (skeletonIdx !== -1) {
+                  const next = [...prev];
+                  next[skeletonIdx] = imageMsg;
+                  return next;
+                }
+                return [...prev, imageMsg];
+              });
+              onImageGenerated?.({ url: parsed.image_url, prompt: parsed.image_prompt });
+            }
             if (parsed.text) {
               const { textChunk, briefUpdates } = parseBriefUpdates(parsed.text);
               assistantText += textChunk;
-              // Propagate brief updates upward
-              briefUpdates.forEach(u => onBriefUpdate(u.market, u.block, { status: u.status, value: u.value }));
-              // Update last assistant message in place
-              setMessages(prev => {
-                const next = [...prev];
-                const last = next[next.length - 1];
-                if (last.role === 'assistant') {
-                  next[next.length - 1] = {
-                    ...last,
-                    content: assistantText,
-                    briefUpdates: [...(last.briefUpdates || []), ...briefUpdates],
-                  };
-                }
-                return next;
-              });
+              briefUpdates.forEach(u => onBriefUpdate({ variant: u.variant, block: u.block, status: u.status, value: u.value }));
+              if (!textPlaceholderAdded) {
+                // Add text bubble only on first text chunk, after any image bubbles
+                textPlaceholderAdded = true;
+                setMessages(prev => [...prev, { role: 'assistant', content: assistantText, briefUpdates }]);
+              } else {
+                setMessages(prev => {
+                  const next = [...prev];
+                  // Find last text bubble (no image_url)
+                  for (let i = next.length - 1; i >= 0; i--) {
+                    if (next[i].role === 'assistant' && !next[i].image_url) {
+                      next[i] = { ...next[i], content: assistantText, briefUpdates: [...(next[i].briefUpdates || []), ...briefUpdates] };
+                      break;
+                    }
+                  }
+                  return next;
+                });
+              }
             }
           } catch (_) { /* non-JSON chunk — skip */ }
         }
@@ -138,19 +248,31 @@ export default function ContentChatPanel({ agent, ticket, onBriefUpdate }) {
     }
   };
 
+  if (!ticket) {
+    return (
+      <div className="content-chat-panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, color: 'var(--text-muted)', fontSize: '0.9rem', padding: 32 }}>
+        <div style={{ fontSize: '2rem' }}>📋</div>
+        <div style={{ fontWeight: 600 }}>{t('contentAgent.noTicketSelected') || 'No hay ticket activo'}</div>
+        <div style={{ fontSize: '0.8rem', textAlign: 'center', maxWidth: 240, lineHeight: 1.6 }}>
+          {t('contentAgent.selectTicketHint') || 'Ve a la tab "Tickets" y selecciona un proyecto para empezar a trabajar con Lucia.'}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="content-chat-panel">
       {/* Agent header */}
-      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: 8, background: '#fff' }}>
         <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>
           {agent.avatar || '✍️'}
         </div>
         <div>
-          <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary, #e2e8f0)' }}>{agent.name}</div>
+          <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#1e293b' }}>{agent.name}</div>
           <div style={{ fontSize: '0.72rem', color: '#10b981' }}>● Gemini + Pinecone</div>
         </div>
         {ticket && (
-          <div style={{ marginLeft: 'auto', fontSize: '0.72rem', color: 'var(--text-muted)', background: 'rgba(148,163,184,0.08)', padding: '2px 8px', borderRadius: 4 }}>
+          <div style={{ marginLeft: 'auto', fontSize: '0.72rem', color: '#64748b', background: 'rgba(0,0,0,0.05)', padding: '2px 8px', borderRadius: 4 }}>
             {ticket.project_name}
           </div>
         )}
@@ -160,19 +282,29 @@ export default function ContentChatPanel({ agent, ticket, onBriefUpdate }) {
       <div className="content-chat-messages">
         {messages.map((msg, i) => (
           <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
-            <div
-              style={{
-                maxWidth: '82%',
-                padding: '8px 12px',
-                borderRadius: msg.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
-                background: msg.role === 'user' ? '#334155' : 'var(--bg-card, #1e293b)',
-                border: msg.role === 'assistant' ? '1px solid rgba(148,163,184,0.08)' : 'none',
-                fontSize: '0.85rem',
-                color: 'var(--text-primary, #e2e8f0)',
-                lineHeight: 1.5,
-              }}
-            >
-              {msg.role === 'assistant'
+            <div className={msg.role === 'user' ? 'content-chat-bubble-user' : 'content-chat-bubble-assistant'}>
+              {msg.isImageSkeleton ? (
+                <div className="image-skeleton">
+                  <div className="image-skeleton-shimmer" />
+                  <div className="image-skeleton-label">
+                    <span className="loading-pulse" />
+                    {' Generando imagen con Nano Banana...'}
+                  </div>
+                </div>
+              ) : msg.image_url ? (
+                <div>
+                  <img
+                    src={msg.image_url}
+                    alt={msg.image_prompt || 'Generated image'}
+                    style={{ width: '100%', borderRadius: 8, display: 'block', marginBottom: msg.image_prompt ? 6 : 0 }}
+                  />
+                  {msg.image_prompt && (
+                    <div style={{ fontSize: '0.72rem', color: '#64748b', fontStyle: 'italic' }}>
+                      {msg.image_prompt}
+                    </div>
+                  )}
+                </div>
+              ) : msg.role === 'assistant'
                 ? <div dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content || '…') }} />
                 : msg.content
               }
@@ -190,7 +322,7 @@ export default function ContentChatPanel({ agent, ticket, onBriefUpdate }) {
                     <div key={j} className={`brief-inline-market-row${u.status === 'generating' ? ' generating' : ''}`}>
                       <div className="brief-inline-market-value">
                         <span style={{ fontSize: '0.72rem', fontWeight: 700, marginRight: 6 }}>
-                          {u.market === 'en' ? '🇬🇧' : u.market === 'es' ? '🇪🇸' : u.market === 'ar' ? '🇦🇪' : '🌐'}
+                          {MARKET_FLAGS_INLINE[u.variant?.split(':')[0]] || '🌐'} {u.variant?.toUpperCase().replace(':', ' / ')}
                         </span>
                         {u.status === 'generating' ? '...' : u.value}
                       </div>
@@ -200,7 +332,7 @@ export default function ContentChatPanel({ agent, ticket, onBriefUpdate }) {
                             {t('contentAgent.approveBlock') || '✓'}
                           </button>
                           <button className="brief-action-btn regenerate" onClick={() => {
-                            setInput(`Regenera el ${u.block} para ${u.market}`);
+                            setInput(`Regenera el ${u.block} para la variante ${u.variant}`);
                             inputRef.current?.focus();
                           }}>
                             {t('contentAgent.regenerateBlock') || '↻'}

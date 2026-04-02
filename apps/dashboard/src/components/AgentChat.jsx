@@ -146,6 +146,7 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
             let fullResponse = '';
+            let sseBuffer = '';
 
             setMessages(prev => [...prev, { role: 'assistant', content: '', media: parsedMedia }]);
 
@@ -153,8 +154,9 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
                 const { done, value } = await reader.read();
                 if (done) break;
 
-                const chunk = decoder.decode(value, { stream: true });
-                const lines = chunk.split('\n');
+                sseBuffer += decoder.decode(value, { stream: true });
+                const lines = sseBuffer.split('\n');
+                sseBuffer = lines.pop() ?? '';
 
                 for (const line of lines) {
                     if (!line.startsWith('data: ')) continue;

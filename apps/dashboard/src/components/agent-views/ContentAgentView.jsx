@@ -42,43 +42,61 @@ export default function ContentAgentView({ agent, activeTab: activeTabProp, onTa
 
   const pipeline = useAgentPipelineSession(agent.id);
 
-  const DEFAULT_MARKETS = ['en', 'es', 'ar'];
-  const emptyMarket = () => ({
-    subject:   { status: 'pending', value: null },
-    heroImage: { status: 'pending', value: null },
-    bodyCopy:  { status: 'pending', value: null },
-    cta:       { status: 'pending', value: null },
+  const ALL_MARKETS = ['en', 'es', 'ar', 'ru'];
+  const AVAILABLE_TIERS = ['economy', 'economy_premium', 'business', 'first_class'];
+
+  const emptyVariant = () => ({
+    subject:      { status: 'pending', value: null },
+    preheader:    { status: 'pending', value: null },
+    heroHeadline: { status: 'pending', value: null },
+    bodyCopy:     { status: 'pending', value: null },
+    cta:          { status: 'pending', value: null },
   });
 
-  const [markets, setMarkets] = useState(DEFAULT_MARKETS);
-  const [brief, setBrief] = useState(() =>
-    Object.fromEntries(DEFAULT_MARKETS.map(m => [m, emptyMarket()]))
-  );
+  const buildVariantKey = (market, tier) => `${market}:${tier}`;
 
-  // Update markets and reset brief when active ticket changes
+  const [variants, setVariants] = useState({});
+  const [activeVariant, setActiveVariant] = useState(null);
+  const [availableMarkets, setAvailableMarkets] = useState(ALL_MARKETS);
+
+  // Reset variants when active ticket changes
   useEffect(() => {
-    const m = pipeline.selectedTicket?.markets
+    const raw = pipeline.selectedTicket?.project_markets
       || pipeline.selectedTicket?.metadata?.markets
-      || DEFAULT_MARKETS;
-    setMarkets(m);
-    setBrief(Object.fromEntries(m.map(mk => [mk, emptyMarket()])));
+      || ALL_MARKETS;
+    const arr = Array.isArray(raw) ? raw : ALL_MARKETS;
+    // If markets are generic strings like ["Global"] rather than lang codes, fall back to ALL_MARKETS
+    const validCodes = new Set(ALL_MARKETS);
+    const resolved = arr.every(m => validCodes.has(m)) ? arr : ALL_MARKETS;
+    setAvailableMarkets(resolved);
+    setVariants({});
+    setActiveVariant(null);
   }, [pipeline.selectedTicket?.id]);
 
-  const handleBriefUpdate = useCallback((market, block, blockState) => {
-    setBrief(prev => ({
+  const handleBriefUpdate = useCallback(({ variant, block, status, value }) => {
+    setVariants(prev => ({
       ...prev,
-      [market]: { ...prev[market], [block]: blockState },
+      [variant]: {
+        ...(prev[variant] || emptyVariant()),
+        [block]: { status, value },
+      },
     }));
+  }, []);
+
+  const addVariant = useCallback((market, tier) => {
+    const key = buildVariantKey(market, tier);
+    setVariants(prev => prev[key] ? prev : { ...prev, [key]: emptyVariant() });
+    setActiveVariant(key);
   }, []);
 
   const handleContentHandoff = useCallback(() => {
     pipeline.setHandoffSession({
       id: pipeline.selectedTicket?.id || 'content-brief',
       stage_order: pipeline.currentSession?.stage_order,
-      brief,
-      markets,
+      variants,
+      activeVariant,
     });
-  }, [pipeline, brief, markets]);
+  }, [pipeline, variants, activeVariant]);
 
   const handleWorkOnTicket = (ticket) => {
     pipeline.selectTicket(ticket);
@@ -92,6 +110,23 @@ export default function ContentAgentView({ agent, activeTab: activeTabProp, onTa
   const [generatedImages, setGeneratedImages] = useState(data.generatedImages || []);
   const [genError, setGenError] = useState(null);
   const promptRef = useRef(null);
+
+  // Images generated inline from chat (also pushed to Image Studio)
+  const [chatImages, setChatImages] = useState([]);
+  const handleChatImage = useCallback(({ url, prompt }) => {
+    const newImage = {
+      id: `chat-img-${Date.now()}`,
+      url,
+      prompt,
+      size: '1200x628',
+      status: 'review',
+      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
+      campaign: pipeline.selectedTicket?.project_name || 'Chat Generation',
+      source: 'chat',
+    };
+    setChatImages(prev => [...prev, newImage]);
+    setGeneratedImages(prev => [newImage, ...prev]);
+  }, [pipeline.selectedTicket?.project_name]);
 
   const tabs = [
     { id: 'portfolio', label: 'Content Library', icon: AgentTabIcons.portfolio },
@@ -420,13 +455,21 @@ export default function ContentAgentView({ agent, activeTab: activeTabProp, onTa
             <ContentChatPanel
               agent={agent}
               ticket={pipeline.selectedTicket}
+              completedSessions={pipeline.completedSessions}
+              activeVariant={activeVariant}
               onBriefUpdate={handleBriefUpdate}
+              onImageGenerated={handleChatImage}
             />
             <ContentBriefSidebar
-              brief={brief}
-              markets={markets}
+              variants={variants}
+              activeVariant={activeVariant}
+              availableMarkets={availableMarkets}
+              availableTiers={AVAILABLE_TIERS}
+              onAddVariant={addVariant}
+              onSelectVariant={setActiveVariant}
               onBriefUpdate={handleBriefUpdate}
               onHandoff={handleContentHandoff}
+              chatImages={chatImages}
             />
           </div>
         )}

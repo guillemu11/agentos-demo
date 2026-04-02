@@ -17,7 +17,7 @@ import {
   ServerCrash, HardDrive, GitBranch, Code2, Layers,
   FolderOpen, Siren, Repeat, Scale, Cloud, Gem, Medal,
   Handshake, Plane, Tag, Trophy, Sprout, Moon, HelpCircle,
-  Database, Calculator, Share2, Cpu,
+  Database, Calculator, Share2, Cpu, SlidersHorizontal, Ticket,
 } from 'lucide-react';
 
 // Default icon size for inline usage
@@ -170,6 +170,7 @@ export const AgentTabIcons = {
   workflows: <ClipboardList size={S} />,
   activity: <Activity size={S} />,
   eod: <FileEdit size={S} />,
+  settings: <SlidersHorizontal size={S} />,
   dashboard: <TrendingUp size={S} />,
   bau: <MailOpen size={S} />,
   attribution: <GitBranch size={S} />,
@@ -205,6 +206,7 @@ export const AgentTabIcons = {
   journeys: <RotateCw size={S} />,
   infrastructure: <HardDrive size={S} />,
   changelog: <FileEdit size={S} />,
+  tickets: <Ticket size={S} />,
 };
 
 // ─── Metric Card Icons ──────────────────────────────────────────────────────

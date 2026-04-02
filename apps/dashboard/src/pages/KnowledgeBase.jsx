@@ -181,7 +181,7 @@ export default function KnowledgeBase() {
                         <div className="kb-upload-zone">
                             <input
                                 type="file"
-                                accept=".pdf,.png,.jpg,.jpeg,.webp,.gif"
+                                accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.html,.htm,.doc,.docx,.eml"
                                 onChange={e => {
                                     const f = e.target.files?.[0];
                                     if (f) {

@@ -385,6 +385,11 @@ export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onT
                   setBuilderStatus(`${blockName} actualizado`);
                   setTimeout(() => { setPatchedBlock(null); setBuilderStatus(''); }, 2000);
                 }}
+                onHtmlBlock={(block) => {
+                  setBuilderHtml(prev => prev + block.htmlSource);
+                  setBuilderStatus(`${block.title} añadido`);
+                  setTimeout(() => setBuilderStatus(''), 3000);
+                }}
               />
             </div>
             <EmailBuilderPreview

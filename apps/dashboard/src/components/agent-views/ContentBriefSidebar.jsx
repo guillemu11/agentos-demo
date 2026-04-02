@@ -1,40 +1,67 @@
 import React, { useState } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 
-const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', de: '🇩🇪', fr: '🇫🇷', ru: '🇷🇺', it: '🇮🇹', zh: '🇨🇳', ja: '🇯🇵', pt: '🇧🇷', nl: '🇳🇱', pl: '🇵🇱', tr: '🇹🇷', ko: '🇰🇷' };
-const MARKET_LABELS = { en: 'EN', es: 'ES', ar: 'AR', de: 'DE', fr: 'FR', ru: 'RU', it: 'IT', zh: 'ZH', ja: 'JA', pt: 'PT', nl: 'NL', pl: 'PL', tr: 'TR', ko: 'KO' };
-const BLOCK_KEYS = ['subject', 'heroImage', 'bodyCopy', 'cta'];
+const MARKET_FLAGS  = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺', de: '🇩🇪', fr: '🇫🇷', it: '🇮🇹', zh: '🇨🇳', ja: '🇯🇵', pt: '🇧🇷' };
+const MARKET_LABELS = { en: 'EN', es: 'ES', ar: 'AR', ru: 'RU', de: 'DE', fr: 'FR', it: 'IT', zh: 'ZH', ja: 'JA', pt: 'PT' };
+const TIER_LABELS   = { economy: 'Economy', economy_premium: 'Eco Premium', business: 'Business', first_class: 'First Class' };
+const BLOCK_KEYS    = ['subject', 'preheader', 'heroHeadline', 'bodyCopy', 'cta'];
 
-export default function ContentBriefSidebar({ brief, markets, onBriefUpdate, onHandoff }) {
+const parseVariantKey = (key) => {
+  const [market, ...tierParts] = (key || '').split(':');
+  return { market, tier: tierParts.join(':') };
+};
+
+const variantTagLabel = (key) => {
+  const { market, tier } = parseVariantKey(key);
+  const mLabel = MARKET_LABELS[market] || (market || '').toUpperCase();
+  const tLabel = TIER_LABELS[tier] || (tier || '').replace(/_/g, ' ');
+  return `${mLabel} / ${tLabel}`;
+};
+
+export default function ContentBriefSidebar({
+  variants,
+  activeVariant,
+  availableMarkets,
+  availableTiers,
+  onAddVariant,
+  onSelectVariant,
+  onBriefUpdate,
+  onHandoff,
+  chatImages = [],
+}) {
   const { t } = useLanguage();
-  const [activeMarket, setActiveMarket] = useState(markets[0] || 'en');
+  const [newMarket, setNewMarket] = useState('');
+  const [newTier, setNewTier]     = useState('');
 
-  const blockLabel = (key) => {
-    if (key === 'subject') return t('contentAgent.blockSubject') || 'Subject Line';
-    if (key === 'heroImage') return t('contentAgent.blockHeroImage') || 'Hero Image';
-    if (key === 'bodyCopy') return t('contentAgent.blockBodyCopy') || 'Body Copy';
-    if (key === 'cta') return t('contentAgent.blockCta') || 'CTA Button';
-    return key;
+  const variantKeys   = Object.keys(variants || {});
+  const totalBlocks   = variantKeys.length * BLOCK_KEYS.length;
+  const approvedBlocks = variantKeys.reduce((sum, vk) =>
+    sum + BLOCK_KEYS.filter(k => variants[vk]?.[k]?.status === 'approved').length, 0);
+  const isComplete = variantKeys.length > 0 && approvedBlocks === totalBlocks;
+
+  const handleAddVariant = () => {
+    if (!newMarket || !newTier) return;
+    onAddVariant(newMarket, newTier);
+    setNewMarket('');
+    setNewTier('');
   };
 
-  // Count total approved blocks across all markets
-  const totalBlocks = markets.length * BLOCK_KEYS.length;
-  const approvedBlocks = markets.reduce((sum, m) => {
-    return sum + BLOCK_KEYS.filter(k => brief[m]?.[k]?.status === 'approved').length;
-  }, 0);
-  const isComplete = approvedBlocks === totalBlocks;
+  const blockLabel = (key) => {
+    const labels = {
+      subject:      t('contentAgent.blockSubject')      || 'Subject Line',
+      preheader:    t('contentAgent.blockPreheader')    || 'Preheader',
+      heroHeadline: t('contentAgent.blockHeroHeadline') || 'Hero Headline',
+      bodyCopy:     t('contentAgent.blockBodyCopy')     || 'Body Copy',
+      cta:          t('contentAgent.blockCta')          || 'CTA Button',
+    };
+    return labels[key] || key;
+  };
 
-  // Progress label: "EN 2/4 · ES 1/4 · AR 0/4"
-  const progressDetail = markets.map(m => {
-    const done = BLOCK_KEYS.filter(k => brief[m]?.[k]?.status === 'approved').length;
-    return `${MARKET_LABELS[m] || m.toUpperCase()} ${done}/${BLOCK_KEYS.length}`;
-  }).join(' · ');
-
-  const activeBlocks = brief[activeMarket] || {};
+  const activeBlocks = activeVariant ? (variants[activeVariant] || {}) : null;
 
   return (
     <aside className="brief-sidebar">
-      {/* Header */}
+      {/* ─── Header ─────────────────────────────────────── */}
       <div className="brief-sidebar-header">
         <div className="brief-sidebar-title">
           {t('contentAgent.briefSidebar') || 'Brief en construcción'}
@@ -42,70 +69,145 @@ export default function ContentBriefSidebar({ brief, markets, onBriefUpdate, onH
         <div className="brief-sidebar-subtitle">
           {(t('contentAgent.blocksProgress') || '{completed}/{total} bloques')
             .replace('{completed}', approvedBlocks)
-            .replace('{total}', totalBlocks)}
+            .replace('{total}', totalBlocks || 0)}
         </div>
       </div>
 
-      {/* Market tabs */}
-      <div className="brief-market-tabs">
-        {markets.map(m => (
-          <button
-            key={m}
-            className={`brief-market-tab${activeMarket === m ? ' active' : ''}`}
-            onClick={() => setActiveMarket(m)}
+      {/* ─── Variants (tags) ────────────────────────────── */}
+      <div className="brief-variants-section">
+        <div className="brief-variants-label">
+          {t('contentAgent.variantsLabel') || 'Variants'}
+        </div>
+        <div className="brief-variant-tags">
+          {variantKeys.length === 0 ? (
+            <span className="brief-variants-empty">
+              {t('contentAgent.noVariantsYet') || 'No variants yet'}
+            </span>
+          ) : (
+            variantKeys.map(vk => {
+              const done = BLOCK_KEYS.filter(k => variants[vk]?.[k]?.status === 'approved').length;
+              const { market } = parseVariantKey(vk);
+              return (
+                <button
+                  key={vk}
+                  className={`brief-variant-tag${activeVariant === vk ? ' active' : ''}`}
+                  onClick={() => onSelectVariant(vk)}
+                >
+                  {MARKET_FLAGS[market] || '🌐'} {variantTagLabel(vk)}
+                  <span className="brief-variant-tag-progress">{done}/{BLOCK_KEYS.length}</span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* ─── New Variant form ───────────────────────────── */}
+      <div className="brief-new-variant-form">
+        <div className="brief-new-variant-title">
+          {t('contentAgent.newVariant') || 'New Variant'}
+        </div>
+        <div className="brief-new-variant-fields">
+          <select
+            className="brief-new-variant-select"
+            value={newMarket}
+            onChange={e => setNewMarket(e.target.value)}
           >
-            {MARKET_FLAGS[m] || '🌐'} {MARKET_LABELS[m] || m.toUpperCase()}
+            <option value="">{t('contentAgent.selectMarket') || 'Market'}</option>
+            {(availableMarkets || []).map(m => (
+              <option key={m} value={m}>
+                {MARKET_FLAGS[m] || '🌐'} {MARKET_LABELS[m] || m.toUpperCase()}
+              </option>
+            ))}
+          </select>
+          <select
+            className="brief-new-variant-select"
+            value={newTier}
+            onChange={e => setNewTier(e.target.value)}
+          >
+            <option value="">{t('contentAgent.selectTier') || 'Tier'}</option>
+            {(availableTiers || []).map(tier => (
+              <option key={tier} value={tier}>
+                {TIER_LABELS[tier] || tier}
+              </option>
+            ))}
+          </select>
+          <button
+            className="brief-new-variant-add-btn"
+            onClick={handleAddVariant}
+            disabled={!newMarket || !newTier}
+            title="Add variant"
+          >
+            +
           </button>
-        ))}
-        <button className="brief-market-tab-add" title={t('contentAgent.addMarket') || '+ Mercado'}>+</button>
+        </div>
       </div>
 
-      {/* Blocks */}
+      {/* ─── Content Fields (variante activa) ───────────── */}
       <div className="brief-blocks">
-        {BLOCK_KEYS.map(key => {
-          const block = activeBlocks[key] || { status: 'pending', value: null };
-          return (
-            <div key={key} className={`brief-block ${block.status}`}>
-              <div className="brief-block-header">
-                <span className={`brief-block-label ${block.status}`}>{blockLabel(key)}</span>
-                <span className={`brief-block-status ${block.status}`}>
-                  {block.status === 'approved' && `✓ ${t('contentAgent.statusApproved') || 'aprobado'}`}
-                  {block.status === 'generating' && `⏳ ${t('contentAgent.statusGenerating') || 'generando'}`}
-                  {block.status === 'pending' && `— ${t('contentAgent.statusPending') || 'pendiente'}`}
-                </span>
-              </div>
-
-              {block.status === 'approved' && block.value && (
-                <>
-                  {key === 'heroImage'
-                    ? <img src={block.value} alt="Hero" className="brief-block-image-thumb" />
-                    : <div className="brief-block-value">{block.value}</div>
-                  }
-                  <button
-                    className="brief-block-edit-btn"
-                    onClick={() => onBriefUpdate(activeMarket, key, { status: 'pending', value: null })}
-                  >
-                    {t('contentAgent.editBlock') || 'Editar'} ✏️
-                  </button>
-                </>
-              )}
-
-              {block.status === 'generating' && key === 'heroImage' && (
-                <div style={{ height: 40, background: 'rgba(245,158,11,0.08)', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.72rem', color: '#f59e0b', marginTop: 4 }}>
-                  1200 × 628 px
-                </div>
-              )}
+        {activeBlocks ? (
+          <>
+            <div className="brief-active-variant-label">
+              {MARKET_FLAGS[parseVariantKey(activeVariant).market] || '🌐'} {variantTagLabel(activeVariant)}
             </div>
-          );
-        })}
+            {BLOCK_KEYS.map(key => {
+              const block = activeBlocks[key] || { status: 'pending', value: null };
+              return (
+                <div key={key} className={`brief-block ${block.status}`}>
+                  <div className="brief-block-header">
+                    <span className={`brief-block-label ${block.status}`}>{blockLabel(key)}</span>
+                    <span className={`brief-block-status ${block.status}`}>
+                      {block.status === 'approved'  && `✓ ${t('contentAgent.statusApproved')  || 'aprobado'}`}
+                      {block.status === 'generating' && `⏳ ${t('contentAgent.statusGenerating') || 'generando'}`}
+                      {block.status === 'pending'    && `— ${t('contentAgent.statusPending')   || 'pendiente'}`}
+                    </span>
+                  </div>
+                  {block.status === 'approved' && block.value && (
+                    <>
+                      <div className="brief-block-value">{block.value}</div>
+                      <button
+                        className="brief-block-edit-btn"
+                        onClick={() => onBriefUpdate({ variant: activeVariant, block: key, status: 'pending', value: null })}
+                      >
+                        {t('contentAgent.editBlock') || 'Editar'} ✏️
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </>
+        ) : (
+          <div className="brief-no-variant-selected">
+            {t('contentAgent.selectVariantHint') || 'Select a variant above to see its content fields'}
+          </div>
+        )}
       </div>
 
-      {/* Footer: progress + handoff */}
+      {/* ─── Chat Images ────────────────────────────────── */}
+      {chatImages.length > 0 && (
+        <div className="brief-images-section">
+          <div className="brief-images-header">
+            <span>🖼️ {t('contentAgent.imagesGenerated') || 'Imágenes generadas'}</span>
+            <span className="brief-images-count">{chatImages.length}</span>
+          </div>
+          <div className="brief-images-list">
+            {chatImages.map(img => (
+              <div key={img.id} className="brief-image-thumb" onClick={() => window.open(img.url, '_blank')}>
+                <img src={img.url} alt={img.prompt} />
+                {img.prompt && <div className="brief-image-prompt">{img.prompt}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ─── Footer: progress + handoff ─────────────────── */}
       <div className="brief-sidebar-footer">
         <div className="brief-progress-bar-wrap">
           <div className="brief-progress-label">
             <span>{t('contentAgent.globalProgress') || 'Progreso global'}</span>
-            <span>{progressDetail}</span>
+            <span>{approvedBlocks}/{totalBlocks || 0}</span>
           </div>
           <div className="brief-progress-track">
             <div
@@ -125,7 +227,9 @@ export default function ContentBriefSidebar({ brief, markets, onBriefUpdate, onH
 
         {!isComplete && (
           <div className="brief-handoff-hint">
-            {t('contentAgent.handoffIncomplete') || 'Completa todos los bloques primero'}
+            {variantKeys.length === 0
+              ? (t('contentAgent.handoffNoVariants') || 'Crea al menos una variante primero')
+              : (t('contentAgent.handoffIncomplete') || 'Completa todos los bloques primero')}
           </div>
         )}
       </div>

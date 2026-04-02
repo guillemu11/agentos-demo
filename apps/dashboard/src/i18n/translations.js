@@ -414,6 +414,7 @@ export const translations = {
       voiceEndCall: 'Terminar llamada',
       voiceStart: 'Modo voz',
       voiceError: 'Error de voz',
+      closeOverlay: 'Cerrar chat',
     },
 
     // BrainstormPanel
@@ -1412,6 +1413,17 @@ export const translations = {
       regenerateBlock: 'Regenerar',
       editBlock: 'Editar',
       globalProgress: 'Progreso global',
+      variantsLabel: 'Variantes',
+      newVariant: 'Nueva variante',
+      selectMarket: 'Mercado',
+      selectTier: 'Tier',
+      noVariantsYet: 'Sin variantes aún',
+      selectVariantHint: 'Selecciona una variante para ver sus campos',
+      handoffNoVariants: 'Crea al menos una variante primero',
+      blockPreheader: 'Preheader',
+      blockHeroHeadline: 'Headline Hero',
+      noTicketSelected: 'No hay ticket activo',
+      selectTicketHint: 'Ve a la tab "Tickets" y selecciona un proyecto para empezar a trabajar con Lucia.',
     },
   },
 
@@ -1820,6 +1832,7 @@ export const translations = {
       voiceEndCall: 'End call',
       voiceStart: 'Voice mode',
       voiceError: 'Voice error',
+      closeOverlay: 'Close chat',
     },
 
     brainstorm: {
@@ -2794,6 +2807,17 @@ export const translations = {
       regenerateBlock: 'Regenerate',
       editBlock: 'Edit',
       globalProgress: 'Global progress',
+      variantsLabel: 'Variants',
+      newVariant: 'New Variant',
+      selectMarket: 'Market',
+      selectTier: 'Tier',
+      noVariantsYet: 'No variants yet',
+      selectVariantHint: 'Select a variant above to see its content fields',
+      handoffNoVariants: 'Create at least one variant first',
+      blockPreheader: 'Preheader',
+      blockHeroHeadline: 'Hero Headline',
+      noTicketSelected: 'No active ticket',
+      selectTicketHint: 'Go to the "Tickets" tab and select a project to start working with Lucia.',
     },
   },
 };

@@ -9,7 +9,7 @@ const fileUrl = (filePath) => `${API_URL.replace('/api', '')}/api/kb-files/${fil
 const NAMESPACES = ['campaigns', 'emails', 'images', 'kpis', 'research', 'brand'];
 const STORAGE_KEY = 'kb-chat-messages';
 
-export default function KBChat() {
+export default function KBChat({ defaultNamespace = '', fixedNamespace = false, suggestedQuestions = null }) {
     const { t, lang } = useLanguage();
     const [messages, setMessages] = useState(() => {
         try {
@@ -19,7 +19,7 @@ export default function KBChat() {
     });
     const [input, setInput] = useState('');
     const [streaming, setStreaming] = useState(false);
-    const [namespace, setNamespace] = useState('');
+    const [namespace, setNamespace] = useState(defaultNamespace);
     const [lastSources, setLastSources] = useState([]);
     const [sourcesExpanded, setSourcesExpanded] = useState(false);
     const [highlightedSource, setHighlightedSource] = useState(null);
@@ -182,7 +182,29 @@ export default function KBChat() {
 
                         try {
                             const parsed = JSON.parse(data);
-                            if (parsed.text) {
+                            if (parsed.error) {
+                                fullResponse = `Error: ${parsed.error}`;
+                                setMessages(prev => {
+                                    const updated = [...prev];
+                                    const last = updated[updated.length - 1];
+                                    updated[updated.length - 1] = { ...last, content: fullResponse };
+                                    return updated;
+                                });
+                            } else if (parsed.html_sources) {
+                                const newMedia = parsed.html_sources
+                                    .filter(s => s.htmlSource)
+                                    .map(s => ({ mediaType: 'email_html', htmlSource: s.htmlSource, title: s.title }));
+                                if (newMedia.length > 0) {
+                                    setMessages(prev => {
+                                        const updated = [...prev];
+                                        const last = updated[updated.length - 1];
+                                        const existing = last.media || [];
+                                        const merged = [...existing, ...newMedia.filter(m => !existing.find(e => e.title === m.title))];
+                                        updated[updated.length - 1] = { ...last, media: merged };
+                                        return updated;
+                                    });
+                                }
+                            } else if (parsed.text) {
                                 fullResponse += parsed.text;
                                 const captured = fullResponse;
                                 setMessages(prev => {
@@ -231,7 +253,7 @@ export default function KBChat() {
         }
     }
 
-    const suggested = [
+    const suggested = suggestedQuestions || [
         t('knowledge.chat.suggested1'),
         t('knowledge.chat.suggested2'),
         t('knowledge.chat.suggested3'),
@@ -277,15 +299,17 @@ export default function KBChat() {
             <div className="kb-chat-header">
                 <Database size={16} style={{ color: 'var(--primary)', flexShrink: 0 }} />
                 <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>{t('knowledge.chat.title')}</span>
-                <select
-                    value={namespace}
-                    onChange={e => setNamespace(e.target.value)}
-                    className="kb-filter-select"
-                    style={{ marginLeft: 'auto', minWidth: 130 }}
-                >
-                    <option value="">{t('knowledge.chat.namespaceAll')}</option>
-                    {NAMESPACES.map(ns => <option key={ns} value={ns}>{ns}</option>)}
-                </select>
+                {!fixedNamespace && (
+                    <select
+                        value={namespace}
+                        onChange={e => setNamespace(e.target.value)}
+                        className="kb-filter-select"
+                        style={{ marginLeft: 'auto', minWidth: 130 }}
+                    >
+                        <option value="">{t('knowledge.chat.namespaceAll')}</option>
+                        {NAMESPACES.map(ns => <option key={ns} value={ns}>{ns}</option>)}
+                    </select>
+                )}
                 {messages.length > 0 && !streaming && (
                     <button
                         onClick={clearChat}
@@ -463,12 +487,13 @@ export default function KBChat() {
                         </div>
                     </div>
                 ) : (
-                    <input
+                    <textarea
                         value={input}
                         onChange={e => setInput(e.target.value)}
                         onKeyDown={handleKeyDown}
                         placeholder={t('knowledge.chat.placeholder')}
                         disabled={streaming}
+                        rows={1}
                     />
                 )}
                 

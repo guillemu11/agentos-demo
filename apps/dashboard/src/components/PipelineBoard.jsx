@@ -245,6 +245,10 @@ export default function PipelineBoard({ department }) {
                                 const totalTasks = parseInt(proj.total_tasks) || 0;
                                 const doneTasks = parseInt(proj.done_tasks) || 0;
                                 const taskPct = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
+                                const hasPipeline = !!proj.has_active_pipeline;
+                                const pipelineTotal = parseInt(proj.pipeline_total) || 0;
+                                const pipelineCompleted = parseInt(proj.pipeline_completed) || 0;
+                                const pipelinePct = pipelineTotal > 0 ? Math.round((pipelineCompleted / pipelineTotal) * 100) : 0;
                                 const transitions = statusTransitions[proj.status] || [];
                                 const isUpdating = updating === `${itemType}-${proj.id}`;
 
@@ -311,8 +315,24 @@ export default function PipelineBoard({ department }) {
                                             )}
                                         </div>
 
-                                        {/* Task progress bar */}
-                                        {totalTasks > 0 && (
+                                        {/* Progress bar — pipeline stages or legacy tasks */}
+                                        {hasPipeline && pipelineTotal > 0 ? (
+                                            <div style={{ marginBottom: '10px' }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                                    <span style={{ fontSize: '0.7rem', color: '#94A3B8' }}>{t('pipeline.stages')}</span>
+                                                    <span style={{ fontSize: '0.7rem', color: '#64748B', fontWeight: 600 }}>
+                                                        {pipelineCompleted}/{pipelineTotal}
+                                                    </span>
+                                                </div>
+                                                <div style={{ height: '4px', background: '#f1f5f9', borderRadius: '9999px', overflow: 'hidden' }}>
+                                                    <div style={{
+                                                        width: `${pipelinePct}%`, height: '100%', borderRadius: '9999px',
+                                                        background: pipelinePct === 100 ? '#10b981' : '#a855f7',
+                                                        transition: 'width 0.3s ease',
+                                                    }} />
+                                                </div>
+                                            </div>
+                                        ) : totalTasks > 0 ? (
                                             <div style={{ marginBottom: '10px' }}>
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                                                     <span style={{ fontSize: '0.7rem', color: '#94A3B8' }}>{t('pipeline.tasks')}</span>
@@ -328,7 +348,7 @@ export default function PipelineBoard({ department }) {
                                                     }} />
                                                 </div>
                                             </div>
-                                        )}
+                                        ) : null}
 
                                         {/* Status change buttons */}
                                         {transitions.length > 0 && (

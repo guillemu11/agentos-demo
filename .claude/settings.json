@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(netstat -ano)",
+      "Bash(taskkill //F //FI \"WINDOWTITLE eq *agentOS*\")",
+      "Bash(npx kill-port:*)"
+    ]
+  }
+}

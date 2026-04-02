@@ -19,7 +19,7 @@ import { chatWithPMAgent, extractJSON, generateSummary, generateDraft, renderDra
 import { saveProject } from '../../packages/core/db/save_project.js';
 import { buildProjectContext } from '../../packages/core/pm-agent/context-builder.js';
 import Anthropic from '@anthropic-ai/sdk';
-import { initGemini, isGeminiReady, getGeminiClient, EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from '../../packages/core/ai-providers/gemini.js';
+import { initGemini, isGeminiReady, getGeminiClient, generateImage, EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from '../../packages/core/ai-providers/gemini.js';
 import { initPinecone, isPineconeReady, describeIndex } from '../../packages/core/ai-providers/pinecone.js';
 import multer from 'multer';
 import { generateEodReport } from '../../packages/core/workspace-skills/eod-generator.js';
@@ -2591,13 +2591,30 @@ app.delete('/api/agents/:id/conversation', requireAuth, async (req, res) => {
     }
 });
 
-// POST /api/agents/generate-image — Generate an image from a prompt using AI
+// POST /api/agents/generate-image — Generate an image using Gemini Imagen (Nano Banana), fallback to Claude SVG
 app.post('/api/agents/generate-image', async (req, res) => {
     try {
         const { prompt, size } = req.body;
         if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
 
-        // Use Claude to generate an SVG illustration based on the prompt
+        // Map size string → Imagen aspectRatio
+        const aspectMap = {
+            '1200x628': '16:9', '1080x1080': '1:1',
+            '600x600':  '1:1',  '600x200':   '3:1',
+        };
+        const aspectRatio = aspectMap[size] || '16:9';
+
+        // Try Gemini Imagen (Nano Banana) first
+        if (isGeminiReady()) {
+            try {
+                const urls = await generateImage(prompt, { aspectRatio, numberOfImages: 1 });
+                return res.json({ url: urls[0], type: 'png' });
+            } catch (imgErr) {
+                console.warn('[Image] Gemini Imagen failed, falling back to Claude SVG:', imgErr.message);
+            }
+        }
+
+        // Fallback: Claude SVG illustration
         const response = await anthropic.messages.create({
             model: 'claude-sonnet-4-6',
             max_tokens: 4096,
@@ -2606,14 +2623,10 @@ app.post('/api/agents/generate-image', async (req, res) => {
 
         const svgContent = response.content[0]?.text || '';
         const svgMatch = svgContent.match(/<svg[\s\S]*<\/svg>/i);
+        if (!svgMatch) return res.json({ url: null, svg: null, message: 'Could not generate image' });
 
-        if (!svgMatch) {
-            return res.json({ url: null, svg: null, message: 'Could not generate image' });
-        }
-
-        // Return the SVG as a data URI
         const svgDataUri = `data:image/svg+xml;base64,${Buffer.from(svgMatch[0]).toString('base64')}`;
-        res.json({ url: svgDataUri, svg: svgMatch[0] });
+        res.json({ url: svgDataUri, svg: svgMatch[0], type: 'svg' });
     } catch (err) {
         console.error('Image generation error:', err.message);
         res.status(500).json({ error: 'Image generation failed' });
@@ -2644,9 +2657,11 @@ app.post('/api/chat/agent/:agentId', async (req, res) => {
         const isContentAgent = (agent.role || '').toLowerCase().includes('content')
           || (agent.name || '').toLowerCase().includes('content');
         const isEmailBuilder = agentId === 'html-developer'
+          || agentId === 'lucia'
           || (agent.role || '').toLowerCase().includes('html')
           || (agent.role || '').toLowerCase().includes('email template')
-          || (agent.role || '').toLowerCase().includes('email developer');
+          || (agent.role || '').toLowerCase().includes('email developer')
+          || (agent.department || '').toLowerCase().includes('email');
         const personality = agent.personality || profile.personality;
         const systemPrompt = `You are ${agent.name}, an AI agent working in the ${agent.department} department.
 
@@ -2658,13 +2673,31 @@ ${skillsList ? `Your skills: ${skillsList}` : ''}
 ${toolsList ? `Your tools: ${toolsList}` : ''}
 
 ${personality ? `## Personality\n${personality}\n` : ''}${isContentAgent ? `## Brief Generation Protocol
-When generating email content blocks (subject lines, hero images, body copy, CTA buttons), you MUST emit structured brief update tags inline with your response. Use this exact format for each block you generate:
+You work with a variant-based brief system. Each variant is identified by "market:tier" (e.g. "en:economy", "es:business", "ar:first_class").
 
-[BRIEF_UPDATE:{"market":"en","block":"subject","status":"approved","value":"Your copy here"}]
-[BRIEF_UPDATE:{"market":"es","block":"subject","status":"approved","value":"Tu copy aquí"}]
-[BRIEF_UPDATE:{"market":"ar","block":"subject","status":"approved","value":"النص هنا"}]
+The user's message will include [Campaign: ... — Active Variant: <key>] when a variant is selected in the UI.
 
-For hero images, trigger generation via the image API — emit the update with status "generating" first, then "approved" once the URL is ready. Block names: subject, heroImage, bodyCopy, cta. Markets: en, es, ar. Always generate all three markets unless the user specifies otherwise.
+When generating email content blocks, you MUST emit structured brief update tags on dedicated lines within your response. Use this EXACT format:
+
+[BRIEF_UPDATE:{"variant":"en:economy","block":"subject","status":"approved","value":"Your subject line here"}]
+[BRIEF_UPDATE:{"variant":"en:economy","block":"preheader","status":"approved","value":"Preheader text here"}]
+[BRIEF_UPDATE:{"variant":"en:economy","block":"heroHeadline","status":"approved","value":"Main headline here"}]
+[BRIEF_UPDATE:{"variant":"en:economy","block":"bodyCopy","status":"approved","value":"Body copy here"}]
+[BRIEF_UPDATE:{"variant":"en:economy","block":"cta","status":"approved","value":"CTA text here"}]
+
+Block names: subject, preheader, heroHeadline, bodyCopy, cta.
+Available tiers: economy, economy_premium, business, first_class.
+
+Rules:
+1. Always generate content for the active variant shown in the message context. If no active variant is specified, ask the user which market + tier combination they want to create before generating.
+2. Generate in English (en) FIRST by default. Only generate other languages when the user explicitly requests it.
+3. You can emit all 5 blocks at once or individual blocks on request.
+4. Each BRIEF_UPDATE tag must be on its own line, NOT embedded in sentences.
+
+## Image Generation Capability
+You CAN generate images directly in this chat (powered by Google Imagen / Nano Banana). Images appear inline automatically.
+When the user asks for an image, confirm you are generating it and describe what you're creating.
+Never redirect to another tab. Never say you cannot create images.
 ` : ''}## Behavior Rules
 1. Stay in character as ${agent.name}. Respond from the perspective of your role and expertise.
 2. Be helpful, direct, and knowledgeable about your area of specialization.
@@ -2721,14 +2754,21 @@ Extract the HTML from the RAG context and render it directly. Do not describe it
         const apiMessages = messages.map(m => ({ role: m.role, content: m.content }));
 
         // RAG: use DB override namespaces or fallback to profile defaults
-        const ragNamespaces = (Array.isArray(agent.rag_namespaces) && agent.rag_namespaces.length > 0)
+        let ragNamespaces = (Array.isArray(agent.rag_namespaces) && agent.rag_namespaces.length > 0)
             ? agent.rag_namespaces
             : profile.ragNamespaces;
+        // If query is about a specific email block type, restrict to email-blocks namespace only
+        const blockKeywords = /\b(block|header|footer|preheader|hero|banner|cta|button|product.?card|body.?copy|section.?heading|partner|icon|terms|module)\b/i;
+        if (isEmailBuilder && blockKeywords.test(message) && ragNamespaces.includes('email-blocks')) {
+            ragNamespaces = ['email-blocks'];
+        }
         const visualKeywords = /\b(show|display|ver|mostrar|look like|see|visualiz|email|imagen|image|picture|inline)\b/i;
         const isVisualQuery = visualKeywords.test(message);
+        console.log(`[RAG] agent=${agentId} isEmailBuilder=${isEmailBuilder} namespaces=${JSON.stringify(ragNamespaces)} visualQuery=${isVisualQuery}`);
         const ragResult = isKBReady()
             ? await buildRAGContext(pool, message, { namespaces: ragNamespaces, visualQuery: isVisualQuery, maxTokens: isVisualQuery ? 4000 : 3000, maxMedia: isVisualQuery ? 4 : 2 })
             : { context: '', sources: [] };
+        console.log(`[RAG] sources=${ragResult.sources?.length} mediaResults=${ragResult.mediaResults?.length} htmlSources=${ragResult.sources?.filter(s=>s.htmlSource).length}`);
 
         const finalSystemPrompt = ragResult.context
             ? systemPrompt + '\n\n' + ragResult.context
@@ -4313,21 +4353,24 @@ app.post('/api/chat/knowledge', requireAuth, async (req, res) => {
         if (!isKBReady()) return res.status(503).json({ error: 'Knowledge base not configured.' });
 
         // Determine namespaces to search
-        const allNamespaces = ['campaigns', 'emails', 'images', 'kpis', 'research', 'brand'];
-        const namespaces = namespace ? [namespace] : allNamespaces;
+        const allNamespaces = ['campaigns', 'emails', 'images', 'kpis', 'research', 'brand', 'email-blocks'];
+        // If the query specifically asks for an email block/component, search only email-blocks namespace
+        const blockQuery = /\b(email\s+block|block|header block|footer block|email component|email template|plantilla|bloque)\b/i.test(message);
+        const namespaces = namespace ? [namespace] : (blockQuery ? ['email-blocks'] : allNamespaces);
 
         // Build RAG context (pass visualQuery flag for boosted visual retrieval)
-        const ragResult = await buildRAGContext(pool, message, { namespaces, maxTokens: visualQuery ? 4000 : 3000, visualQuery: !!visualQuery, mode: 'text', maxMedia: visualQuery ? 4 : 2 });
+        // For block queries: limit to 1 result so only the requested block is returned
+        const ragResult = await buildRAGContext(pool, message, { namespaces, maxTokens: visualQuery ? 4000 : 3000, visualQuery: !!visualQuery, mode: 'text', maxMedia: blockQuery ? 1 : (visualQuery ? 4 : 2), maxResults: blockQuery ? 1 : undefined, minScore: blockQuery ? 0.3 : undefined });
 
         // System prompt for conversational KB assistant
         const visualInstruction = visualQuery ? `
 
-## CRITICAL: Visual Query Detected
-The user is asking for a diagram, image, schema, or visual content. You MUST:
-- Embed ALL matching [VISUAL PAGE: url] and [IMAGE: url] references as inline images using ![description](url)
-- Show the visual FIRST, then explain what it contains
-- NEVER describe a diagram with text when the actual visual page is available in the context
-- If multiple visual pages match, embed ALL of them` : '';
+## CRITICAL: Visual/Email Query Detected
+The user is asking for a visual, diagram, or email block/template. You MUST:
+- If the context contains [SYSTEM INSTRUCTION: The full HTML of this email is being rendered...]: respond with ONLY a brief acknowledgment like "Here is the [title]:" and nothing else. Do NOT describe or analyze the content — the HTML is already rendered directly in the UI.
+- For diagrams/images: Embed ALL matching [VISUAL PAGE: url] and [IMAGE: url] references as inline images using ![description](url)
+- Show the visual FIRST, then explain only if there is no HTML block being rendered
+- NEVER describe content when the actual HTML block or visual is already being shown in the UI` : '';
 
         const langDirective = lang === 'en'
             ? '\n\nCRITICAL LANGUAGE RULE: You MUST respond in English at all times, regardless of the language of the knowledge base content.'
@@ -4349,7 +4392,8 @@ The user is asking for a diagram, image, schema, or visual content. You MUST:
 8. If nothing relevant is found, say so honestly and suggest what the user could try instead.
 9. Respond in the same language the user writes to you. If a language directive is provided above, follow it strictly.
 10. Be concise but thorough. Under 400 words unless the user asks for more detail.
-11. Use markdown formatting (bold, lists, headers) to make your responses easy to scan.` +
+11. Use markdown formatting (bold, lists, headers) to make your responses easy to scan.
+12. When the context contains email HTML blocks (source from email-blocks namespace): respond ONLY with a brief acknowledgment such as "Here is the [block name]:" — do NOT describe the HTML content, do NOT list its properties or sections. The HTML is already rendered as an iframe in the user's UI.` +
             visualInstruction +
             (ragResult.context ? '\n\n' + ragResult.context : '');
 
@@ -5908,13 +5952,20 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
         );
         const accumulatedContext = buildAccumulatedContext(completedRes.rows, session.stage_order);
 
-        const ragNamespaces = session.stage_namespaces && session.stage_namespaces.length > 0
+        let ragNamespaces = session.stage_namespaces && session.stage_namespaces.length > 0
             ? session.stage_namespaces
             : ['campaigns', 'kpis', 'research', 'emails'];
+        // Ensure email-blocks is included for html-developer agent sessions
+        if (session.agent_id === 'html-developer' && !ragNamespaces.includes('email-blocks')) {
+            ragNamespaces = ['email-blocks', ...ragNamespaces];
+        }
+        const blockKeywords = /\b(block|header|footer|preheader|hero|banner|cta|button|product.?card|body.?copy|section.?heading|partner|icon|terms|module)\b/i;
+        const isBlockQuery = session.agent_id === 'html-developer' && blockKeywords.test(message) && ragNamespaces.includes('email-blocks');
+        if (isBlockQuery) ragNamespaces = ['email-blocks'];
         const visualKeywords = /\b(show|display|ver|mostrar|look like|see|visualiz|email|imagen|image|picture|inline)\b/i;
         const isVisualQuery = visualKeywords.test(message);
         const ragResult = typeof isKBReady === 'function' && isKBReady()
-            ? await buildRAGContext(pool, message, { namespaces: ragNamespaces, visualQuery: isVisualQuery, maxTokens: isVisualQuery ? 4000 : 3000, maxMedia: isVisualQuery ? 4 : 2 })
+            ? await buildRAGContext(pool, message, { namespaces: ragNamespaces, visualQuery: isVisualQuery, maxTokens: isVisualQuery ? 4000 : 3000, maxMedia: isBlockQuery ? 1 : (isVisualQuery ? 4 : 2), minScore: isBlockQuery ? 0.6 : undefined, maxResults: isBlockQuery ? 1 : undefined })
             : { context: '', sources: [], mediaResults: [] };
 
         const agent = {
@@ -5957,6 +6008,38 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
         const allPipelineHtml = [...pipelineHtmlSources, ...pipelineHtmlMedia].filter((m, i, arr) => arr.findIndex(x => (x.title || x.documentTitle) === (m.title || m.documentTitle)) === i);
         if (allPipelineHtml.length > 0) {
             res.write(`data: ${JSON.stringify({ html_sources: allPipelineHtml.map(s => ({ htmlSource: s.htmlSource, title: s.title || s.documentTitle, filePath: s.filePath })) })}\n\n`);
+        }
+
+        // Detect image generation request — generate inline before LLM text response
+        const imageRequestRE = /\b(imagen?|image|foto|photo|banner|hero|visual|picture|ilustra|generat|crea(?:r)?|diseña|design|make)\b.{0,80}\b(imagen?|image|foto|photo|banner|hero|avion|plane|aircraft|logo|background|fondo)\b/i;
+        const isContentSession = session.agent_id === 'lucia' || (session.agent_role || '').toLowerCase().includes('content');
+        const isImageRequest = imageRequestRE.test(message) && isGeminiReady() && isContentSession;
+        console.log(`[Chat:image-detect] isGeminiReady=${isGeminiReady()} isContentSession=${isContentSession} isImageRequest=${isImageRequest} agent=${session.agent_id}`);
+        if (imageRequestRE.test(message) && isContentSession && !isGeminiReady()) {
+            res.write(`data: ${JSON.stringify({ image_error: 'Gemini no está inicializado. Verifica GEMINI_API_KEY en .env' })}\n\n`);
+        }
+        if (isImageRequest) {
+            // Signal frontend immediately so skeleton stays visible
+            res.write(`data: ${JSON.stringify({ generating_image: true })}\n\n`);
+            try {
+                // Use message directly — strip conversational prefix, pass as-is to Imagen
+                const imgPrompt = message.replace(/^(me puedes?|puedes?|crea|genera|dame|haz|make|give me|can you|genera|genéra)\s+/i, '').slice(0, 200).trim();
+                console.log(`[Chat:image-generate] prompt="${imgPrompt}"`);
+                const imageUrls = await generateImage(imgPrompt, { aspectRatio: '16:9', numberOfImages: 1 });
+                if (imageUrls?.[0]) {
+                    // Save base64 to temp file — base64 is too large for a single SSE JSON chunk
+                    const b64 = imageUrls[0].replace(/^data:image\/\w+;base64,/, '');
+                    const tmpDir = path.join(__dirname, 'public', 'temp-images');
+                    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+                    const fname = `img-${Date.now()}.png`;
+                    fs.writeFileSync(path.join(tmpDir, fname), Buffer.from(b64, 'base64'));
+                    const imageServUrl = `/temp-images/${fname}`;
+                    console.log(`[Chat:image-saved] ${imageServUrl}`);
+                    res.write(`data: ${JSON.stringify({ image_url: imageServUrl, image_prompt: imgPrompt })}\n\n`);
+                }
+            } catch (imgErr) {
+                console.warn('[Chat] Inline image generation failed:', imgErr.message);
+            }
         }
 
         let fullResponse = '';
@@ -6048,7 +6131,8 @@ app.get('/api/pipelines/active', requireAuth, async (req, res) => {
 app.get('/api/agents/:agentId/active-sessions', requireAuth, async (req, res) => {
     try {
         const result = await pool.query(
-            `SELECT pas.*, p.name as project_name, p.id as project_id, pp.status as pipeline_status,
+            `SELECT pas.*, p.name as project_name, p.id as project_id, p.markets as project_markets,
+                pp.status as pipeline_status,
                 ps.description as stage_description, ps.gate_type, ps.depends_on,
                 (SELECT count(*) FROM pipeline_session_messages WHERE session_id = pas.id) as message_count
              FROM project_agent_sessions pas
@@ -6084,6 +6168,11 @@ app.get('/api/agents/:agentId/pipeline-work', requireAuth, async (req, res) => {
         res.json(result.rows);
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// ─── Temp Images (generated by Imagen — served without auth) ────────────────
+const tempImagesDir = path.join(__dirname, 'public', 'temp-images');
+if (!fs.existsSync(tempImagesDir)) fs.mkdirSync(tempImagesDir, { recursive: true });
+app.use('/temp-images', express.static(tempImagesDir));
 
 // ─── Static Files (production) — MUST be after all API routes ───────────────
 if (process.env.NODE_ENV === 'production') {

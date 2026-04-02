@@ -284,6 +284,7 @@ const MIME_MAP = {
     '.htm': 'text/html',
     '.doc': 'application/msword',
     '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.eml': 'message/rfc822',
 };
 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
@@ -637,6 +638,131 @@ export async function ingestHtmlFile(pool, { filePath, relativePath, title, name
     }
 }
 
+// ─── EML Parsing Helpers ────────────────────────────────────────────────────
+
+function decodeRfc2047(str) {
+    return str.replace(/=\?([^?]+)\?([BQbq])\?([^?]*)\?=/g, (_, _charset, encoding, encoded) => {
+        if (encoding.toUpperCase() === 'B') {
+            return Buffer.from(encoded, 'base64').toString('utf-8');
+        }
+        // Quoted-printable word encoding
+        return encoded.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g, (__, hex) => String.fromCharCode(parseInt(hex, 16)));
+    });
+}
+
+function decodeQuotedPrintable(str) {
+    return str
+        .replace(/=\r\n/g, '')
+        .replace(/=\n/g, '')
+        .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+function escapeRegexStr(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function parseEmlToHtml(emlContent) {
+    // Split at first blank line (headers / body separator)
+    const sep = emlContent.indexOf('\r\n\r\n') !== -1 ? '\r\n\r\n' : '\n\n';
+    const splitIdx = emlContent.indexOf(sep);
+    if (splitIdx === -1) return null;
+
+    const headerSection = emlContent.slice(0, splitIdx);
+    const bodySection = emlContent.slice(splitIdx + sep.length);
+
+    // Unfold and parse headers
+    const unfoldedHeaders = headerSection.replace(/\r?\n[ \t]+/g, ' ');
+    const headers = {};
+    for (const line of unfoldedHeaders.split(/\r?\n/)) {
+        const colonIdx = line.indexOf(':');
+        if (colonIdx > 0) {
+            const key = line.slice(0, colonIdx).trim().toLowerCase();
+            if (!headers[key]) headers[key] = line.slice(colonIdx + 1).trim();
+        }
+    }
+
+    const contentType = headers['content-type'] || '';
+    const transferEncoding = (headers['content-transfer-encoding'] || '').toLowerCase().trim();
+    const boundaryMatch = contentType.match(/boundary=["']?([^"';\r\n\s]+)["']?/i);
+
+    if (boundaryMatch) {
+        // Multipart: scan parts for text/html
+        const boundary = boundaryMatch[1];
+        const parts = bodySection.split(new RegExp(`--${escapeRegexStr(boundary)}(?:--)?`));
+        for (const part of parts) {
+            const partSep = part.indexOf('\r\n\r\n') !== -1 ? '\r\n\r\n' : '\n\n';
+            const partSplitIdx = part.indexOf(partSep);
+            if (partSplitIdx === -1) continue;
+            const partHeaderRaw = part.slice(0, partSplitIdx);
+            const partBody = part.slice(partSplitIdx + partSep.length);
+            const partCT = (partHeaderRaw.match(/Content-Type:\s*([^\r\n;]+)/i)?.[1] || '').trim().toLowerCase();
+            const partTE = (partHeaderRaw.match(/Content-Transfer-Encoding:\s*([^\r\n]+)/i)?.[1] || '').trim().toLowerCase();
+            if (partCT === 'text/html') return decodePartBody(partBody, partTE);
+        }
+        return null;
+    }
+
+    if (contentType.toLowerCase().includes('text/html') || bodySection.trim().startsWith('<')) {
+        return decodePartBody(bodySection, transferEncoding);
+    }
+    return null;
+}
+
+function decodePartBody(body, encoding) {
+    if (encoding === 'quoted-printable') return decodeQuotedPrintable(body);
+    if (encoding === 'base64') return Buffer.from(body.replace(/\s/g, ''), 'base64').toString('utf-8');
+    return body;
+}
+
+/**
+ * Ingest an .eml email file by extracting the HTML body and delegating to ingestHtmlFile.
+ */
+export async function ingestEmlFile(pool, { filePath, relativePath, title, namespace, sourceType = 'upload', metadata = {} }) {
+    if (!isGeminiReady()) throw new Error('Gemini not initialized — cannot embed');
+    if (!isPineconeReady()) throw new Error('Pinecone not initialized — cannot store vectors');
+
+    const emlContent = fs.readFileSync(filePath, 'utf-8');
+
+    // Parse email headers for enriched title/metadata
+    const sep = emlContent.indexOf('\r\n\r\n') !== -1 ? '\r\n\r\n' : '\n\n';
+    const splitIdx = emlContent.indexOf(sep);
+    const headers = {};
+    if (splitIdx > 0) {
+        const unfoldedHeaders = emlContent.slice(0, splitIdx).replace(/\r?\n[ \t]+/g, ' ');
+        for (const line of unfoldedHeaders.split(/\r?\n/)) {
+            const colonIdx = line.indexOf(':');
+            if (colonIdx > 0) {
+                const key = line.slice(0, colonIdx).trim().toLowerCase();
+                if (!headers[key]) headers[key] = line.slice(colonIdx + 1).trim();
+            }
+        }
+    }
+
+    const subject = headers['subject'] ? decodeRfc2047(headers['subject']) : null;
+    const from = headers['from'] ? decodeRfc2047(headers['from']) : '';
+    const date = headers['date'] || '';
+
+    const htmlBody = parseEmlToHtml(emlContent);
+    if (!htmlBody) throw new Error('No HTML body found in .eml file. Only HTML emails are supported.');
+
+    // Write extracted HTML to a sibling temp file so ingestHtmlFile can read it
+    const tmpPath = `${filePath}.extracted.html`;
+    fs.writeFileSync(tmpPath, htmlBody, 'utf-8');
+
+    try {
+        return await ingestHtmlFile(pool, {
+            filePath: tmpPath,
+            relativePath,
+            title: subject || title,
+            namespace,
+            sourceType,
+            metadata: { ...metadata, from, date, source_format: 'eml' },
+        });
+    } finally {
+        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    }
+}
+
 /**
  * Ingest a Word document (.docx) by extracting text from the ZIP XML,
  * chunking, embedding, and storing in Pinecone + PostgreSQL.
@@ -788,6 +914,9 @@ export async function ingestFile(pool, { filePath, originalFilename, title, name
     }
     if (ext === '.doc' || ext === '.docx') {
         return await ingestWordFile(pool, { filePath: destPath, relativePath, title, namespace, sourceType, metadata });
+    }
+    if (ext === '.eml') {
+        return await ingestEmlFile(pool, { filePath: destPath, relativePath, title, namespace, sourceType, metadata });
     }
     throw new Error(`Unhandled file type: ${ext}`);
 }

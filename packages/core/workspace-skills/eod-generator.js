@@ -20,6 +20,15 @@ export async function generateEodReport(agentId, date = new Date().toISOString()
     );
     const events = res.rows;
 
+    // Fetch active pipeline sessions for this agent
+    const pipelineRes = await pool.query(
+        `SELECT pas.stage_name, pas.status, p.name as project_name
+         FROM project_agent_sessions pas
+         JOIN projects p ON p.id = pas.project_id
+         WHERE pas.agent_id = $1 AND pas.status IN ('active', 'pending', 'awaiting_handoff')`,
+        [agentId]
+    );
+
     if (events.length === 0) {
         console.log(`[EOD Gen] No events found for ${agentId} on ${date}.`);
         return null;
@@ -44,6 +53,14 @@ export async function generateEodReport(agentId, date = new Date().toISOString()
         if (c.insight) {
             insights.push(c.insight);
         }
+    }
+
+    // Add pipeline tickets to in-progress
+    for (const ticket of pipelineRes.rows) {
+        inProgress.push({
+            desc: `[Pipeline] ${ticket.project_name} — ${ticket.stage_name}`,
+            pct: ticket.status === 'active' ? 50 : ticket.status === 'awaiting_handoff' ? 90 : 10,
+        });
     }
 
     const report = {

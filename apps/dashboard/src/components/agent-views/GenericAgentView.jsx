@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import AgentSettingsPanel from './AgentSettingsPanel.jsx';
 import AgentWorkHistory from './AgentWorkHistory.jsx';
@@ -8,7 +9,7 @@ import AgentChatSwitcher from './shared/AgentChatSwitcher.jsx';
 import HandoffModal from '../HandoffModal.jsx';
 import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
 import { AgentTabIcons, StatusDots, MoodIcons } from '../icons.jsx';
-import { Wrench } from 'lucide-react';
+import { Wrench, X } from 'lucide-react';
 
 function eventTypeToVisual(eventType) {
   switch (eventType) {
@@ -34,12 +35,28 @@ function formatEventTime(timestamp, lang) {
 export default function GenericAgentView({ agent, activeTab: activeTabProp, onTabChange }) {
   const { t, lang } = useLanguage();
   const [localTab, setLocalTab] = useState('chat');
+  const [isChatOpen, setIsChatOpen] = useState(false);
   const activeTab = activeTabProp !== undefined ? activeTabProp : localTab;
   const setActiveTab = (tab) => {
     setLocalTab(tab);
     if (onTabChange) onTabChange(tab);
+    if (tab === 'chat') setIsChatOpen(true);
   };
   const pipeline = useAgentPipelineSession(agent.id);
+
+  // Open overlay on mount (chat is the default tab) and when parent forces chat tab
+  useEffect(() => { setIsChatOpen(true); }, []);
+
+  useEffect(() => {
+    if (activeTabProp === 'chat') setIsChatOpen(true);
+  }, [activeTabProp]);
+
+  useEffect(() => {
+    if (!isChatOpen) return;
+    const onKeyDown = (e) => { if (e.key === 'Escape') setIsChatOpen(false); };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isChatOpen]);
 
   const handleWorkOnTicket = (ticket) => {
       pipeline.selectTicket(ticket);
@@ -247,6 +264,45 @@ export default function GenericAgentView({ agent, activeTab: activeTabProp, onTa
           <AgentSettingsPanel agentId={agent.id} />
         )}
       </section>
+
+      {isChatOpen && createPortal(
+        <div className="chat-fullscreen-overlay" role="dialog" aria-modal="true" aria-label={`Chat — ${agent.name}`}>
+          <div className="chat-fullscreen-header">
+            <div className="chat-fullscreen-agent-info">
+              <span className="chat-fullscreen-avatar">{agent.avatar}</span>
+              <div>
+                <div className="chat-fullscreen-agent-name">{agent.name}</div>
+                {pipeline.selectedTicket && (
+                  <div className="chat-fullscreen-context">
+                    {pipeline.selectedTicket.project_name} — {pipeline.selectedTicket.stage_name}
+                  </div>
+                )}
+              </div>
+            </div>
+            <button
+              className="chat-fullscreen-close"
+              onClick={() => setIsChatOpen(false)}
+              aria-label={t('agentChat.closeOverlay')}
+            >
+              <X size={14} />
+              {t('agentChat.closeOverlay')}
+            </button>
+          </div>
+          <div className="chat-fullscreen-body">
+            <AgentChatSwitcher
+              agent={agent}
+              selectedTicket={pipeline.selectedTicket}
+              pipelineData={pipeline.pipelineData}
+              currentSession={pipeline.currentSession}
+              completedSessions={pipeline.completedSessions}
+              agents={pipeline.agents}
+              onClearTicket={pipeline.clearTicket}
+              onHandoffRequest={pipeline.setHandoffSession}
+            />
+          </div>
+        </div>,
+        document.body
+      )}
 
       {pipeline.handoffSession && (
         <HandoffModal

@@ -11,7 +11,7 @@ const { Pool } = pg;
 
 const pool = new Pool({
     host: process.env.PG_HOST || 'localhost',
-    port: parseInt(process.env.PG_PORT || '5433', 10),
+    port: parseInt(process.env.PG_PORT || '5434', 10),
     database: process.env.PG_DB || 'agentos',
     user: process.env.PG_USER || 'agentos',
     password: process.env.PG_PASSWORD || 'changeme',
@@ -22,15 +22,16 @@ const pool = new Pool({
  * @param {Object} data - JSON estructurado del PM Agent
  * @returns {number} ID del proyecto creado
  */
-export async function saveProject(data) {
-    const client = await pool.connect();
+export async function saveProject(data, externalClient = null) {
+    const client = externalClient || await pool.connect();
+    const ownTransaction = !externalClient;
     try {
-        await client.query('BEGIN');
+        if (ownTransaction) await client.query('BEGIN');
 
         // 1. Insertar Proyecto
         const projectRes = await client.query(
-            `INSERT INTO projects (name, problem, solution, success_metrics, blocks, department, sub_area, pain_points, requirements, risks, estimated_budget, estimated_timeline, future_improvements, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            `INSERT INTO projects (name, problem, solution, success_metrics, blocks, department, sub_area, pain_points, requirements, risks, estimated_budget, estimated_timeline, future_improvements, status, objective, target_audience, bau_type, markets, pm_notes, key_metrics, compliance_notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
        RETURNING id`,
             [
                 data.project_name,
@@ -46,7 +47,14 @@ export async function saveProject(data) {
                 data.estimated_budget || 0,
                 data.estimated_timeline || 'TBD',
                 JSON.stringify(data.future_improvements || []),
-                'Planning'
+                'Planning',
+                data.objective || '',
+                data.target_audience || '',
+                data.bau_type || '',
+                JSON.stringify(data.markets || []),
+                data.pm_notes || '',
+                JSON.stringify(data.key_metrics || []),
+                JSON.stringify(data.compliance_notes || [])
             ]
         );
         const projectId = projectRes.rows[0].id;
@@ -94,13 +102,13 @@ export async function saveProject(data) {
             }
         }
 
-        await client.query('COMMIT');
+        if (ownTransaction) await client.query('COMMIT');
         return projectId;
     } catch (err) {
-        await client.query('ROLLBACK');
+        if (ownTransaction) await client.query('ROLLBACK');
         throw err;
     } finally {
-        client.release();
+        if (!externalClient) client.release();
     }
 }
 
@@ -117,8 +125,9 @@ export async function updateProject(projectId, data) {
             `UPDATE projects 
        SET name = $1, problem = $2, solution = $3, success_metrics = $4, blocks = $5, department = $6, sub_area = $7, 
            pain_points = $8, requirements = $9, risks = $10, estimated_budget = $11, estimated_timeline = $12, 
-           future_improvements = $13, updated_at = NOW()
-       WHERE id = $14`,
+           future_improvements = $13, objective = $14, target_audience = $15, bau_type = $16, markets = $17, 
+           pm_notes = $18, key_metrics = $19, compliance_notes = $20, updated_at = NOW()
+       WHERE id = $21`,
             [
                 data.project_name,
                 data.problem,
@@ -133,6 +142,13 @@ export async function updateProject(projectId, data) {
                 data.estimated_budget || 0,
                 data.estimated_timeline || 'TBD',
                 JSON.stringify(data.future_improvements || []),
+                data.objective || '',
+                data.target_audience || '',
+                data.bau_type || '',
+                JSON.stringify(data.markets || []),
+                data.pm_notes || '',
+                JSON.stringify(data.key_metrics || []),
+                JSON.stringify(data.compliance_notes || []),
                 projectId
             ]
         );

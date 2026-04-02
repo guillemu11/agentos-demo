@@ -56,7 +56,7 @@ function base64ToFloat32(base64) {
     return float32;
 }
 
-export function useGeminiLive({ namespace, lang = 'es', onSources, onTurnComplete }) {
+export function useGeminiLive({ namespace, lang = 'es', onSources, onTurnComplete, wsPath = '/ws/voice-kb', wsParams = {} }) {
     const [status, setStatus] = useState('idle'); // idle|connecting|connected|listening|speaking|searching|error
     const [inputTranscript, setInputTranscript] = useState('');
     const [outputTranscript, setOutputTranscript] = useState('');
@@ -152,14 +152,17 @@ export function useGeminiLive({ namespace, lang = 'es', onSources, onTurnComplet
         const apiUrl = import.meta.env.VITE_API_URL || '';
         let wsUrl;
         if (apiUrl.startsWith('http')) {
-            wsUrl = apiUrl.replace(/^http/, 'ws') + '/ws/voice-kb';
+            wsUrl = apiUrl.replace(/^http/, 'ws') + wsPath;
         } else {
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            wsUrl = `${wsProtocol}//${window.location.host}/ws/voice-kb`;
+            wsUrl = `${wsProtocol}//${window.location.host}${wsPath}`;
         }
         const params = new URLSearchParams();
         if (namespace) params.set('namespace', namespace);
         if (lang) params.set('lang', lang);
+        for (const [key, val] of Object.entries(wsParams)) {
+            if (val) params.set(key, val);
+        }
         if (params.toString()) wsUrl += '?' + params.toString();
 
         // Request microphone
