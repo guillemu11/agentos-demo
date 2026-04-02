@@ -2641,6 +2641,8 @@ app.post('/api/chat/agent/:agentId', async (req, res) => {
             ? agent.tools.map(t => typeof t === 'object' ? t.name : t).join(', ')
             : '';
         const profile = getAgentProfile(agentId);
+        const isContentAgent = (agent.role || '').toLowerCase().includes('content')
+          || (agent.name || '').toLowerCase().includes('content');
         const personality = agent.personality || profile.personality;
         const systemPrompt = `You are ${agent.name}, an AI agent working in the ${agent.department} department.
 
@@ -2651,7 +2653,15 @@ Your role: ${agent.role}
 ${skillsList ? `Your skills: ${skillsList}` : ''}
 ${toolsList ? `Your tools: ${toolsList}` : ''}
 
-${personality ? `## Personality\n${personality}\n` : ''}## Behavior Rules
+${personality ? `## Personality\n${personality}\n` : ''}${isContentAgent ? `## Brief Generation Protocol
+When generating email content blocks (subject lines, hero images, body copy, CTA buttons), you MUST emit structured brief update tags inline with your response. Use this exact format for each block you generate:
+
+[BRIEF_UPDATE:{"market":"en","block":"subject","status":"approved","value":"Your copy here"}]
+[BRIEF_UPDATE:{"market":"es","block":"subject","status":"approved","value":"Tu copy aquí"}]
+[BRIEF_UPDATE:{"market":"ar","block":"subject","status":"approved","value":"النص هنا"}]
+
+For hero images, trigger generation via the image API — emit the update with status "generating" first, then "approved" once the URL is ready. Block names: subject, heroImage, bodyCopy, cta. Markets: en, es, ar. Always generate all three markets unless the user specifies otherwise.
+` : ''}## Behavior Rules
 1. Stay in character as ${agent.name}. Respond from the perspective of your role and expertise.
 2. Be helpful, direct, and knowledgeable about your area of specialization.
 3. When asked about topics outside your expertise, acknowledge the limits but offer what insight you can.
