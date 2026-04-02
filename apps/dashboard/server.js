@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url';
 import session from 'express-session';
 import connectPgSimple from 'connect-pg-simple';
 import bcrypt from 'bcrypt';
-import { chatWithPMAgent, extractJSON, generateSummary, generateProject } from '../../packages/core/pm-agent/core.js';
+import { chatWithPMAgent, extractJSON, generateSummary, generateDraft, renderDraftSummary, generateProject, generateHandoffSummary, buildAccumulatedContext, buildPipelineSystemPrompt, buildPipelineConversation } from '../../packages/core/pm-agent/core.js';
 import { saveProject } from '../../packages/core/db/save_project.js';
 import { buildProjectContext } from '../../packages/core/pm-agent/context-builder.js';
 import Anthropic from '@anthropic-ai/sdk';
@@ -23,6 +23,7 @@ import { initGemini, isGeminiReady, getGeminiClient, EMBEDDING_DIMENSIONS, EMBED
 import { initPinecone, isPineconeReady, describeIndex } from '../../packages/core/ai-providers/pinecone.js';
 import multer from 'multer';
 import { generateEodReport } from '../../packages/core/workspace-skills/eod-generator.js';
+import { getAgentProfile } from '../../packages/core/agents/profiles.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -95,8 +96,11 @@ const kbUpload = multer({
             'application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'image/gif',
             'text/html', 'application/msword',
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'message/rfc822',
         ];
-        cb(null, allowed.includes(file.mimetype));
+        // Some browsers send application/octet-stream for .eml — allow by extension too
+        const isEml = (file.originalname || '').toLowerCase().endsWith('.eml');
+        cb(null, allowed.includes(file.mimetype) || isEml);
     },
 });
 
@@ -194,6 +198,21 @@ async function initDatabase() {
             }
         } else {
             console.log(`[DB] Seed not needed, projects count: ${projectCount.rows[0].c}`);
+        }
+
+        // Agent settings columns migration
+        const agentSettingsCols = [
+            'ALTER TABLE agents ADD COLUMN IF NOT EXISTS personality TEXT',
+            'ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_name TEXT',
+            'ALTER TABLE agents ADD COLUMN IF NOT EXISTS voice_rules TEXT',
+            'ALTER TABLE agents ADD COLUMN IF NOT EXISTS rag_namespaces JSONB',
+            'ALTER TABLE agents ADD COLUMN IF NOT EXISTS budget_max NUMERIC',
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS budget_period TEXT DEFAULT 'monthly'",
+            'ALTER TABLE agents ADD COLUMN IF NOT EXISTS budget_spent NUMERIC DEFAULT 0',
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS connections JSONB DEFAULT '[]'",
+        ];
+        for (const sql of agentSettingsCols) {
+            await pool.query(sql);
         }
 
         // Run initial EOD refresh + migration
@@ -356,7 +375,16 @@ async function logAudit(eventType, department, title, details, agentId = null) {
 
 app.get('/api/projects', async (req, res) => {
     try {
-        const result = await pool.query('SELECT * FROM projects ORDER BY created_at DESC');
+        const result = await pool.query(
+            `SELECT p.*,
+                EXISTS(SELECT 1 FROM project_pipeline pp WHERE pp.project_id = p.id AND pp.status IN ('active', 'paused')) as has_active_pipeline,
+                (SELECT json_build_object(
+                    'completed', (SELECT count(*) FROM project_agent_sessions pas2 WHERE pas2.pipeline_id = pp2.id AND pas2.status = 'completed'),
+                    'total', (SELECT count(*) FROM pipeline_stages ps2 WHERE ps2.pipeline_id = pp2.id)
+                ) FROM project_pipeline pp2 WHERE pp2.project_id = p.id AND pp2.status IN ('active', 'paused') LIMIT 1) as pipeline_progress
+             FROM projects p
+             ORDER BY p.created_at DESC`
+        );
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -421,6 +449,8 @@ app.get('/api/projects/:id', async (req, res) => {
     }
 });
 
+// [REMOVED] Duplicate pipeline GET — full version with sessions is at line ~5257
+
 app.put('/api/projects/:id', async (req, res) => {
     try {
         const { name, problem, solution, status, blocks, success_metrics, department, sub_area, pain_points, requirements, risks, estimated_budget, estimated_timeline, future_improvements } = req.body;
@@ -449,6 +479,78 @@ app.delete('/api/projects/:id', async (req, res) => {
     }
 });
 
+// GET /api/projects/:id/emails — list email versions for a project
+app.get('/api/projects/:id/emails', requireAuth, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      `SELECT id, variant_name, market, language, tier, version, status,
+              subject_line, html_content, generated_by, created_at, updated_at
+       FROM email_proposals
+       WHERE project_id = $1
+       ORDER BY market, language, tier, version DESC`,
+      [id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('GET /api/projects/:id/emails error:', err);
+    res.status(500).json({ error: 'Failed to fetch email versions' });
+  }
+});
+
+// POST /api/projects/:id/emails — save a new email version
+app.post('/api/projects/:id/emails', requireAuth, async (req, res) => {
+  const { id } = req.params;
+  const { market, language, tier, html_content, subject_line, variant_name, status } = req.body;
+  if (!market || !language || !html_content) {
+    return res.status(400).json({ error: 'market, language, html_content are required' });
+  }
+  try {
+    // Get next version number for this combination
+    const versionRes = await pool.query(
+      `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
+       FROM email_proposals
+       WHERE project_id = $1 AND market = $2 AND language = $3 AND tier = $4`,
+      [id, market, language, tier || null]
+    );
+    const version = versionRes.rows[0].next_version;
+    const result = await pool.query(
+      `INSERT INTO email_proposals (project_id, campaign_id, market, language, tier, version,
+        html_content, subject_line, variant_name, status, generated_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'html-developer-agent')
+       RETURNING *`,
+      [id, `project-${id}`, market, language, tier || null, version,
+       html_content, subject_line || '', variant_name || `v${version}`, status || 'draft']
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('POST /api/projects/:id/emails error:', err);
+    res.status(500).json({ error: 'Failed to save email version' });
+  }
+});
+
+// PATCH /api/emails/:id/status — update email status (draft→review→approved)
+app.patch('/api/emails/:id/status', requireAuth, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  const allowed = ['draft', 'review', 'approved', 'rejected'];
+  if (!allowed.includes(status)) {
+    return res.status(400).json({ error: `status must be one of: ${allowed.join(', ')}` });
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE email_proposals SET status = $1, updated_at = NOW()
+       WHERE id = $2 RETURNING *`,
+      [status, id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Email not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('PATCH /api/emails/:id/status error:', err);
+    res.status(500).json({ error: 'Failed to update status' });
+  }
+});
+
 // ── Pipeline ──
 app.get('/api/pipeline', async (req, res) => {
     try {
@@ -459,7 +561,10 @@ app.get('/api/pipeline', async (req, res) => {
         if (!type || type === 'project') {
             let q = `SELECT p.*, 'project' as _type,
                 (SELECT COUNT(*) FROM tasks t JOIN phases ph ON t.phase_id = ph.id WHERE ph.project_id = p.id) as total_tasks,
-                (SELECT COUNT(*) FROM tasks t JOIN phases ph ON t.phase_id = ph.id WHERE ph.project_id = p.id AND t.status = 'Done') as done_tasks
+                (SELECT COUNT(*) FROM tasks t JOIN phases ph ON t.phase_id = ph.id WHERE ph.project_id = p.id AND t.status = 'Done') as done_tasks,
+                EXISTS(SELECT 1 FROM project_pipeline pp WHERE pp.project_id = p.id AND pp.status IN ('active', 'paused')) as has_active_pipeline,
+                (SELECT count(*) FROM pipeline_stages ps JOIN project_pipeline pp ON ps.pipeline_id = pp.id WHERE pp.project_id = p.id) as pipeline_total,
+                (SELECT count(*) FROM project_agent_sessions pas JOIN project_pipeline pp ON pas.pipeline_id = pp.id WHERE pp.project_id = p.id AND pas.status = 'completed') as pipeline_completed
                 FROM projects p`;
             const params = [];
             if (department) { params.push(department); q += ` WHERE LOWER(p.department) = LOWER($${params.length})`; }
@@ -468,34 +573,40 @@ app.get('/api/pipeline', async (req, res) => {
             items.push(...result.rows);
         }
 
-        // Email proposals
+        // Email proposals (skip gracefully if table doesn't exist)
         if (!type || type === 'email_proposal') {
-            let q = `SELECT id, campaign_id, variant_name as name, market, language, tier, subject_line, status, department, created_at, updated_at, 'email_proposal' as _type FROM email_proposals`;
-            const params = [];
-            if (department) { params.push(department); q += ` WHERE LOWER(department) = LOWER($${params.length})`; }
-            q += ' ORDER BY updated_at DESC LIMIT 50';
-            const result = await pool.query(q, params);
-            items.push(...result.rows);
+            try {
+                let q = `SELECT id, campaign_id, variant_name as name, market, language, tier, subject_line, status, department, created_at, updated_at, 'email_proposal' as _type FROM email_proposals`;
+                const params = [];
+                if (department) { params.push(department); q += ` WHERE LOWER(department) = LOWER($${params.length})`; }
+                q += ' ORDER BY updated_at DESC LIMIT 50';
+                const result = await pool.query(q, params);
+                items.push(...result.rows);
+            } catch (e) { /* table may not exist yet */ }
         }
 
-        // Research sessions
+        // Research sessions (skip gracefully if table doesn't exist)
         if (!type || type === 'research_session') {
-            let q = `SELECT id, title as name, topic, status, progress, sources_found, depth, campaign_id, department, created_at, updated_at, 'research_session' as _type FROM research_sessions`;
-            const params = [];
-            if (department) { params.push(department); q += ` WHERE LOWER(department) = LOWER($${params.length})`; }
-            q += ' ORDER BY updated_at DESC LIMIT 30';
-            const result = await pool.query(q, params);
-            items.push(...result.rows);
+            try {
+                let q = `SELECT id, title as name, topic, status, progress, sources_found, depth, campaign_id, department, created_at, updated_at, 'research_session' as _type FROM research_sessions`;
+                const params = [];
+                if (department) { params.push(department); q += ` WHERE LOWER(department) = LOWER($${params.length})`; }
+                q += ' ORDER BY updated_at DESC LIMIT 30';
+                const result = await pool.query(q, params);
+                items.push(...result.rows);
+            } catch (e) { /* table may not exist yet */ }
         }
 
-        // Experiments
+        // Experiments (skip gracefully if table doesn't exist)
         if (!type || type === 'experiment') {
-            let q = `SELECT id, campaign_id, experiment_type, hypothesis as name, status, winner, improvement_pct, department, created_at, updated_at, 'experiment' as _type FROM campaign_experiments`;
-            const params = [];
-            if (department) { params.push(department); q += ` WHERE LOWER(department) = LOWER($${params.length})`; }
-            q += ' ORDER BY updated_at DESC LIMIT 30';
-            const result = await pool.query(q, params);
-            items.push(...result.rows);
+            try {
+                let q = `SELECT id, campaign_id, experiment_type, hypothesis as name, status, winner, improvement_pct, department, created_at, updated_at, 'experiment' as _type FROM campaign_experiments`;
+                const params = [];
+                if (department) { params.push(department); q += ` WHERE LOWER(department) = LOWER($${params.length})`; }
+                q += ' ORDER BY updated_at DESC LIMIT 30';
+                const result = await pool.query(q, params);
+                items.push(...result.rows);
+            } catch (e) { /* table may not exist yet */ }
         }
 
         // Sort all by updated_at descending
@@ -608,6 +719,92 @@ app.patch('/api/agents/:id', async (req, res) => {
         const { status } = req.body;
         await pool.query('UPDATE agents SET status = $1, updated_at = NOW() WHERE id = $2', [status, req.params.id]);
         await logAudit('agent', null, `Agent ${req.params.id} status -> ${status}`, null, req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/agents/:id/settings — agent settings + default profile for comparison
+app.get('/api/agents/:id/settings', async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT id, personality, voice_name, voice_rules, rag_namespaces,
+                    budget_max, budget_period, budget_spent,
+                    connections, skills, tools
+             FROM agents WHERE id = $1`,
+            [req.params.id]
+        );
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Agent not found' });
+
+        const agent = result.rows[0];
+        const defaultProfile = getAgentProfile(req.params.id);
+
+        res.json({
+            ...agent,
+            default_personality: defaultProfile.personality,
+            default_voice_name: defaultProfile.voiceName,
+            default_voice_rules: defaultProfile.voiceRules,
+            default_rag_namespaces: defaultProfile.ragNamespaces,
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PATCH /api/agents/:id/settings — update agent settings
+app.patch('/api/agents/:id/settings', async (req, res) => {
+    try {
+        const allowed = [
+            'personality', 'voice_name', 'voice_rules', 'rag_namespaces',
+            'budget_max', 'budget_period', 'connections', 'skills', 'tools'
+        ];
+        const sets = [];
+        const values = [];
+        let idx = 1;
+
+        for (const key of allowed) {
+            if (req.body[key] !== undefined) {
+                if (['connections', 'skills', 'tools', 'rag_namespaces'].includes(key)) {
+                    sets.push(`${key} = $${idx}::jsonb`);
+                    values.push(JSON.stringify(req.body[key]));
+                } else if (key === 'budget_max') {
+                    sets.push(`${key} = $${idx}::numeric`);
+                    values.push(req.body[key]);
+                } else {
+                    sets.push(`${key} = $${idx}`);
+                    values.push(req.body[key]);
+                }
+                idx++;
+            }
+        }
+
+        if (sets.length === 0) return res.status(400).json({ error: 'No valid fields provided' });
+
+        values.push(req.params.id);
+        await pool.query(
+            `UPDATE agents SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${idx}`,
+            values
+        );
+
+        await logAudit('agent', null, `Agent ${req.params.id} settings updated`,
+            `Fields: ${sets.map(s => s.split(' ')[0]).join(', ')}`, req.params.id);
+
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/agents/:id/settings/reset-personality — reset to profiles.js defaults
+app.post('/api/agents/:id/settings/reset-personality', async (req, res) => {
+    try {
+        await pool.query(
+            `UPDATE agents SET personality = NULL, voice_name = NULL, voice_rules = NULL,
+             rag_namespaces = NULL, updated_at = NOW() WHERE id = $1`,
+            [req.params.id]
+        );
+        await logAudit('agent', null, `Agent ${req.params.id} personality reset to default`, null, req.params.id);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -1360,11 +1557,30 @@ app.post('/api/weekly-sessions/:id/report', async (req, res) => {
             };
         }
 
+        // 8b. Pipeline activity for department
+        const pipelineResult = await pool.query(
+            `SELECT pp.status as pipeline_status, p.name as project_name, p.id as project_id,
+                (SELECT count(*) FROM pipeline_stages WHERE pipeline_id = pp.id) as total_stages,
+                (SELECT count(*) FROM project_agent_sessions WHERE pipeline_id = pp.id AND status = 'completed') as completed_stages
+             FROM project_pipeline pp
+             JOIN projects p ON p.id = pp.project_id
+             WHERE LOWER(p.department) = LOWER($1) AND pp.status IN ('active', 'paused')`,
+            [department]
+        );
+        const pipeline_summary = {
+            active_pipelines: pipelineResult.rows.length,
+            projects: pipelineResult.rows.map(r => ({
+                name: r.project_name,
+                status: r.pipeline_status,
+                progress: `${r.completed_stages}/${r.total_stages}`,
+            })),
+        };
+
         // 9. Assemble & save report
         const report = {
             period: { week: week_number, start: startDate, end: endDate },
             tasks, blockers: allBlockers, mood, kpis,
-            brainstorm_summary, inbox, vs_last_week,
+            brainstorm_summary, inbox, pipeline_summary, vs_last_week,
             generated_at: new Date().toISOString(),
         };
 
@@ -1590,6 +1806,24 @@ app.post('/api/eod-reports/summarize', async (req, res) => {
             if (blockers.length > 0) context += `Blockers: ${blockers.map(b => `${b.desc} [${b.severity}]`).join('; ')}\n`;
             if (insights.length > 0) context += `Insights: ${insights.join('; ')}\n`;
             if (plan.length > 0) context += `Plan manana: ${plan.join('; ')}\n`;
+            context += '\n';
+        }
+
+        // Add pipeline activity for the department
+        const pipelineActivity = await pool.query(
+            `SELECT pas.agent_id, a.name as agent_name, pas.stage_name, pas.status, p.name as project_name
+             FROM project_agent_sessions pas
+             JOIN agents a ON a.id = pas.agent_id
+             JOIN projects p ON p.id = pas.project_id
+             WHERE a.department = $1 AND pas.status IN ('active', 'pending', 'awaiting_handoff')
+             ORDER BY a.name, pas.stage_order`,
+            [department]
+        );
+        if (pipelineActivity.rows.length > 0) {
+            context += `## Pipeline Activity\n`;
+            for (const pa of pipelineActivity.rows) {
+                context += `- ${pa.agent_name}: "${pa.project_name}" — Stage: ${pa.stage_name} (${pa.status})\n`;
+            }
             context += '\n';
         }
 
@@ -2047,7 +2281,7 @@ app.post('/api/chat/pm-agent', async (req, res) => {
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Inbox-Item-Id', item.id.toString());
         if (ragResult.sources.length > 0) {
-            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources));
+            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources.map(({ htmlSource, ...s }) => s)));
         }
         res.flushHeaders();
 
@@ -2111,18 +2345,20 @@ app.post('/api/inbox/:id/to-borrador', async (req, res) => {
             return res.status(400).json({ error: 'No conversation to summarize' });
         }
 
-        console.log(`[to-borrador] Generating summary for item ${req.params.id} (${conversation.length} messages)...`);
-        const summary = await generateSummary(conversation);
-        console.log(`[to-borrador] Summary generated: ${summary.substring(0, 100)}...`);
+        console.log(`[to-borrador] Generating structured draft for item ${req.params.id} (${conversation.length} messages)...`);
+        const projectContext = await buildProjectContext(pool);
+        const draft = await generateDraft(conversation, projectContext);
+        const summary = renderDraftSummary(draft);
+        console.log(`[to-borrador] Draft generated: ${draft.project_name} (${draft.stages.length} stages)`);
 
         await pool.query(
             `UPDATE inbox_items
-             SET summary = $1, status = 'borrador', updated_at = NOW()
-             WHERE id = $2`,
-            [summary, req.params.id]
+             SET summary = $1, structured_data = $2, status = 'borrador', updated_at = NOW()
+             WHERE id = $3`,
+            [summary, JSON.stringify(draft), req.params.id]
         );
 
-        res.json({ id: parseInt(req.params.id), status: 'borrador', summary });
+        res.json({ id: parseInt(req.params.id), status: 'borrador', summary, structured_data: draft });
     } catch (err) {
         console.error('[to-borrador] Error:', err);
         res.status(500).json({ error: err.message || 'Unknown error' });
@@ -2135,7 +2371,7 @@ app.post('/api/inbox/:id/to-proyecto', async (req, res) => {
         const item = await pool.query('SELECT * FROM inbox_items WHERE id = $1', [req.params.id]);
         if (item.rows.length === 0) return res.status(404).json({ error: 'Not found' });
 
-        const { title, summary, status } = item.rows[0];
+        const { title, summary, status, structured_data } = item.rows[0];
         if (status !== 'borrador') {
             return res.status(400).json({ error: `Cannot create project from status '${status}'` });
         }
@@ -2143,6 +2379,10 @@ app.post('/api/inbox/:id/to-proyecto', async (req, res) => {
             return res.status(400).json({ error: 'No summary available' });
         }
 
+        // Use edited draft from request body if provided, otherwise use stored draft
+        const draft = req.body.structured_data || structured_data;
+
+        // Generate project JSON from the draft summary
         const projectContext = await buildProjectContext(pool);
         const { text, json: projectData } = await generateProject(title, summary, projectContext);
 
@@ -2150,17 +2390,122 @@ app.post('/api/inbox/:id/to-proyecto', async (req, res) => {
             return res.status(500).json({ error: 'PM Agent did not generate valid project JSON', response: text });
         }
 
-        const projectId = await saveProject(projectData);
+        // Atomic transaction: create project + pipeline + sessions
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
 
-        await pool.query(
-            `UPDATE inbox_items
-             SET structured_data = $1, project_id = $2, status = 'proyecto', updated_at = NOW()
-             WHERE id = $3`,
-            [JSON.stringify(projectData), projectId, req.params.id]
-        );
+            // 1. Create project (using shared client for atomicity)
+            // Ensure project_name is never null — use draft name as fallback
+            if (!projectData.project_name && draft?.project_name) {
+                projectData.project_name = draft.project_name;
+            }
+            if (!projectData.project_name) {
+                projectData.project_name = title || 'Untitled Project';
+            }
+            if (!projectData.problem && draft?.problem) projectData.problem = draft.problem;
+            if (!projectData.solution && draft?.objective) projectData.solution = draft.objective;
+            // Set department from first pipeline stage if available
+            if (draft?.stages?.[0]?.department && !projectData.department) {
+                projectData.department = draft.stages[0].department;
+            }
 
-        res.json({ id: parseInt(req.params.id), status: 'proyecto', project_id: projectId });
+            // Proyecto 007: Mix in extended details from draft
+            if (draft) {
+                if (draft.objective) projectData.objective = draft.objective;
+                if (draft.target_audience) projectData.target_audience = draft.target_audience;
+                if (draft.bau_type) projectData.bau_type = draft.bau_type;
+                if (draft.markets) projectData.markets = draft.markets;
+                if (draft.pm_notes) projectData.pm_notes = draft.pm_notes;
+                if (draft.key_metrics) projectData.key_metrics = draft.key_metrics;
+                if (draft.compliance_notes) projectData.compliance_notes = draft.compliance_notes;
+                // Keep the timeline and risks if AI didn't overwrite it
+                if (draft.estimated_timeline && (!projectData.estimated_timeline || projectData.estimated_timeline === 'TBD')) {
+                    projectData.estimated_timeline = draft.estimated_timeline;
+                }
+                if (draft.risks && (!projectData.risks || projectData.risks.length === 0)) {
+                    projectData.risks = draft.risks;
+                }
+            }
+
+            const projectId = await saveProject(projectData, client);
+
+            // 2. Create pipeline + stages + sessions if draft has stages
+            let pipelineId = null;
+            if (draft && draft.stages && draft.stages.length > 0) {
+                const pipelineRes = await client.query(
+                    `INSERT INTO project_pipeline (project_id, template_id, current_stage_order, status)
+                     VALUES ($1, $2, 0, 'active') RETURNING id`,
+                    [projectId, 'pm-draft']
+                );
+                pipelineId = pipelineRes.rows[0].id;
+
+                // Insert stages
+                for (let i = 0; i < draft.stages.length; i++) {
+                    const s = draft.stages[i];
+                    await client.query(
+                        `INSERT INTO pipeline_stages (pipeline_id, stage_order, name, agent_id, department, description, depends_on, gate_type, namespaces)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                        [
+                            pipelineId, i, s.name, s.agent_id,
+                            s.department || 'execution',
+                            s.description || '',
+                            s.depends_on || [],
+                            s.gate_type || 'none',
+                            s.namespaces || [],
+                        ]
+                    );
+                }
+
+                // Create agent sessions (stage 0 = active, rest = pending)
+                for (let i = 0; i < draft.stages.length; i++) {
+                    const s = draft.stages[i];
+                    const sessionStatus = i === 0 ? 'active' : 'pending';
+                    const startedAt = i === 0 ? 'NOW()' : 'NULL';
+                    await client.query(
+                        `INSERT INTO project_agent_sessions (project_id, pipeline_id, agent_id, stage_name, stage_order, status, started_at)
+                         VALUES ($1, $2, $3, $4, $5, $6, ${startedAt})`,
+                        [projectId, pipelineId, s.agent_id, s.name, i, sessionStatus]
+                    );
+                }
+
+                // Generate phases from pipeline stages so Details tab isn't empty
+                const existingPhases = await client.query('SELECT id FROM phases WHERE project_id = $1 LIMIT 1', [projectId]);
+                if (existingPhases.rows.length === 0) {
+                    for (let i = 0; i < draft.stages.length; i++) {
+                        const s = draft.stages[i];
+                        const phaseRes = await client.query(
+                            `INSERT INTO phases (project_id, phase_number, name, objective)
+                             VALUES ($1, $2, $3, $4) RETURNING id`,
+                            [projectId, i + 1, s.name, s.description || '']
+                        );
+                        await client.query(
+                            `INSERT INTO tasks (phase_id, description, status)
+                             VALUES ($1, $2, 'Todo')`,
+                            [phaseRes.rows[0].id, `Execute: ${s.name}`]
+                        );
+                    }
+                }
+            }
+
+            // 3. Update inbox item
+            await client.query(
+                `UPDATE inbox_items
+                 SET structured_data = $1, project_id = $2, status = 'proyecto', updated_at = NOW()
+                 WHERE id = $3`,
+                [JSON.stringify(draft || projectData), projectId, req.params.id]
+            );
+
+            await client.query('COMMIT');
+            res.json({ id: parseInt(req.params.id), status: 'proyecto', project_id: projectId, pipeline_id: pipelineId });
+        } catch (txErr) {
+            await client.query('ROLLBACK');
+            throw txErr;
+        } finally {
+            client.release();
+        }
     } catch (err) {
+        console.error('[to-proyecto] Error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -2178,12 +2523,42 @@ app.post('/api/inbox/:id/reopen', async (req, res) => {
 
         await pool.query(
             `UPDATE inbox_items
-             SET status = 'chat', summary = NULL, updated_at = NOW()
-             WHERE id = $2`,
+             SET status = 'chat', summary = NULL, structured_data = NULL, updated_at = NOW()
+             WHERE id = $1`,
             [req.params.id]
         );
 
         res.json({ id: parseInt(req.params.id), status: 'chat' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ─── POST /api/inbox/:id/update-draft ────────────────────────────────────────
+app.post('/api/inbox/:id/update-draft', async (req, res) => {
+    try {
+        const item = await pool.query('SELECT * FROM inbox_items WHERE id = $1', [req.params.id]);
+        if (item.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+
+        if (item.rows[0].status !== 'borrador') {
+            return res.status(400).json({ error: 'Can only update draft in borrador status' });
+        }
+
+        const { structured_data } = req.body;
+        if (!structured_data || !Array.isArray(structured_data.stages) || structured_data.stages.length === 0) {
+            return res.status(400).json({ error: 'Invalid draft: must have stages array' });
+        }
+
+        const summary = renderDraftSummary(structured_data);
+
+        await pool.query(
+            `UPDATE inbox_items
+             SET structured_data = $1, summary = $2, updated_at = NOW()
+             WHERE id = $3`,
+            [JSON.stringify(structured_data), summary, req.params.id]
+        );
+
+        res.json({ id: parseInt(req.params.id), structured_data, summary });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -2201,6 +2576,16 @@ app.get('/api/agents/:id/conversation', async (req, res) => {
             [req.params.id]
         );
         res.json({ messages: result.rows.length > 0 ? result.rows[0].messages : [] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/agents/:id/conversation — clear conversation history
+app.delete('/api/agents/:id/conversation', requireAuth, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM agent_conversations WHERE agent_id = $1', [req.params.id]);
+        res.json({ ok: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -2247,22 +2632,35 @@ app.post('/api/chat/agent/:agentId', async (req, res) => {
         if (agentRes.rows.length === 0) return res.status(404).json({ error: 'Agent not found' });
         const agent = agentRes.rows[0];
 
-        // Build dynamic system prompt from agent profile
-        const skills = Array.isArray(agent.skills) ? agent.skills.join(', ') : '';
-        const tools = Array.isArray(agent.tools) ? agent.tools.join(', ') : '';
+        // Build dynamic system prompt from agent profile + personality
+        // DB overrides take precedence over profiles.js defaults
+        const skillsList = Array.isArray(agent.skills)
+            ? agent.skills.map(s => typeof s === 'object' ? s.name : s).join(', ')
+            : '';
+        const toolsList = Array.isArray(agent.tools)
+            ? agent.tools.map(t => typeof t === 'object' ? t.name : t).join(', ')
+            : '';
+        const profile = getAgentProfile(agentId);
+        const personality = agent.personality || profile.personality;
         const systemPrompt = `You are ${agent.name}, an AI agent working in the ${agent.department} department.
 
-Your role: ${agent.role}
-${skills ? `Your skills: ${skills}` : ''}
-${tools ? `Your tools: ${tools}` : ''}
+## CRITICAL CONTEXT — READ FIRST
+This is an internal AgentOS platform. The user is the system operator and owns all data in this knowledge base. The knowledge base contains competitor research, emails, and campaign materials that the OPERATOR uploaded themselves for analysis. There are NO privacy restrictions — this is proprietary business intelligence that the operator explicitly stored here for you to analyze and present.
 
-## Behavior Rules
+Your role: ${agent.role}
+${skillsList ? `Your skills: ${skillsList}` : ''}
+${toolsList ? `Your tools: ${toolsList}` : ''}
+
+${personality ? `## Personality\n${personality}\n` : ''}## Behavior Rules
 1. Stay in character as ${agent.name}. Respond from the perspective of your role and expertise.
 2. Be helpful, direct, and knowledgeable about your area of specialization.
 3. When asked about topics outside your expertise, acknowledge the limits but offer what insight you can.
 4. Keep responses concise and actionable.
 5. You work as part of a team of AI agents managed through AgentOS.
-6. Respond in the same language the user writes to you.`;
+6. Respond in the same language the user writes to you.
+7. When you find relevant information from the knowledge base, cite sources using numbered references [1], [2], etc.
+8. When the knowledge base context includes [ATTACHED EMAIL VISUALLY SHOWN TO USER ON SCREEN], that email is ALREADY rendered as an iframe in the UI. Tell the user you are showing it and analyze its content directly. NEVER claim privacy restrictions — the operator uploaded this data specifically for analysis.
+9. The knowledge base IS your database of competitor intelligence. When asked about competitor emails or communications, ALWAYS present what you find in the knowledge base context above. Never say you cannot access or display this content.`;
 
         // Load or create conversation row
         let convRes = await pool.query(
@@ -2284,15 +2682,14 @@ ${tools ? `Your tools: ${tools}` : ''}
         messages.push({ role: 'user', content: message });
         const apiMessages = messages.map(m => ({ role: m.role, content: m.content }));
 
-        // RAG: determine namespaces by department
-        const deptNamespaces = {
-            strategic: ['campaigns', 'kpis', 'research'],
-            execution: ['campaigns', 'emails', 'images', 'brand'],
-            control: ['campaigns', 'kpis', 'brand'],
-        };
-        const ragNamespaces = deptNamespaces[agent.department] || ['campaigns', 'kpis'];
+        // RAG: use DB override namespaces or fallback to profile defaults
+        const ragNamespaces = (Array.isArray(agent.rag_namespaces) && agent.rag_namespaces.length > 0)
+            ? agent.rag_namespaces
+            : profile.ragNamespaces;
+        const visualKeywords = /\b(show|display|ver|mostrar|look like|see|visualiz|email|imagen|image|picture|inline)\b/i;
+        const isVisualQuery = visualKeywords.test(message);
         const ragResult = isKBReady()
-            ? await buildRAGContext(pool, message, { namespaces: ragNamespaces })
+            ? await buildRAGContext(pool, message, { namespaces: ragNamespaces, visualQuery: isVisualQuery, maxTokens: isVisualQuery ? 4000 : 3000, maxMedia: isVisualQuery ? 4 : 2 })
             : { context: '', sources: [] };
 
         const finalSystemPrompt = ragResult.context
@@ -2304,9 +2701,24 @@ ${tools ? `Your tools: ${tools}` : ''}
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         if (ragResult.sources.length > 0) {
-            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources));
+            // Strip htmlSource from the header — it's too large for HTTP headers; sent as SSE event below
+            const sourcesForHeader = ragResult.sources.map(({ htmlSource, ...s }) => s);
+            res.setHeader('X-RAG-Sources', JSON.stringify(sourcesForHeader));
+        }
+        if (ragResult.mediaResults?.length > 0) {
+            // Strip htmlSource from header — too large; email_html sent as SSE event below
+            const mediaForHeader = ragResult.mediaResults.filter(m => m.mediaType !== 'email_html').map(({ htmlSource, ...m }) => m);
+            if (mediaForHeader.length > 0) res.setHeader('X-RAG-Media', JSON.stringify(mediaForHeader));
         }
         res.flushHeaders();
+
+        // Send email html as first SSE event (headers can't carry large HTML payloads)
+        const htmlFromSources = ragResult.sources?.filter(s => s.htmlSource) || [];
+        const htmlFromMedia = ragResult.mediaResults?.filter(m => m.mediaType === 'email_html' && m.htmlSource) || [];
+        const allHtmlItems = [...htmlFromSources, ...htmlFromMedia].filter((m, i, arr) => arr.findIndex(x => x.title === m.title) === i);
+        if (allHtmlItems.length > 0) {
+            res.write(`data: ${JSON.stringify({ html_sources: allHtmlItems.map(s => ({ htmlSource: s.htmlSource, title: s.title || s.documentTitle, filePath: s.filePath })) })}\n\n`);
+        }
 
         // Stream response via chatWithPMAgent with systemPromptOverride
         let fullResponse = '';
@@ -2484,7 +2896,7 @@ app.post('/api/chat/campaign/:campaignId', async (req, res) => {
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         if (ragResult.sources.length > 0) {
-            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources));
+            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources.map(({ htmlSource, ...s }) => s)));
         }
         res.flushHeaders();
 
@@ -3638,6 +4050,7 @@ app.post('/api/campaigns/:campaignId/emails/:id/duplicate', requireAuth, async (
 
 import { ingestDocument, ingestCampaigns, ingestBauTypes, deleteDocument, ingestFile } from '../../packages/core/knowledge/ingestion.js';
 import { searchKnowledge, searchMultiNamespace, buildRAGContext, isKBReady } from '../../packages/core/knowledge/retrieval.js';
+import { ingestEmailBlocks } from '../../packages/core/knowledge/ingest-email-blocks.js';
 
 // Auto-migrate: add multimodal columns to KB tables
 (async () => {
@@ -3796,6 +4209,17 @@ app.post('/api/knowledge/ingest-campaigns', requireAuth, async (req, res) => {
     }
 });
 
+// POST /api/knowledge/ingest-email-blocks — Ingest Emirates email design blocks
+app.post('/api/knowledge/ingest-email-blocks', requireAuth, async (req, res) => {
+    try {
+        if (!isKBReady()) return res.status(503).json({ error: 'Knowledge base not configured. Set Gemini and Pinecone API keys in Settings.' });
+        const result = await ingestEmailBlocks(pool);
+        res.json(result);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // POST /api/knowledge/upload — Upload and ingest a file (image or PDF)
 app.post('/api/knowledge/upload', requireAuth, kbUpload.single('file'), async (req, res) => {
     try {
@@ -3902,24 +4326,22 @@ The user is asking for a diagram, image, schema, or visual content. You MUST:
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
-        const headerSources = ragResult.sources.map(s => ({
-            ...s,
-            htmlSource: s.htmlSource ? true : undefined,
-        }));
-        if (headerSources.length > 0) {
-            res.setHeader('X-RAG-Sources', JSON.stringify(headerSources));
-        }
-        const htmlSources = ragResult.sources.filter(s => s.htmlSource && s.htmlSource !== true);
-        if (htmlSources.length > 0) {
-            res.setHeader('X-HTML-Sources', JSON.stringify(htmlSources.map(s => ({
-                title: s.title,
-                htmlSource: s.htmlSource,
-            }))));
+        if (ragResult.sources.length > 0) {
+            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources.map(({ htmlSource, ...s }) => s)));
         }
         if (ragResult.mediaResults && ragResult.mediaResults.length > 0) {
-            res.setHeader('X-RAG-Media', JSON.stringify(ragResult.mediaResults));
+            const mediaForHeader = ragResult.mediaResults.filter(m => m.mediaType !== 'email_html').map(({ htmlSource, ...m }) => m);
+            if (mediaForHeader.length > 0) res.setHeader('X-RAG-Media', JSON.stringify(mediaForHeader));
         }
         res.flushHeaders();
+
+        // Send email html as SSE event (too large for HTTP headers)
+        const htmlFromSources = ragResult.sources?.filter(s => s.htmlSource) || [];
+        const htmlFromMedia = ragResult.mediaResults?.filter(m => m.mediaType === 'email_html' && m.htmlSource) || [];
+        const allHtmlKB = [...htmlFromSources, ...htmlFromMedia].filter((m, i, arr) => arr.findIndex(x => (x.title || x.documentTitle) === (m.title || m.documentTitle)) === i);
+        if (allHtmlKB.length > 0) {
+            res.write(`data: ${JSON.stringify({ html_sources: allHtmlKB.map(s => ({ htmlSource: s.htmlSource, title: s.title || s.documentTitle, filePath: s.filePath })) })}\n\n`);
+        }
 
         // Stream response via Gemini
         const gemini = getGeminiClient();
@@ -3984,7 +4406,7 @@ const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
-    if (url.pathname === '/ws/voice' || url.pathname === '/ws/voice-meeting' || url.pathname === '/ws/voice-kb') {
+    if (url.pathname === '/ws/voice' || url.pathname === '/ws/voice-meeting' || url.pathname === '/ws/voice-kb' || url.pathname === '/ws/voice-agent') {
         // Validate session before allowing WebSocket upgrade
         // express-session needs a response-like object with header methods
         const fakeRes = Object.create(http.ServerResponse.prototype);
@@ -4019,6 +4441,10 @@ wss.on('connection', async (ws, req) => {
 
     if (url.pathname === '/ws/voice-kb') {
         return handleVoiceKB(ws, url);
+    }
+
+    if (url.pathname === '/ws/voice-agent') {
+        return handleVoiceAgent(ws, url);
     }
 
     const agentId = url.searchParams.get('agentId');
@@ -4529,6 +4955,284 @@ CRITICAL INSTRUCTIONS:
     });
 }
 
+// ─── Voice Agent Handler (Gemini Live Speech-to-Speech + RAG per agent) ─────
+
+function buildAgentVoicePrompt(agent, profile, lang) {
+    const langName = lang === 'en' ? 'English' : 'Spanish';
+    const skills = Array.isArray(agent.skills) ? agent.skills.join(', ') : '';
+    const tools = Array.isArray(agent.tools) ? agent.tools.join(', ') : '';
+
+    return `LANGUAGE: You MUST speak in ${langName}. All your responses must be in ${langName} only. Even if the knowledge base content is in another language, translate and respond in ${langName}.
+
+You are ${agent.name}, an AI agent in the ${agent.department} department.
+Role: ${agent.role}
+${skills ? `Skills: ${skills}` : ''}
+${tools ? `Tools: ${tools}` : ''}
+
+${profile.personality}
+
+VOICE BEHAVIOR:
+${profile.voiceRules}
+
+CRITICAL INSTRUCTIONS:
+1. ALWAYS respond in ${langName}. This is non-negotiable.
+2. ALWAYS use the searchKnowledge tool to find relevant information BEFORE answering questions about campaigns, emails, KPIs, brand, research, or any work-related topic.
+3. Base your responses ONLY on the retrieved knowledge. If no relevant information is found, say so honestly. Do not hallucinate.
+4. Stay in character as ${agent.name} at all times — your perspective, tone, and expertise should reflect your role.
+5. DO NOT ramble, over-explain, or repeat yourself. Voice responses must be extremely concise.`;
+}
+
+async function handleVoiceAgent(ws, url) {
+    const agentId = url.searchParams.get('agentId');
+    const lang = url.searchParams.get('lang') || 'es';
+
+    if (!agentId) {
+        ws.send(JSON.stringify({ type: 'error', message: 'agentId is required' }));
+        ws.close();
+        return;
+    }
+
+    console.log(`[Voice Agent] Connected: agent=${agentId}, lang=${lang}`);
+
+    // Verify Gemini and KB are ready
+    const gemini = getGeminiClient();
+    if (!gemini || !isKBReady()) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Gemini or Knowledge Base not configured' }));
+        ws.close();
+        return;
+    }
+
+    // Fetch agent from DB
+    let agent;
+    try {
+        const agentRes = await pool.query('SELECT * FROM agents WHERE id = $1', [agentId]);
+        if (agentRes.rows.length === 0) {
+            ws.send(JSON.stringify({ type: 'error', message: `Agent ${agentId} not found` }));
+            ws.close();
+            return;
+        }
+        agent = agentRes.rows[0];
+    } catch (err) {
+        ws.send(JSON.stringify({ type: 'error', message: 'Failed to load agent' }));
+        ws.close();
+        return;
+    }
+
+    // Load profile and build prompt (DB overrides take precedence)
+    const profile = getAgentProfile(agentId);
+    const effectiveProfile = {
+        ...profile,
+        personality: agent.personality || profile.personality,
+        voiceName: agent.voice_name || profile.voiceName,
+        voiceRules: agent.voice_rules || profile.voiceRules,
+        ragNamespaces: (Array.isArray(agent.rag_namespaces) && agent.rag_namespaces.length > 0)
+            ? agent.rag_namespaces : profile.ragNamespaces,
+    };
+    const systemPrompt = buildAgentVoicePrompt(agent, effectiveProfile, lang);
+
+    // Build tool declarations: searchKnowledge + any custom tools
+    const toolDeclarations = [SEARCH_KNOWLEDGE_TOOL, ...profile.customTools];
+
+    let session = null;
+
+    try {
+        session = await gemini.live.connect({
+            model: GEMINI_LIVE_MODEL,
+            config: {
+                responseModalities: ['AUDIO'],
+                systemInstruction: systemPrompt,
+                tools: [{ functionDeclarations: toolDeclarations }],
+                speechConfig: {
+                    voiceConfig: { prebuiltVoiceConfig: { voiceName: effectiveProfile.voiceName } },
+                },
+                inputAudioTranscription: {},
+                outputAudioTranscription: {},
+            },
+            callbacks: {
+                onopen: () => {
+                    console.log(`[Voice Agent] Gemini Live session opened for ${agent.name}`);
+                    ws.send(JSON.stringify({ type: 'ready' }));
+                },
+                onmessage: async (message) => {
+                    try {
+                        // Audio response from model
+                        if (message.serverContent?.modelTurn?.parts) {
+                            for (const part of message.serverContent.modelTurn.parts) {
+                                if (part.inlineData) {
+                                    ws.send(JSON.stringify({
+                                        type: 'audio',
+                                        data: part.inlineData.data,
+                                        mimeType: part.inlineData.mimeType,
+                                    }));
+                                }
+                            }
+                        }
+
+                        // Input transcription (what user said)
+                        if (message.serverContent?.inputTranscription?.text) {
+                            ws.send(JSON.stringify({
+                                type: 'input-transcript',
+                                text: message.serverContent.inputTranscription.text,
+                            }));
+                        }
+
+                        // Output transcription (what AI said)
+                        if (message.serverContent?.outputTranscription?.text) {
+                            ws.send(JSON.stringify({
+                                type: 'output-transcript',
+                                text: message.serverContent.outputTranscription.text,
+                            }));
+                        }
+
+                        // Turn complete
+                        if (message.serverContent?.turnComplete) {
+                            ws.send(JSON.stringify({ type: 'turn-complete' }));
+                        }
+
+                        // Interrupted by user
+                        if (message.serverContent?.interrupted) {
+                            ws.send(JSON.stringify({ type: 'interrupted' }));
+                        }
+
+                        // Function calling (RAG search)
+                        if (message.toolCall?.functionCalls) {
+                            for (const fc of message.toolCall.functionCalls) {
+                                if (fc.name === 'searchKnowledge') {
+                                    const query = fc.args?.query || '';
+                                    const needsVisuals = fc.args?.needsVisuals || false;
+                                    console.log(`[Voice Agent] RAG search (${agent.name}): "${query}", visuals: ${needsVisuals}`);
+                                    ws.send(JSON.stringify({ type: 'searching' }));
+
+                                    try {
+                                        const namespaces = profile.ragNamespaces;
+                                        const RAG_TIMEOUT_MS = 45000;
+                                        const ragPromise = buildRAGContext(pool, query, {
+                                            namespaces,
+                                            maxTokens: 1500,
+                                            visualQuery: needsVisuals,
+                                            mode: 'voice',
+                                            maxMedia: 2,
+                                        });
+                                        const timeoutPromise = new Promise((_, reject) =>
+                                            setTimeout(() => reject(new Error('RAG timeout')), RAG_TIMEOUT_MS)
+                                        );
+
+                                        let context, sources, mediaResults;
+                                        try {
+                                            ({ context, sources, mediaResults } = await Promise.race([ragPromise, timeoutPromise]));
+                                        } catch (timeoutErr) {
+                                            console.warn(`[Voice Agent] RAG timed out after ${RAG_TIMEOUT_MS}ms for: "${query}"`);
+                                            context = 'Knowledge base search timed out. Please try a simpler question.';
+                                            sources = [];
+                                            mediaResults = [];
+                                        }
+
+                                        session.sendToolResponse({
+                                            functionResponses: [{
+                                                id: fc.id,
+                                                name: fc.name,
+                                                response: { result: context || 'No relevant information found in the knowledge base.' },
+                                            }],
+                                        });
+
+                                        ws.send(JSON.stringify({ type: 'rag-sources', sources: sources || [] }));
+                                        ws.send(JSON.stringify({ type: 'rag-media', media: mediaResults || [] }));
+                                    } catch (ragErr) {
+                                        console.error(`[Voice Agent] RAG error (${agent.name}):`, ragErr.message);
+                                        session.sendToolResponse({
+                                            functionResponses: [{
+                                                id: fc.id,
+                                                name: fc.name,
+                                                response: { result: 'Error searching the knowledge base. Please try again.' },
+                                            }],
+                                        });
+                                    }
+                                }
+                            }
+                        }
+
+                        // Tool call cancellation
+                        if (message.toolCallCancellation) {
+                            console.log(`[Voice Agent] Tool call cancelled:`, message.toolCallCancellation.ids);
+                        }
+
+                        // Session expiring warning
+                        if (message.goAway) {
+                            ws.send(JSON.stringify({
+                                type: 'warning',
+                                message: 'Voice session will expire soon',
+                                timeLeft: message.goAway.timeLeft,
+                            }));
+                        }
+                    } catch (err) {
+                        console.error(`[Voice Agent] Message handling error (${agent.name}):`, err.message);
+                    }
+                },
+                onerror: (err) => {
+                    console.error(`[Voice Agent] Gemini Live error (${agent.name}):`, err);
+                    try {
+                        ws.send(JSON.stringify({ type: 'error', message: 'Voice session error' }));
+                    } catch { /* ws may be closed */ }
+                },
+                onclose: () => {
+                    console.log(`[Voice Agent] Gemini Live session closed for ${agent.name}`);
+                    try {
+                        ws.send(JSON.stringify({ type: 'session-closed' }));
+                    } catch { /* ws may be closed */ }
+                },
+            },
+        });
+    } catch (err) {
+        console.error(`[Voice Agent] Failed to create Gemini Live session for ${agent.name}:`, err.message);
+        ws.send(JSON.stringify({ type: 'error', message: 'Failed to start voice session. Please try again.' }));
+        ws.close();
+        return;
+    }
+
+    // Handle messages from client
+    ws.on('message', (data) => {
+        try {
+            const msg = JSON.parse(data.toString());
+
+            if (msg.type === 'audio' && session) {
+                session.sendRealtimeInput({
+                    audio: { data: msg.data, mimeType: msg.mimeType || 'audio/pcm;rate=16000' },
+                });
+            }
+
+            if (msg.type === 'text' && session) {
+                session.sendClientContent({
+                    turns: [{ role: 'user', parts: [{ text: msg.text }] }],
+                    turnComplete: true,
+                });
+            }
+
+            if (msg.type === 'ping') {
+                ws.send(JSON.stringify({ type: 'pong' }));
+            }
+        } catch (err) {
+            console.error(`[Voice Agent] Client message error (${agent.name}):`, err.message);
+        }
+    });
+
+    // Cleanup on disconnect
+    ws.on('close', () => {
+        console.log(`[Voice Agent] Client disconnected: ${agent.name}`);
+        if (session) {
+            try { session.close(); } catch { /* ignore */ }
+            session = null;
+        }
+    });
+
+    ws.on('error', (err) => {
+        console.error(`[Voice Agent] WebSocket error (${agent.name}):`, err.message);
+        if (session) {
+            try { session.close(); } catch { /* ignore */ }
+            session = null;
+        }
+    });
+}
+
 // ─── Meeting REST Endpoints ─────────────────────────────────────────────────
 
 app.get('/api/meetings', requireAuth, async (req, res) => {
@@ -4562,6 +5266,785 @@ app.delete('/api/meetings/:id', requireAuth, async (req, res) => {
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PIPELINE BETWEEN AGENTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function logAuditTx(client, eventType, department, agentId, title, details) {
+    await client.query(
+        `INSERT INTO audit_log (event_type, department, agent_id, title, details)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [eventType, department, agentId, title, (details || '').substring(0, 500)]
+    );
+}
+
+// POST /api/projects/:id/pipeline — Create pipeline from template
+app.post('/api/projects/:id/pipeline', requireAuth, async (req, res) => {
+    try {
+        const projectId = parseInt(req.params.id);
+        const { template_id, stages } = req.body;
+        if (!stages || !Array.isArray(stages) || stages.length === 0) {
+            return res.status(400).json({ error: 'stages array is required' });
+        }
+
+        const projRes = await pool.query('SELECT id FROM projects WHERE id = $1', [projectId]);
+        if (projRes.rows.length === 0) return res.status(404).json({ error: 'Project not found' });
+
+        const existingRes = await pool.query('SELECT id FROM project_pipeline WHERE project_id = $1', [projectId]);
+        if (existingRes.rows.length > 0) return res.status(409).json({ error: 'Pipeline already exists for this project' });
+
+        const agentIds = stages.filter(s => s.agent_id).map(s => s.agent_id);
+        if (agentIds.length > 0) {
+            const agentsRes = await pool.query('SELECT id FROM agents WHERE id = ANY($1)', [agentIds]);
+            const foundIds = new Set(agentsRes.rows.map(r => r.id));
+            const missing = agentIds.filter(id => !foundIds.has(id));
+            if (missing.length > 0) return res.status(400).json({ error: `Agents not found: ${missing.join(', ')}` });
+        }
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            const pipelineRes = await client.query(
+                `INSERT INTO project_pipeline (project_id, template_id) VALUES ($1, $2) RETURNING *`,
+                [projectId, template_id || null]
+            );
+            const pipeline = pipelineRes.rows[0];
+
+            for (let i = 0; i < stages.length; i++) {
+                const s = stages[i];
+                await client.query(
+                    `INSERT INTO pipeline_stages (pipeline_id, stage_order, name, agent_id, department, description, depends_on, gate_type, namespaces)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                    [pipeline.id, i, s.name, s.agent_id, s.department || null, s.description || null,
+                     s.depends_on || [], s.gate_type || 'none', s.namespaces || []]
+                );
+            }
+
+            for (let i = 0; i < stages.length; i++) {
+                const s = stages[i];
+                const isFirstStage = !s.depends_on || s.depends_on.length === 0;
+                await client.query(
+                    `INSERT INTO project_agent_sessions (project_id, pipeline_id, agent_id, stage_name, stage_order, status, started_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                    [projectId, pipeline.id, s.agent_id, s.name, i,
+                     isFirstStage ? 'active' : 'pending',
+                     isFirstStage ? new Date() : null]
+                );
+            }
+
+            await logAuditTx(client, 'pipeline_created', stages[0]?.department, null,
+                `Pipeline created for project #${projectId}`,
+                `Template: ${template_id || 'custom'}, ${stages.length} stages`);
+
+            await client.query('COMMIT');
+            res.status(201).json(pipeline);
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/projects/:id/pipeline — Full pipeline state (single JOIN query)
+app.get('/api/projects/:id/pipeline', requireAuth, async (req, res) => {
+    try {
+        const projectId = parseInt(req.params.id);
+        const result = await pool.query(
+            `SELECT pp.*,
+                (SELECT json_agg(
+                    json_build_object(
+                        'id', ps.id, 'stage_order', ps.stage_order, 'name', ps.name,
+                        'agent_id', ps.agent_id, 'department', ps.department,
+                        'description', ps.description, 'depends_on', ps.depends_on,
+                        'gate_type', ps.gate_type, 'namespaces', ps.namespaces
+                    ) ORDER BY ps.stage_order
+                ) FROM pipeline_stages ps WHERE ps.pipeline_id = pp.id) as stages,
+                (SELECT json_agg(
+                    json_build_object(
+                        'id', pas.id, 'agent_id', pas.agent_id,
+                        'stage_name', pas.stage_name, 'stage_order', pas.stage_order,
+                        'status', pas.status, 'summary', pas.summary,
+                        'summary_edited', pas.summary_edited, 'deliverables', pas.deliverables,
+                        'started_at', pas.started_at, 'completed_at', pas.completed_at
+                    ) ORDER BY pas.stage_order
+                ) FROM project_agent_sessions pas WHERE pas.pipeline_id = pp.id) as sessions
+            FROM project_pipeline pp
+            WHERE pp.project_id = $1`,
+            [projectId]
+        );
+        if (result.rows.length === 0) return res.status(404).json({ error: 'No pipeline found' });
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/projects/:id/pipeline — Cancel pipeline
+app.delete('/api/projects/:id/pipeline', requireAuth, async (req, res) => {
+    try {
+        const projectId = parseInt(req.params.id);
+        const result = await pool.query(
+            'DELETE FROM project_pipeline WHERE project_id = $1 RETURNING id',
+            [projectId]
+        );
+        if (result.rows.length === 0) return res.status(404).json({ error: 'No pipeline found' });
+        await logAudit('pipeline_deleted', null, null,
+            `Pipeline deleted for project #${projectId}`, '');
+        res.json({ deleted: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/projects/:id/pipeline/handoff — 2-phase handoff (AI summary + atomic DB)
+app.post('/api/projects/:id/pipeline/handoff', requireAuth, async (req, res) => {
+    try {
+        const projectId = parseInt(req.params.id);
+        const { session_id, summary_override, notes } = req.body;
+        if (!session_id) return res.status(400).json({ error: 'session_id is required' });
+
+        const sessionRes = await pool.query(
+            `SELECT pas.*, a.name as agent_name, a.role as agent_role,
+                    pp.id as pipeline_id, pp.status as pipeline_status
+             FROM project_agent_sessions pas
+             JOIN agents a ON a.id = pas.agent_id
+             JOIN project_pipeline pp ON pp.id = pas.pipeline_id
+             WHERE pas.id = $1 AND pas.project_id = $2`,
+            [session_id, projectId]
+        );
+        if (sessionRes.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+        const currentSession = sessionRes.rows[0];
+
+        if (!['active', 'awaiting_handoff'].includes(currentSession.status)) {
+            return res.status(409).json({ error: `Session status is ${currentSession.status}, cannot handoff` });
+        }
+        if (currentSession.pipeline_status !== 'active') {
+            return res.status(409).json({ error: `Pipeline is ${currentSession.pipeline_status}` });
+        }
+
+        const blockers = await pool.query(
+            `SELECT count(*) FROM collaboration_raises
+             WHERE pipeline_session_id = $1 AND status = 'open' AND raise_type = 'blocker'`,
+            [session_id]
+        );
+        if (parseInt(blockers.rows[0].count) > 0) {
+            return res.status(409).json({ error: 'Cannot handoff with open blockers' });
+        }
+
+        const projRes = await pool.query('SELECT * FROM projects WHERE id = $1', [projectId]);
+        const project = projRes.rows[0];
+
+        const stageRes = await pool.query(
+            `SELECT * FROM pipeline_stages WHERE pipeline_id = $1 AND stage_order = $2`,
+            [currentSession.pipeline_id, currentSession.stage_order]
+        );
+        const currentStage = stageRes.rows[0];
+
+        if (currentStage.gate_type === 'human_approval' && !req.body.gate_approved) {
+            return res.status(409).json({ error: 'Human approval required for this stage', gate_required: true });
+        }
+
+        const nextStagesPreview = await pool.query(
+            `SELECT ps.*, a.name as agent_name, a.role as agent_role
+             FROM pipeline_stages ps
+             JOIN agents a ON a.id = ps.agent_id
+             WHERE ps.pipeline_id = $1 AND ps.stage_order > $2
+             ORDER BY ps.stage_order LIMIT 2`,
+            [currentSession.pipeline_id, currentSession.stage_order]
+        );
+        const nextAgentInfo = nextStagesPreview.rows.length > 0
+            ? { name: nextStagesPreview.rows[0].agent_name, role: nextStagesPreview.rows[0].agent_role }
+            : { name: 'the team', role: 'project completion' };
+
+        // ── PHASE A: Generate AI summary (outside transaction) ──
+        let handoffData;
+        if (summary_override) {
+            handoffData = {
+                summary: summary_override,
+                decisions_made: ['User-provided summary'],
+                deliverables: [],
+                open_questions: [],
+                context_for_next: notes || ''
+            };
+        } else {
+            const messagesRes = await pool.query(
+                `SELECT role, content FROM pipeline_session_messages
+                 WHERE session_id = $1 ORDER BY created_at`,
+                [session_id]
+            );
+            const conversation = messagesRes.rows.map(m => ({ role: m.role, content: m.content }));
+
+            try {
+                handoffData = await generateHandoffSummary(
+                    conversation,
+                    { name: project.name },
+                    { name: currentStage.name, agentName: currentSession.agent_name },
+                    nextAgentInfo
+                );
+            } catch (aiErr) {
+                return res.status(502).json({ error: `AI summary generation failed: ${aiErr.message}` });
+            }
+        }
+
+        // ── PHASE B: Atomic DB update (inside transaction) ──
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            const pipeline = (await client.query(
+                'SELECT * FROM project_pipeline WHERE id = $1 FOR UPDATE',
+                [currentSession.pipeline_id]
+            )).rows[0];
+
+            if (pipeline.status !== 'active') {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ error: `Pipeline is ${pipeline.status}` });
+            }
+
+            await client.query(
+                `UPDATE project_agent_sessions
+                 SET status = 'completed', summary = $1, deliverables = $2, completed_at = NOW()
+                 WHERE id = $3 AND status IN ('active', 'awaiting_handoff')`,
+                [handoffData.summary, JSON.stringify(handoffData), session_id]
+            );
+
+            const nextStages = await client.query(
+                `SELECT ps.* FROM pipeline_stages ps
+                 WHERE ps.pipeline_id = $1
+                 AND NOT EXISTS (
+                     SELECT 1 FROM unnest(ps.depends_on) AS dep
+                     WHERE dep NOT IN (
+                         SELECT stage_order FROM project_agent_sessions
+                         WHERE pipeline_id = $1 AND status = 'completed'
+                     )
+                 )
+                 AND ps.stage_order NOT IN (
+                     SELECT stage_order FROM project_agent_sessions
+                     WHERE pipeline_id = $1 AND status IN ('active', 'completed', 'skipped')
+                 )`,
+                [pipeline.id]
+            );
+
+            for (const stage of nextStages.rows) {
+                await client.query(
+                    `UPDATE project_agent_sessions
+                     SET status = 'active', started_at = NOW()
+                     WHERE pipeline_id = $1 AND stage_order = $2`,
+                    [pipeline.id, stage.stage_order]
+                );
+            }
+
+            const remaining = await client.query(
+                `SELECT count(*) FROM project_agent_sessions
+                 WHERE pipeline_id = $1 AND status IN ('pending', 'active', 'awaiting_handoff')`,
+                [pipeline.id]
+            );
+            if (parseInt(remaining.rows[0].count) === 0) {
+                await client.query(
+                    "UPDATE project_pipeline SET status = 'completed', updated_at = NOW() WHERE id = $1",
+                    [pipeline.id]
+                );
+            }
+
+            await logAuditTx(client, 'pipeline_handoff', currentStage.department, currentSession.agent_id,
+                `Pipeline handoff: ${currentStage.name} completed`,
+                handoffData.summary);
+
+            for (const stage of nextStages.rows) {
+                await client.query(
+                    `INSERT INTO collaboration_raises
+                     (from_agent, to_agent, raise_type, title, details, status, pipeline_session_id)
+                     VALUES ($1, $2, 'handoff', $3, $4, 'resolved', $5)`,
+                    [currentSession.agent_id, stage.agent_id,
+                     `Handoff: ${currentStage.name} -> ${stage.name}`,
+                     handoffData.context_for_next,
+                     session_id]
+                );
+            }
+
+            await client.query('COMMIT');
+
+            const updatedPipeline = await pool.query(
+                `SELECT pp.*,
+                    (SELECT json_agg(json_build_object(
+                        'id', pas.id, 'agent_id', pas.agent_id,
+                        'stage_name', pas.stage_name, 'stage_order', pas.stage_order,
+                        'status', pas.status, 'summary', pas.summary,
+                        'completed_at', pas.completed_at
+                    ) ORDER BY pas.stage_order)
+                    FROM project_agent_sessions pas WHERE pas.pipeline_id = pp.id) as sessions
+                FROM project_pipeline pp WHERE pp.id = $1`,
+                [pipeline.id]
+            );
+            res.json({ handoff: handoffData, pipeline: updatedPipeline.rows[0] });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
+    } catch (err) {
+        if (!res.headersSent) res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/projects/:id/pipeline/pause
+app.post('/api/projects/:id/pipeline/pause', requireAuth, async (req, res) => {
+    try {
+        const result = await pool.query(
+            "UPDATE project_pipeline SET status = 'paused', updated_at = NOW() WHERE project_id = $1 AND status = 'active' RETURNING *",
+            [req.params.id]
+        );
+        if (result.rows.length === 0) return res.status(404).json({ error: 'No active pipeline found' });
+        await logAudit('pipeline_paused', null, null, `Pipeline paused for project #${req.params.id}`, '');
+        res.json(result.rows[0]);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/projects/:id/pipeline/resume
+app.post('/api/projects/:id/pipeline/resume', requireAuth, async (req, res) => {
+    try {
+        const result = await pool.query(
+            "UPDATE project_pipeline SET status = 'active', updated_at = NOW() WHERE project_id = $1 AND status = 'paused' RETURNING *",
+            [req.params.id]
+        );
+        if (result.rows.length === 0) return res.status(404).json({ error: 'No paused pipeline found' });
+        await logAudit('pipeline_resumed', null, null, `Pipeline resumed for project #${req.params.id}`, '');
+        res.json(result.rows[0]);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/projects/:id/pipeline/stages/:order/skip
+app.post('/api/projects/:id/pipeline/stages/:order/skip', requireAuth, async (req, res) => {
+    try {
+        const projectId = parseInt(req.params.id);
+        const stageOrder = parseInt(req.params.order);
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            const pipeline = (await client.query(
+                'SELECT * FROM project_pipeline WHERE project_id = $1 FOR UPDATE', [projectId]
+            )).rows[0];
+            if (!pipeline) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Pipeline not found' }); }
+
+            await client.query(
+                `UPDATE project_agent_sessions SET status = 'skipped', completed_at = NOW()
+                 WHERE pipeline_id = $1 AND stage_order = $2 AND status IN ('pending', 'active')`,
+                [pipeline.id, stageOrder]
+            );
+
+            const nextStages = await client.query(
+                `SELECT ps.* FROM pipeline_stages ps
+                 WHERE ps.pipeline_id = $1
+                 AND NOT EXISTS (
+                     SELECT 1 FROM unnest(ps.depends_on) AS dep
+                     WHERE dep NOT IN (
+                         SELECT stage_order FROM project_agent_sessions
+                         WHERE pipeline_id = $1 AND status IN ('completed', 'skipped')
+                     )
+                 )
+                 AND ps.stage_order NOT IN (
+                     SELECT stage_order FROM project_agent_sessions
+                     WHERE pipeline_id = $1 AND status IN ('active', 'completed', 'skipped')
+                 )`,
+                [pipeline.id]
+            );
+
+            for (const stage of nextStages.rows) {
+                await client.query(
+                    `UPDATE project_agent_sessions SET status = 'active', started_at = NOW()
+                     WHERE pipeline_id = $1 AND stage_order = $2`,
+                    [pipeline.id, stage.stage_order]
+                );
+            }
+
+            await logAuditTx(client, 'pipeline_stage_skipped', null, null,
+                `Stage ${stageOrder} skipped in project #${projectId}`, '');
+            await client.query('COMMIT');
+            res.json({ skipped: true, activated: nextStages.rows.map(s => s.stage_order) });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/projects/:id/sessions/:sessionId/messages — Paginated messages
+app.get('/api/projects/:id/sessions/:sessionId/messages', requireAuth, async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 50;
+        const offset = parseInt(req.query.offset) || 0;
+        const result = await pool.query(
+            `SELECT * FROM pipeline_session_messages
+             WHERE session_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3`,
+            [req.params.sessionId, limit, offset]
+        );
+        const countRes = await pool.query(
+            'SELECT count(*) FROM pipeline_session_messages WHERE session_id = $1',
+            [req.params.sessionId]
+        );
+        res.json({ messages: result.rows, total: parseInt(countRes.rows[0].count) });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /api/projects/:id/sessions/:sessionId/messages — Clear chat history for a session
+app.delete('/api/projects/:id/sessions/:sessionId/messages', requireAuth, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM pipeline_session_messages WHERE session_id = $1', [req.params.sessionId]);
+        res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/projects/:id/sessions/:sessionId/initialize — Agent speaks first (auto-init)
+app.post('/api/projects/:id/sessions/:sessionId/initialize', requireAuth, async (req, res) => {
+    try {
+        const sessionId = parseInt(req.params.sessionId);
+        const projectId = parseInt(req.params.id);
+
+        // 1. Validate session exists, is active, and has zero messages
+        const sessionRes = await pool.query(
+            `SELECT pas.*, a.name as agent_name, a.role as agent_role,
+                    a.department as agent_department, a.skills as agent_skills, a.tools as agent_tools,
+                    ps.description as stage_description, ps.namespaces as stage_namespaces,
+                    pp.status as pipeline_status
+             FROM project_agent_sessions pas
+             JOIN agents a ON a.id = pas.agent_id
+             JOIN pipeline_stages ps ON ps.pipeline_id = pas.pipeline_id AND ps.stage_order = pas.stage_order
+             JOIN project_pipeline pp ON pp.id = pas.pipeline_id
+             WHERE pas.id = $1 AND pas.project_id = $2`,
+            [sessionId, projectId]
+        );
+        if (sessionRes.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+        const session = sessionRes.rows[0];
+
+        if (session.status !== 'active') return res.status(409).json({ error: `Session is ${session.status}` });
+
+        const msgCountRes = await pool.query(
+            'SELECT count(*) FROM pipeline_session_messages WHERE session_id = $1',
+            [sessionId]
+        );
+        if (parseInt(msgCountRes.rows[0].count) > 0) {
+            return res.status(409).json({ error: 'Session already has messages' });
+        }
+
+        // 2. Build context (same pattern as /chat)
+        const projRes = await pool.query('SELECT * FROM projects WHERE id = $1', [projectId]);
+        const project = projRes.rows[0];
+
+        const completedRes = await pool.query(
+            `SELECT pas.*, a.name as agent_name
+             FROM project_agent_sessions pas
+             JOIN agents a ON a.id = pas.agent_id
+             WHERE pas.pipeline_id = $1 AND pas.status = 'completed'
+             ORDER BY pas.stage_order`,
+            [session.pipeline_id]
+        );
+        const accumulatedContext = buildAccumulatedContext(completedRes.rows, session.stage_order);
+
+        const ragNamespaces = session.stage_namespaces && session.stage_namespaces.length > 0
+            ? session.stage_namespaces
+            : ['campaigns', 'kpis'];
+        const ragResult = typeof isKBReady === 'function' && isKBReady()
+            ? await buildRAGContext(pool, project.name + ' ' + (project.problem || ''), { namespaces: ragNamespaces })
+            : { context: '', sources: [] };
+
+        const agent = {
+            name: session.agent_name, role: session.agent_role,
+            department: session.agent_department,
+            skills: session.agent_skills, tools: session.agent_tools
+        };
+        const stage = { name: session.stage_name, description: session.stage_description };
+        let systemPrompt = buildPipelineSystemPrompt(agent, stage, project, accumulatedContext, ragResult.context);
+
+        // 3. Append initial message instructions
+        systemPrompt += `\n\n## INITIAL MESSAGE
+This is your very first message in this stage session. You MUST:
+1. Briefly introduce yourself (name and role, 1 sentence)
+2. Acknowledge the project and your specific task for this stage
+3. If there is previous work context from other agents, briefly summarize what you received and how it informs your approach
+4. Ask 1-2 focused questions to begin your work effectively
+Keep it concise (3-4 paragraphs max). Be warm but professional.`;
+
+        // 4. Stream response (no user message persisted)
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        if (ragResult.sources.length > 0) {
+            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources.map(({ htmlSource, ...s }) => s)));
+        }
+        res.flushHeaders();
+
+        let fullResponse = '';
+        const stream = await chatWithPMAgent(
+            [{ role: 'user', content: '[SESSION_INIT] The session has just started. Introduce yourself and begin.' }],
+            { stream: true, systemPromptOverride: systemPrompt }
+        );
+
+        stream.on('text', (text) => {
+            fullResponse += text;
+            res.write(`data: ${JSON.stringify({ text })}\n\n`);
+        });
+
+        let streamEnded = false;
+        stream.on('error', (err) => {
+            if (!streamEnded) {
+                streamEnded = true;
+                res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+                res.write('data: [DONE]\n\n');
+                res.end();
+            }
+        });
+
+        await stream.finalMessage();
+
+        // 5. Persist ONLY the assistant message
+        await pool.query(
+            `INSERT INTO pipeline_session_messages (session_id, role, content, metadata)
+             VALUES ($1, 'assistant', $2, $3)`,
+            [sessionId, fullResponse, JSON.stringify({ auto_generated: true, rag_sources: ragResult.sources })]
+        );
+
+        if (!streamEnded) {
+            streamEnded = true;
+            res.write('data: [DONE]\n\n');
+            res.end();
+        }
+    } catch (err) {
+        if (res.headersSent && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+            res.write('data: [DONE]\n\n');
+            res.end();
+        } else if (!res.headersSent) {
+            res.status(500).json({ error: err.message });
+        }
+    }
+});
+
+// POST /api/projects/:id/sessions/:sessionId/chat — SSE streaming chat in pipeline
+app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, res) => {
+    try {
+        const { message } = req.body;
+        const sessionId = parseInt(req.params.sessionId);
+        const projectId = parseInt(req.params.id);
+        if (!message) return res.status(400).json({ error: 'Message is required' });
+
+        const sessionRes = await pool.query(
+            `SELECT pas.*, a.name as agent_name, a.role as agent_role,
+                    a.department as agent_department, a.skills as agent_skills, a.tools as agent_tools,
+                    ps.description as stage_description, ps.namespaces as stage_namespaces,
+                    pp.status as pipeline_status
+             FROM project_agent_sessions pas
+             JOIN agents a ON a.id = pas.agent_id
+             JOIN pipeline_stages ps ON ps.pipeline_id = pas.pipeline_id AND ps.stage_order = pas.stage_order
+             JOIN project_pipeline pp ON pp.id = pas.pipeline_id
+             WHERE pas.id = $1 AND pas.project_id = $2`,
+            [sessionId, projectId]
+        );
+        if (sessionRes.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+        const session = sessionRes.rows[0];
+
+        if (session.status !== 'active') return res.status(409).json({ error: `Session is ${session.status}` });
+        if (session.pipeline_status !== 'active') return res.status(409).json({ error: 'Pipeline is not active' });
+
+        const projRes = await pool.query('SELECT * FROM projects WHERE id = $1', [projectId]);
+        const project = projRes.rows[0];
+
+        const completedRes = await pool.query(
+            `SELECT pas.*, a.name as agent_name
+             FROM project_agent_sessions pas
+             JOIN agents a ON a.id = pas.agent_id
+             WHERE pas.pipeline_id = $1 AND pas.status = 'completed'
+             ORDER BY pas.stage_order`,
+            [session.pipeline_id]
+        );
+        const accumulatedContext = buildAccumulatedContext(completedRes.rows, session.stage_order);
+
+        const ragNamespaces = session.stage_namespaces && session.stage_namespaces.length > 0
+            ? session.stage_namespaces
+            : ['campaigns', 'kpis', 'research', 'emails'];
+        const visualKeywords = /\b(show|display|ver|mostrar|look like|see|visualiz|email|imagen|image|picture|inline)\b/i;
+        const isVisualQuery = visualKeywords.test(message);
+        const ragResult = typeof isKBReady === 'function' && isKBReady()
+            ? await buildRAGContext(pool, message, { namespaces: ragNamespaces, visualQuery: isVisualQuery, maxTokens: isVisualQuery ? 4000 : 3000, maxMedia: isVisualQuery ? 4 : 2 })
+            : { context: '', sources: [], mediaResults: [] };
+
+        const agent = {
+            name: session.agent_name, role: session.agent_role,
+            department: session.agent_department,
+            skills: session.agent_skills, tools: session.agent_tools
+        };
+        const stage = { name: session.stage_name, description: session.stage_description };
+        const systemPrompt = buildPipelineSystemPrompt(agent, stage, project, accumulatedContext, ragResult.context);
+
+        const historyRes = await pool.query(
+            `SELECT role, content FROM pipeline_session_messages
+             WHERE session_id = $1 ORDER BY created_at`,
+            [sessionId]
+        );
+        let allMessages = historyRes.rows.map(m => ({ role: m.role, content: m.content }));
+        allMessages.push({ role: 'user', content: message });
+        const apiMessages = buildPipelineConversation(allMessages);
+
+        await pool.query(
+            `INSERT INTO pipeline_session_messages (session_id, role, content) VALUES ($1, 'user', $2)`,
+            [sessionId, message]
+        );
+
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        if (ragResult.sources?.length > 0) {
+            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources.map(({ htmlSource, ...s }) => s)));
+        }
+        if (ragResult.mediaResults?.length > 0) {
+            const otherMedia = ragResult.mediaResults.filter(m => m.mediaType !== 'email_html').map(({ htmlSource, ...m }) => m);
+            if (otherMedia.length > 0) res.setHeader('X-RAG-Media', JSON.stringify(otherMedia));
+        }
+        res.flushHeaders();
+
+        // Send email html as SSE event (too large for HTTP headers)
+        const pipelineHtmlSources = ragResult.sources?.filter(s => s.htmlSource) || [];
+        const pipelineHtmlMedia = ragResult.mediaResults?.filter(m => m.mediaType === 'email_html' && m.htmlSource) || [];
+        const allPipelineHtml = [...pipelineHtmlSources, ...pipelineHtmlMedia].filter((m, i, arr) => arr.findIndex(x => (x.title || x.documentTitle) === (m.title || m.documentTitle)) === i);
+        if (allPipelineHtml.length > 0) {
+            res.write(`data: ${JSON.stringify({ html_sources: allPipelineHtml.map(s => ({ htmlSource: s.htmlSource, title: s.title || s.documentTitle, filePath: s.filePath })) })}\n\n`);
+        }
+
+        let fullResponse = '';
+        const stream = await chatWithPMAgent(apiMessages, {
+            stream: true,
+            systemPromptOverride: systemPrompt,
+        });
+
+        stream.on('text', (text) => {
+            fullResponse += text;
+            res.write(`data: ${JSON.stringify({ text })}\n\n`);
+        });
+
+        let streamEnded = false;
+        stream.on('error', (err) => {
+            if (!streamEnded) {
+                streamEnded = true;
+                res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+                res.write('data: [DONE]\n\n');
+                res.end();
+            }
+        });
+
+        await stream.finalMessage();
+
+        const stageReadyMatch = fullResponse.match(/\[STAGE_READY:\s*(.+?)\]/);
+        if (stageReadyMatch) {
+            res.write(`data: ${JSON.stringify({ handoff_suggestion: true, reason: stageReadyMatch[1] })}\n\n`);
+            fullResponse = fullResponse.replace(/\[STAGE_READY:\s*.+?\]/, '').trim();
+        }
+
+        await pool.query(
+            `INSERT INTO pipeline_session_messages (session_id, role, content, metadata)
+             VALUES ($1, 'assistant', $2, $3)`,
+            [sessionId, fullResponse, JSON.stringify({ rag_sources: ragResult.sources })]
+        );
+
+        if (!streamEnded) {
+            streamEnded = true;
+            res.write('data: [DONE]\n\n');
+            res.end();
+        }
+    } catch (err) {
+        if (res.headersSent && !res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+            res.write('data: [DONE]\n\n');
+            res.end();
+        } else if (!res.headersSent) {
+            res.status(500).json({ error: err.message });
+        }
+    }
+});
+
+// PATCH /api/projects/:id/sessions/:sessionId/summary — Edit handoff summary
+app.patch('/api/projects/:id/sessions/:sessionId/summary', requireAuth, async (req, res) => {
+    try {
+        const { summary_edited } = req.body;
+        const result = await pool.query(
+            `UPDATE project_agent_sessions SET summary_edited = $1
+             WHERE id = $2 AND project_id = $3 RETURNING *`,
+            [summary_edited, req.params.sessionId, req.params.id]
+        );
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Session not found' });
+        res.json(result.rows[0]);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/pipelines/active — All active pipelines (overview)
+app.get('/api/pipelines/active', requireAuth, async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT pp.*, p.name as project_name, p.department as project_department,
+                (SELECT count(*) FROM project_agent_sessions WHERE pipeline_id = pp.id AND status = 'completed') as completed_stages,
+                (SELECT count(*) FROM pipeline_stages WHERE pipeline_id = pp.id) as total_stages,
+                (SELECT json_agg(json_build_object(
+                    'stage_name', pas.stage_name, 'agent_id', pas.agent_id, 'status', pas.status
+                ) ORDER BY pas.stage_order)
+                FROM project_agent_sessions pas WHERE pas.pipeline_id = pp.id AND pas.status = 'active') as active_stages
+            FROM project_pipeline pp
+            JOIN projects p ON p.id = pp.project_id
+            WHERE pp.status IN ('active', 'paused')
+            ORDER BY pp.updated_at DESC`
+        );
+        res.json(result.rows);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/agents/:agentId/active-sessions — Pipeline sessions for an agent
+app.get('/api/agents/:agentId/active-sessions', requireAuth, async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT pas.*, p.name as project_name, p.id as project_id, pp.status as pipeline_status,
+                ps.description as stage_description, ps.gate_type, ps.depends_on,
+                (SELECT count(*) FROM pipeline_session_messages WHERE session_id = pas.id) as message_count
+             FROM project_agent_sessions pas
+             JOIN projects p ON p.id = pas.project_id
+             JOIN project_pipeline pp ON pp.id = pas.pipeline_id
+             JOIN pipeline_stages ps ON ps.pipeline_id = pp.id AND ps.stage_order = pas.stage_order
+             WHERE pas.agent_id = $1 AND pas.status IN ('active', 'awaiting_handoff')
+             ORDER BY
+                CASE pas.status WHEN 'active' THEN 0 WHEN 'awaiting_handoff' THEN 1 ELSE 2 END,
+                pas.started_at DESC NULLS LAST`,
+            [req.params.agentId]
+        );
+        res.json(result.rows);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/agents/:agentId/pipeline-work — Completed pipeline work for an agent
+app.get('/api/agents/:agentId/pipeline-work', requireAuth, async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT pas.id, pas.stage_name, pas.stage_order, pas.summary, pas.deliverables,
+                    pas.started_at, pas.completed_at,
+                    p.name as project_name, p.id as project_id,
+                    ps.description as stage_description, ps.department
+             FROM project_agent_sessions pas
+             JOIN projects p ON p.id = pas.project_id
+             JOIN project_pipeline pp ON pas.pipeline_id = pp.id
+             JOIN pipeline_stages ps ON ps.pipeline_id = pp.id AND ps.stage_order = pas.stage_order
+             WHERE pas.agent_id = $1 AND pas.status = 'completed'
+             ORDER BY pas.completed_at DESC`,
+            [req.params.agentId]
+        );
+        res.json(result.rows);
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ─── Static Files (production) — MUST be after all API routes ───────────────
