@@ -65,61 +65,96 @@ export function fetchEmailTemplate() {
  * @returns {{ id: string, name: string, html: string }[]}
  */
 export function splitIntoBlocks(html) {
-  if (!html) return [];
+    if (!html) return [];
 
-  // 1. Extract slot content
-  const slotMarker = 'data-type="slot"';
-  const slotIdx = html.indexOf(slotMarker);
-  let content;
-  if (slotIdx !== -1) {
-    const openEnd = html.indexOf('>', slotIdx) + 1;
-    const closeTag = html.indexOf('</div>', openEnd);
-    content = closeTag !== -1 ? html.slice(openEnd, closeTag).trim() : '';
-  } else {
-    // Fallback: use body content
-    const bodyStart = html.indexOf('<body');
-    if (bodyStart !== -1) {
-      const bodyOpen = html.indexOf('>', bodyStart) + 1;
-      const bodyEnd = html.indexOf('</body>', bodyOpen);
-      content = bodyEnd !== -1 ? html.slice(bodyOpen, bodyEnd).trim() : html;
+    // 1. Extract slot content
+    const slotMarker = 'data-type="slot"';
+    const slotIdx = html.indexOf(slotMarker);
+    let content;
+    if (slotIdx !== -1) {
+        const openEnd = html.indexOf('>', slotIdx) + 1;
+        // Depth-tracking to find the matching </div> of the slot
+        let divDepth = 1;
+        let j = openEnd;
+        const htmlLower = html.toLowerCase();
+        while (j < html.length && divDepth > 0) {
+            if (htmlLower.slice(j, j + 4) === '<div') {
+                divDepth++;
+                j += 4;
+            } else if (htmlLower.slice(j, j + 6) === '</div>') {
+                divDepth--;
+                if (divDepth === 0) break;
+                j += 6;
+            } else {
+                j++;
+            }
+        }
+        content = divDepth === 0 ? html.slice(openEnd, j).trim() : '';
     } else {
-      content = html;
+        // Fallback: use body content
+        const bodyStart = html.indexOf('<body');
+        if (bodyStart !== -1) {
+            const bodyOpen = html.indexOf('>', bodyStart) + 1;
+            const bodyEnd = html.indexOf('</body>', bodyOpen);
+            content = bodyEnd !== -1 ? html.slice(bodyOpen, bodyEnd).trim() : html;
+        } else {
+            content = html;
+        }
     }
-  }
 
-  if (!content) return [];
+    if (!content) return [];
 
-  // 2. Depth-tracking to find top-level <table> elements
-  const blocks = [];
-  let depth = 0;
-  let blockStart = -1;
-  let i = 0;
-  const lower = content.toLowerCase();
+    // 2. Depth-tracking to find top-level <table> elements
+    const blocks = [];
+    let depth = 0;
+    let blockStart = -1;
+    let i = 0;
+    const lower = content.toLowerCase();
 
-  while (i < content.length) {
-    if (lower.slice(i, i + 6) === '<table') {
-      if (depth === 0) blockStart = i;
-      depth++;
-      i += 6;
-    } else if (lower.slice(i, i + 8) === '</table>') {
-      depth--;
-      if (depth === 0 && blockStart !== -1) {
-        const rawHtml = content.slice(blockStart, i + 8);
-        const id = `block-${Date.now()}-${blocks.length}`;
-        const name = `Block ${blocks.length + 1}`;
-        // Inject data-block-name into the opening <table> tag
-        const tagEnd = rawHtml.indexOf('>');
-        const blockHtml = rawHtml.slice(0, tagEnd) +
-          ` data-block-name="${name}"` +
-          rawHtml.slice(tagEnd);
-        blocks.push({ id, name, html: blockHtml });
-        blockStart = -1;
-      }
-      i += 8;
-    } else {
-      i++;
+    while (i < content.length) {
+        const nextChar = lower[i + 6];
+        if (
+            lower.slice(i, i + 6) === '<table' &&
+            (nextChar === '>' || nextChar === ' ' || nextChar === '\n' ||
+             nextChar === '\t' || nextChar === '\r' || nextChar === undefined)
+        ) {
+            if (depth === 0) blockStart = i;
+            depth++;
+            i += 6;
+        } else if (lower.slice(i, i + 8) === '</table>') {
+            depth--;
+            if (depth === 0 && blockStart !== -1) {
+                const rawHtml = content.slice(blockStart, i + 8);
+                const id = `block-${blocks.length}`;
+                const name = `Block ${blocks.length + 1}`;
+                // Inject data-block-name into the opening <table> tag
+                // Parse tag end safely, skipping > inside quoted attribute values
+                let tagEnd = 0;
+                let inQuote = false;
+                let quoteChar = '';
+                for (let k = 0; k < rawHtml.length; k++) {
+                    const ch = rawHtml[k];
+                    if (!inQuote && (ch === '"' || ch === "'")) {
+                        inQuote = true;
+                        quoteChar = ch;
+                    } else if (inQuote && ch === quoteChar) {
+                        inQuote = false;
+                    } else if (!inQuote && ch === '>') {
+                        tagEnd = k;
+                        break;
+                    }
+                }
+                const blockHtml = rawHtml.slice(0, tagEnd) +
+                    ` data-block-name="${name}"` +
+                    rawHtml.slice(tagEnd);
+                blocks.push({ id, name, html: blockHtml });
+                blockStart = -1;
+            }
+            i += 8;
+        } else {
+            i++;
+        }
     }
-  }
 
-  return blocks;
+    return blocks;
 }
