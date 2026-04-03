@@ -4291,7 +4291,7 @@ app.post('/api/knowledge/ingest-campaigns', requireAuth, async (req, res) => {
 app.post('/api/knowledge/ingest-email-blocks', requireAuth, async (req, res) => {
     try {
         if (!isKBReady()) return res.status(503).json({ error: 'Knowledge base not configured. Set Gemini and Pinecone API keys in Settings.' });
-        const result = await ingestEmailBlocks(pool);
+        const result = await ingestEmailBlocks(pool, anthropic);
         res.json(result);
     } catch (err) {
         res.status(500).json({ error: err.message });
