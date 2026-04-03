@@ -12,7 +12,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { ingestDocument, deleteDocument } from './ingestion.js';
+import { ingestDocument } from './ingestion.js';
 import { deleteNamespace } from '../ai-providers/pinecone.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -47,7 +47,15 @@ HTML:
  * @param {string} html - Raw HTML content
  * @returns {object} metadata JSON
  */
-async function analyzeBlock(anthropic, filename, html) {
+async function analyzeBlock(anthropic, filename, htmlContent) {
+    const MAX_HTML_CHARS = 80000;
+    const html = htmlContent.length > MAX_HTML_CHARS
+        ? htmlContent.slice(0, MAX_HTML_CHARS)
+        : htmlContent;
+    if (htmlContent.length > MAX_HTML_CHARS) {
+        console.warn(`[email-blocks] ${filename} is ${htmlContent.length} chars — truncating to ${MAX_HTML_CHARS} for Haiku`);
+    }
+
     const response = await anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 1024,
@@ -77,19 +85,18 @@ async function analyzeBlock(anthropic, filename, html) {
  * @returns {{ ingested: number, errors: string[] }}
  */
 export async function ingestEmailBlocks(pool, anthropic) {
-    const results = { ingested: 0, errors: [] };
+    if (!anthropic) throw new Error('[email-blocks] Anthropic client is required');
+
+    const results = { ingested: 0, skipped: 0, errors: [] };
 
     // Step 1: Clear existing email-blocks from Pinecone and PostgreSQL
     console.log('[email-blocks] Clearing existing email-blocks namespace...');
     await deleteNamespace('email-blocks');
 
-    const existing = await pool.query(
-        `SELECT id FROM knowledge_documents WHERE source_type = 'email-block'`
+    const deleted = await pool.query(
+        `DELETE FROM knowledge_documents WHERE source_type = 'email-block' RETURNING id`
     );
-    for (const row of existing.rows) {
-        await deleteDocument(pool, row.id);
-    }
-    console.log(`[email-blocks] Cleared ${existing.rows.length} existing documents.`);
+    console.log(`[email-blocks] Cleared ${deleted.rows.length} existing documents from PostgreSQL.`);
 
     // Step 2: Read all .html files from email_blocks/ directory
     if (!fs.existsSync(BLOCKS_DIR)) {
