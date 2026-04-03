@@ -813,8 +813,13 @@ Rules:
     }
 
     // Content agent: inject BRIEF_UPDATE protocol so the sidebar populates
-    const isContentAgent = (agent.name || '').toLowerCase().includes('lucia')
-        || (agent.role || '').toLowerCase().includes('content');
+    // Note: check 'content agent/strategist' not just 'content' — html-developer role also contains 'content blocks'
+    const isContentAgent = !isHtmlDeveloper && (
+        (agent.name || '').toLowerCase().includes('lucia')
+        || (agent.role || '').toLowerCase().includes('content agent')
+        || (agent.role || '').toLowerCase().includes('content strategist')
+        || (agent.role || '').toLowerCase().includes('content creator')
+    );
     if (isContentAgent) {
         prompt += `\n\n## Brief Generation Protocol — MANDATORY
 Every time you produce or confirm copy for ANY block (subject, preheader, heroHeadline, bodyCopy, cta), you MUST emit a BRIEF_UPDATE tag ON ITS OWN LINE immediately after presenting that content. No exceptions.
