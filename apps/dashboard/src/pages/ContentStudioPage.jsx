@@ -8,7 +8,7 @@ import AgentTicketsPanel from '../components/agent-views/shared/AgentTicketsPane
 import HandoffModal from '../components/HandoffModal.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
-const AGENT_ID = 'content-agent';
+const AGENT_ID = 'lucia';
 const ALL_MARKETS = ['en', 'es', 'ar', 'ru'];
 const AVAILABLE_TIERS = ['economy', 'economy_premium', 'business', 'first_class'];
 
@@ -117,7 +117,7 @@ export default function ContentStudioPage() {
     <div className="studio-page">
       {/* Top bar */}
       <div className="studio-topbar">
-        <button className="studio-back-btn" onClick={() => navigate('/app/workspace/agent/content-agent')}>
+        <button className="studio-back-btn" onClick={() => navigate('/app/workspace/agent/lucia')}>
           {t('studio.backToAgent')}
         </button>
         {pipeline.selectedTicket && (
@@ -186,7 +186,7 @@ export default function ContentStudioPage() {
         {(activeTab === 'images' || activeTab === 'ab' || activeTab === 'quality') && (
           <div className="studio-full-panel" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
             <p style={{ marginBottom: 12 }}>Vuelve al agente para acceder a este panel.</p>
-            <button className="studio-back-btn" onClick={() => navigate('/app/workspace/agent/content-agent')}>
+            <button className="studio-back-btn" onClick={() => navigate('/app/workspace/agent/lucia')}>
               {t('studio.backToAgent')}
             </button>
           </div>

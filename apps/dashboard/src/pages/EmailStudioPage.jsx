@@ -100,35 +100,37 @@ export default function EmailStudioPage() {
       <div className="studio-body">
         {activeTab === 'chat' && (
           <div className="email-studio-split">
-            <AgentChatSwitcher
-              agent={agent}
-              selectedTicket={pipeline.selectedTicket}
-              pipelineData={pipeline.pipelineData}
-              currentSession={pipeline.currentSession}
-              completedSessions={pipeline.completedSessions}
-              agents={pipeline.agents}
-              onClearTicket={pipeline.clearTicket}
-              onHandoffRequest={pipeline.setHandoffSession}
-              externalInput={chatInput}
-              onExternalInputConsumed={() => setChatInput('')}
-              onHtmlGenerated={(html) => {
-                setBuilderHtml(html);
-                setPatchedBlock(null);
-                setBuilderStatus('Email generado');
-                setTimeout(() => setBuilderStatus(''), 3000);
-              }}
-              onHtmlPatched={(blockName, html) => {
-                setBuilderHtml(html);
-                setPatchedBlock(blockName);
-                setBuilderStatus(`${blockName} actualizado`);
-                setTimeout(() => { setPatchedBlock(null); setBuilderStatus(''); }, 2000);
-              }}
-              onHtmlBlock={(block) => {
-                setBuilderHtml(prev => prev + block.htmlSource);
-                setBuilderStatus(`${block.title} añadido`);
-                setTimeout(() => setBuilderStatus(''), 3000);
-              }}
-            />
+            <div className="email-builder-chat-panel">
+              <AgentChatSwitcher
+                agent={agent}
+                selectedTicket={pipeline.selectedTicket}
+                pipelineData={pipeline.pipelineData}
+                currentSession={pipeline.currentSession}
+                completedSessions={pipeline.completedSessions}
+                agents={pipeline.agents}
+                onClearTicket={pipeline.clearTicket}
+                onHandoffRequest={pipeline.setHandoffSession}
+                externalInput={chatInput}
+                onExternalInputConsumed={() => setChatInput('')}
+                onHtmlGenerated={(html) => {
+                  setBuilderHtml(html);
+                  setPatchedBlock(null);
+                  setBuilderStatus('Email generado');
+                  setTimeout(() => setBuilderStatus(''), 3000);
+                }}
+                onHtmlPatched={(blockName, html) => {
+                  setBuilderHtml(html);
+                  setPatchedBlock(blockName);
+                  setBuilderStatus(`${blockName} actualizado`);
+                  setTimeout(() => { setPatchedBlock(null); setBuilderStatus(''); }, 2000);
+                }}
+                onHtmlBlock={(block) => {
+                  setBuilderHtml(prev => prev + block.htmlSource);
+                  setBuilderStatus(`${block.title} añadido`);
+                  setTimeout(() => setBuilderStatus(''), 3000);
+                }}
+              />
+            </div>
             <EmailBuilderPreview
               html={builderHtml}
               patchedBlock={patchedBlock}
@@ -137,6 +139,7 @@ export default function EmailStudioPage() {
             />
           </div>
         )}
+
         {activeTab === 'tickets' && (
           <div className="studio-full-panel">
             <AgentTicketsPanel

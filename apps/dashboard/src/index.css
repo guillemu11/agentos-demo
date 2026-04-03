@@ -11566,20 +11566,26 @@ body.sidebar-collapsed > .inbox-drawer {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Content Studio — chat 2fr, brief 1fr */
 .content-studio-split {
   display: grid;
   grid-template-columns: 2fr 1fr;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Email Studio — 50/50 */
 .email-studio-split {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Studio full-panel (for non-chat tabs) */
