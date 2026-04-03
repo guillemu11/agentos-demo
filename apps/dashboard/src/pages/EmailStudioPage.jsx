@@ -6,6 +6,7 @@ import AgentChatSwitcher from '../components/agent-views/shared/AgentChatSwitche
 import EmailBuilderPreview from '../components/EmailBuilderPreview.jsx';
 import AgentTicketsPanel from '../components/agent-views/shared/AgentTicketsPanel.jsx';
 import HandoffModal from '../components/HandoffModal.jsx';
+import EmailBlocksPanel from '../components/EmailBlocksPanel.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const AGENT_ID = 'html-developer';
@@ -18,12 +19,15 @@ export default function EmailStudioPage() {
 
   const [agent, setAgent] = useState(null);
   const [activeTab, setActiveTab] = useState('chat');
+  const [leftTab, setLeftTab] = useState('chat');
 
   // Builder state
   const [builderHtml, setBuilderHtml] = useState('');
   const [patchedBlock, setPatchedBlock] = useState(null);
   const [builderStatus, setBuilderStatus] = useState('');
   const [chatInput, setChatInput] = useState('');
+  const [contentVariants, setContentVariants] = useState({});
+  const [contentReady, setContentReady] = useState(false);
 
   const pipeline = useAgentPipelineSession(AGENT_ID);
 
@@ -34,6 +38,21 @@ export default function EmailStudioPage() {
       .then(data => { if (data) setAgent(data); })
       .catch(() => {});
   }, []);
+
+  // Fetch content variants when project changes
+  useEffect(() => {
+    const projectId = pipeline.selectedTicket?.project_id;
+    if (!projectId) return;
+    fetch(`${API_URL}/projects/${projectId}/content-variants`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data) {
+          setContentVariants(data.variants || {});
+          setContentReady(data.ready || false);
+        }
+      })
+      .catch(() => {});
+  }, [pipeline.selectedTicket?.project_id]);
 
   // Pre-select ticket from URL param once tickets are loaded
   useEffect(() => {
@@ -100,42 +119,63 @@ export default function EmailStudioPage() {
       <div className="studio-body">
         {activeTab === 'chat' && (
           <div className="email-studio-split">
-            <div className="email-builder-chat-panel">
-              <AgentChatSwitcher
-                agent={agent}
-                selectedTicket={pipeline.selectedTicket}
-                pipelineData={pipeline.pipelineData}
-                currentSession={pipeline.currentSession}
-                completedSessions={pipeline.completedSessions}
-                agents={pipeline.agents}
-                onClearTicket={pipeline.clearTicket}
-                onHandoffRequest={pipeline.setHandoffSession}
-                externalInput={chatInput}
-                onExternalInputConsumed={() => setChatInput('')}
-                onHtmlGenerated={(html) => {
-                  setBuilderHtml(html);
-                  setPatchedBlock(null);
-                  setBuilderStatus('Email generado');
-                  setTimeout(() => setBuilderStatus(''), 3000);
-                }}
-                onHtmlPatched={(blockName, html) => {
-                  setBuilderHtml(html);
-                  setPatchedBlock(blockName);
-                  setBuilderStatus(`${blockName} actualizado`);
-                  setTimeout(() => { setPatchedBlock(null); setBuilderStatus(''); }, 2000);
-                }}
-                onHtmlBlock={(block) => {
-                  setBuilderHtml(prev => prev + block.htmlSource);
-                  setBuilderStatus(`${block.title} añadido`);
-                  setTimeout(() => setBuilderStatus(''), 3000);
-                }}
-              />
+            <div className="email-builder-chat-panel" style={{ display: 'flex', flexDirection: 'column' }}>
+              <div className="email-left-panel-tabs">
+                <button
+                  className={`email-left-tab ${leftTab === 'chat' ? 'active' : ''}`}
+                  onClick={() => setLeftTab('chat')}
+                >{t('emailBlocks.tabChat')}</button>
+                <button
+                  className={`email-left-tab ${leftTab === 'blocks' ? 'active' : ''}`}
+                  onClick={() => setLeftTab('blocks')}
+                >{t('emailBlocks.tabBlocks')}</button>
+              </div>
+              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: leftTab === 'chat' ? 'flex' : 'none', flexDirection: 'column' }}>
+                <AgentChatSwitcher
+                  agent={agent}
+                  selectedTicket={pipeline.selectedTicket}
+                  pipelineData={pipeline.pipelineData}
+                  currentSession={pipeline.currentSession}
+                  completedSessions={pipeline.completedSessions}
+                  agents={pipeline.agents}
+                  onClearTicket={pipeline.clearTicket}
+                  onHandoffRequest={pipeline.setHandoffSession}
+                  externalInput={chatInput}
+                  onExternalInputConsumed={() => setChatInput('')}
+                  onHtmlGenerated={(html) => {
+                    setBuilderHtml(html);
+                    setPatchedBlock(null);
+                    setBuilderStatus('Email generado');
+                    setTimeout(() => setBuilderStatus(''), 3000);
+                  }}
+                  onHtmlPatched={(blockName, html) => {
+                    setBuilderHtml(html);
+                    setPatchedBlock(blockName);
+                    setBuilderStatus(`${blockName} actualizado`);
+                    setTimeout(() => { setPatchedBlock(null); setBuilderStatus(''); }, 2000);
+                  }}
+                  onHtmlBlock={(block) => {
+                    setBuilderHtml(prev => prev + block.htmlSource);
+                    setBuilderStatus(`${block.title} añadido`);
+                    setTimeout(() => setBuilderStatus(''), 3000);
+                  }}
+                />
+              </div>
+              {leftTab === 'blocks' && <EmailBlocksPanel />}
             </div>
             <EmailBuilderPreview
               html={builderHtml}
               patchedBlock={patchedBlock}
               statusMessage={builderStatus}
+              projectId={pipeline.selectedTicket?.project_id}
+              contentVariants={contentVariants}
+              contentReady={contentReady}
               onBlockClick={(blockName) => setChatInput(`[bloque: ${blockName}] `)}
+              onBlockDrop={(block) => {
+                setBuilderHtml(prev => prev + block.html);
+                setBuilderStatus(t('emailBlocks.added').replace('{name}', block.name));
+                setTimeout(() => setBuilderStatus(''), 3000);
+              }}
             />
           </div>
         )}
