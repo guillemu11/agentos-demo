@@ -32,6 +32,10 @@ export default function HandoffModal({ projectId, session, stages, agents, onClo
             if (summary) body.summary_override = summary;
             if (notes) body.notes = notes;
             if (requiresGateApproval) body.gate_approved = true;
+            // session.variants viene de ContentStudioPage → handleContentHandoff
+            if (session?.variants && Object.keys(session.variants).length > 0) {
+              body.variants = session.variants;
+            }
 
             const res = await fetch(`${API_URL}/projects/${projectId}/pipeline/handoff`, {
                 method: 'POST',
