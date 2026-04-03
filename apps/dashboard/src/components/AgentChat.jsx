@@ -21,7 +21,7 @@ function applyPatch(currentHtml, blockName, patchHtml) {
     return doc.documentElement.outerHTML;
 }
 
-export default function AgentChat({ agentId, agentName, agentAvatar, externalInput, onExternalInputConsumed, onHtmlGenerated, onHtmlPatched }) {
+export default function AgentChat({ agentId, agentName, agentAvatar, externalInput, onExternalInputConsumed, onHtmlGenerated, onHtmlPatched, currentHtml }) {
     const { t, lang } = useLanguage();
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
@@ -30,6 +30,11 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
     const [expandedMedia, setExpandedMedia] = useState(null);
     const messagesEndRef = useRef(null);
     const currentHtmlRef = useRef('');
+
+    // Keep currentHtmlRef in sync with external HTML state (e.g. after block reorder)
+    useEffect(() => {
+        if (currentHtml) currentHtmlRef.current = currentHtml;
+    }, [currentHtml]);
 
     // ─── Voice (Gemini Live) ──────────────────────────────────────────────
 
