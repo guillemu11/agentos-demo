@@ -218,11 +218,6 @@ export default function EmailStudioPage() {
                       const newBlocks = splitIntoBlocks(fullPatchedHtml);
                       if (newBlocks.length === 0) return prev;
                       return newBlocks.map((nb, i) => {
-                        const patchedBlock = prev.find(b =>
-                          b.name === blockName &&
-                          nb.html.includes(`data-block-name="${blockName}"`)
-                        );
-                        if (patchedBlock) return { ...patchedBlock, html: nb.html };
                         const byPos = prev[i];
                         return byPos ? { ...byPos, html: nb.html } : nb;
                       });
