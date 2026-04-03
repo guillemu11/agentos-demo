@@ -1425,6 +1425,21 @@ export const translations = {
       noTicketSelected: 'No hay ticket activo',
       selectTicketHint: 'Ve a la tab "Tickets" y selecciona un proyecto para empezar a trabajar con Lucia.',
     },
+
+    studio: {
+      contentStudio: 'Content Studio',
+      emailStudio: 'Email Studio',
+      openContentStudio: 'Abrir Content Studio ↗',
+      openEmailStudio: 'Abrir Email Studio ↗',
+      backToAgent: '← Volver al agente',
+      working: 'Working',
+      building: 'Building',
+      sendToHtmlDev: 'Send to HTML Developer →',
+      exportHtml: '↓ Export HTML',
+      chat: 'Chat',
+      blockLibrary: 'Block Library',
+      templates: 'Templates',
+    },
   },
 
   en: {
@@ -2818,6 +2833,21 @@ export const translations = {
       blockHeroHeadline: 'Hero Headline',
       noTicketSelected: 'No active ticket',
       selectTicketHint: 'Go to the "Tickets" tab and select a project to start working with Lucia.',
+    },
+
+    studio: {
+      contentStudio: 'Content Studio',
+      emailStudio: 'Email Studio',
+      openContentStudio: 'Open Content Studio ↗',
+      openEmailStudio: 'Open Email Studio ↗',
+      backToAgent: '← Back to agent',
+      working: 'Working',
+      building: 'Building',
+      sendToHtmlDev: 'Send to HTML Developer →',
+      exportHtml: '↓ Export HTML',
+      chat: 'Chat',
+      blockLibrary: 'Block Library',
+      templates: 'Templates',
     },
   },
 };
