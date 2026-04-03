@@ -498,6 +498,45 @@ app.get('/api/projects/:id/emails', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/projects/:id/content-variants — Get approved content variants from Content Agent session
+app.get('/api/projects/:id/content-variants', requireAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query(
+            `SELECT deliverables
+             FROM project_agent_sessions
+             WHERE project_id = $1
+               AND agent_id = 'lucia'
+               AND status = 'completed'
+             ORDER BY completed_at DESC
+             LIMIT 1`,
+            [id]
+        );
+        if (result.rows.length === 0) {
+            return res.json({ ready: false, variants: {}, approvedCount: 0, totalCount: 0 });
+        }
+        const deliverables = result.rows[0].deliverables || {};
+        const variants = deliverables.content_variants || {};
+        const variantKeys = Object.keys(variants);
+        if (variantKeys.length === 0) {
+            return res.json({ ready: false, variants: {}, approvedCount: 0, totalCount: 0 });
+        }
+        const FIELDS = ['subject', 'preheader', 'heroHeadline', 'bodyCopy', 'cta'];
+        let approvedCount = 0;
+        let totalCount = 0;
+        for (const key of variantKeys) {
+            for (const field of FIELDS) {
+                totalCount++;
+                if (variants[key]?.[field]?.status === 'approved') approvedCount++;
+            }
+        }
+        const ready = approvedCount > 0;
+        res.json({ ready, variants, approvedCount, totalCount });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // POST /api/projects/:id/emails — save a new email version
 app.post('/api/projects/:id/emails', requireAuth, async (req, res) => {
   const { id } = req.params;
