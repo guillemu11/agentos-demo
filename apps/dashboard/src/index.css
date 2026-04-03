@@ -10526,6 +10526,190 @@ body.sidebar-collapsed > .inbox-drawer {
 .variant-status-dot.waiting { background: var(--accent-amber, #f59e0b); }
 .variant-status-dot.ready   { background: var(--accent-green, #22c55e); }
 
+/* ── Variant Preview Modal ── */
+.variant-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.variant-modal {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  width: 90vw;
+  max-width: 1200px;
+  height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.variant-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+.variant-modal-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.variant-modal-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+}
+.variant-modal-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.variant-modal-list {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-color);
+  padding: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.variant-modal-list-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.variant-modal-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 8px;
+}
+.variant-card {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  position: relative;
+  transition: border-color 0.15s;
+}
+.variant-card:hover { border-color: var(--text-muted); }
+.variant-card.previewing { border-color: var(--accent-blue, #3b82f6); background: rgba(59,130,246,0.06); }
+.variant-card.queued { border-color: var(--accent-purple, #7c3aed); }
+.variant-card.previewing.queued { border-color: var(--accent-purple, #7c3aed); }
+.variant-card-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.variant-card-meta {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.variant-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.variant-badge.previewing {
+  background: rgba(59,130,246,0.15);
+  color: var(--accent-blue, #3b82f6);
+}
+.variant-badge.queued {
+  background: rgba(124,58,237,0.15);
+  color: var(--accent-purple, #7c3aed);
+}
+.variant-card-checkbox {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border-color);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  cursor: pointer;
+  background: transparent;
+  transition: border-color 0.15s, background 0.15s;
+}
+.variant-card-checkbox.checked {
+  border-color: var(--accent-purple, #7c3aed);
+  background: var(--accent-purple, #7c3aed);
+  color: white;
+}
+.variant-modal-preview {
+  flex: 1;
+  background: #f5f5f5;
+  overflow-y: auto;
+}
+.variant-modal-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
+.variant-modal-no-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.variant-modal-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+.variant-modal-sent {
+  font-size: 12px;
+  color: var(--accent-green, #22c55e);
+  margin-right: auto;
+}
+.variant-modal-email-input {
+  flex: 1;
+  max-width: 300px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.variant-modal-send-btn {
+  padding: 7px 16px;
+  border-radius: 6px;
+  border: none;
+  background: var(--accent-purple, #7c3aed);
+  color: white;
+  font-size: 13px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.variant-modal-send-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .email-preview-body {
   flex: 1;
   overflow: auto;
