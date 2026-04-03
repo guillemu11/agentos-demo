@@ -4376,12 +4376,12 @@ app.post('/api/knowledge/ingest-email-blocks', requireAuth, async (req, res) => 
 // GET /api/knowledge/email-blocks — List all Emirates email blocks with HTML for Block Library
 app.get('/api/knowledge/email-blocks', requireAuth, async (req, res) => {
     try {
+        // Use kd.content (full un-chunked content) — chunks have overlap that corrupts HTML
         const result = await pool.query(
-            `SELECT kd.id, kd.title, kd.metadata, kc.content
-             FROM knowledge_documents kd
-             JOIN knowledge_chunks kc ON kc.document_id = kd.id AND kc.chunk_index = 0
-             WHERE kd.source_type = 'email-block'
-             ORDER BY kd.title`
+            `SELECT id, title, metadata, content
+             FROM knowledge_documents
+             WHERE source_type = 'email-block'
+             ORDER BY title`
         );
         const blocks = result.rows.map(row => {
             const htmlMarker = '--- HTML SOURCE ---\n';

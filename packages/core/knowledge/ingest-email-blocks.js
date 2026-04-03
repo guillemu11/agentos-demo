@@ -22,8 +22,8 @@ const BLOCKS_DIR = path.resolve(__dirname, '../../../email_blocks');
 const HAIKU_ANALYSIS_PROMPT = `Analyze this Emirates Airlines email HTML block and return ONLY a valid JSON object with these fields:
 
 {
-  "title": "Human-readable title in Spanish (e.g. 'CTA Rojo — Botón de acción Emirates')",
-  "description": "3-5 sentence semantic description in Spanish: what the block shows visually, when to use it, typical position in email, design tokens used, SFMC variable placeholders present",
+  "title": "Human-readable title in English (e.g. 'Red CTA — Emirates Action Button')",
+  "description": "3-5 sentence semantic description in English: what the block shows visually, when to use it, typical position in email, design tokens used, SFMC variable placeholders present",
   "category": "one of: header, hero, body-copy, section-title, story, offer, cta, article, infographic, card, columns, flight, partner, footer",
   "position": "where in email: top | body | footer | any",
   "design_tokens": {
