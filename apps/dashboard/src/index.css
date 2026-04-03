@@ -11419,3 +11419,185 @@ body.sidebar-collapsed > .inbox-drawer {
         font-size: 0.8rem;
     }
 }
+
+/* ── Studio Pages (Content Studio / Email Studio) ── */
+.studio-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-main);
+  overflow: hidden;
+}
+
+.studio-loading {
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* Top bar */
+.studio-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px;
+  height: 52px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+
+.studio-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+.studio-back-btn:hover { color: var(--text-main); }
+
+.studio-campaign-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-main);
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 20px;
+  padding: 3px 12px;
+  white-space: nowrap;
+}
+
+.studio-status-chip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 20px;
+}
+.studio-status-working { background: #d1fae5; color: #065f46; }
+.studio-status-building { background: #fef2f2; color: #991b1b; }
+
+.studio-topbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.studio-action-secondary {
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-light);
+  background: var(--bg-card);
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.studio-action-primary {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.studio-action-primary:hover { opacity: 0.9; }
+
+/* Tab strip */
+.studio-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 20px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+
+.studio-tab {
+  font-size: 12px;
+  padding: 10px 14px;
+  color: var(--text-muted);
+  border: none;
+  background: transparent;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.15s;
+}
+.studio-tab:hover { color: var(--text-main); }
+.studio-tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+}
+.studio-tab-count {
+  font-size: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 0 6px;
+}
+.studio-tab-count.urgent {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
+/* Studio body */
+.studio-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Content Studio — chat 2fr, brief 1fr */
+.content-studio-split {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  height: 100%;
+}
+
+/* Email Studio — 50/50 */
+.email-studio-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: 100%;
+}
+
+/* Studio full-panel (for non-chat tabs) */
+.studio-full-panel {
+  height: 100%;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+/* ActiveTicketIndicator — studio action button */
+.active-ticket-studio-btn {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  background: var(--primary-soft, rgba(99,102,241,0.1));
+  color: var(--primary);
+  transition: opacity 0.15s;
+}
+.active-ticket-studio-btn:hover { opacity: 0.8; }
