@@ -48,16 +48,6 @@ export default function EmailBuilderPreview({ html, patchedBlock, statusMessage,
     URL.revokeObjectURL(url);
   }
 
-  function handleSendTest() {
-    const email = window.prompt(t('emailBuilder.sendTest') + ':');
-    if (!email || !html) return;
-    fetch(`${import.meta.env.VITE_API_URL || '/api'}/emails/send-test`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: email, html }),
-    }).catch(() => {});
-  }
-
   function handleSaveTemplate() {
     if (!html || !projectId) return;
     fetch(`${import.meta.env.VITE_API_URL || '/api'}/projects/${projectId}/emails`, {

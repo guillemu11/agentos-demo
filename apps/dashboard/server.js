@@ -4176,7 +4176,7 @@ app.post('/api/emails/send-test', requireAuth, async (req, res) => {
 
         const transporter = nodemailer.createTransport({
             host: smtpHost,
-            port: parseInt(process.env.SMTP_PORT || '587'),
+            port: parseInt(process.env.SMTP_PORT || '587', 10),
             secure: process.env.SMTP_SECURE === 'true',
             auth: {
                 user: process.env.SMTP_USER,
@@ -4368,6 +4368,34 @@ app.post('/api/knowledge/ingest-email-blocks', requireAuth, async (req, res) => 
         if (!isKBReady()) return res.status(503).json({ error: 'Knowledge base not configured. Set Gemini and Pinecone API keys in Settings.' });
         const result = await ingestEmailBlocks(pool, anthropic);
         res.json(result);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/knowledge/email-blocks — List all Emirates email blocks with HTML for Block Library
+app.get('/api/knowledge/email-blocks', requireAuth, async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT kd.id, kd.title, kd.metadata, kc.content
+             FROM knowledge_documents kd
+             JOIN knowledge_chunks kc ON kc.document_id = kd.id AND kc.chunk_index = 0
+             WHERE kd.source_type = 'email-block'
+             ORDER BY kd.title`
+        );
+        const blocks = result.rows.map(row => {
+            const htmlMarker = '--- HTML SOURCE ---\n';
+            const markerIdx = row.content.indexOf(htmlMarker);
+            const html = markerIdx >= 0 ? row.content.slice(markerIdx + htmlMarker.length) : '';
+            return {
+                id: row.metadata?.block_id || String(row.id),
+                title: row.title,
+                category: row.metadata?.category || 'content',
+                description: row.metadata?.description || '',
+                html,
+            };
+        });
+        res.json({ blocks });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

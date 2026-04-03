@@ -113,7 +113,7 @@ export default function VariantPreviewModal({ html, contentVariants, onClose }) 
 
         <div className="variant-modal-footer">
           {sentCount > 0 && (
-            <span className="variant-modal-sent">✓ {sentCount} enviado(s)</span>
+            <span className="variant-modal-sent">✓ {t('emailBuilder.sentCount').replace('{n}', sentCount)}</span>
           )}
           <input
             className="variant-modal-email-input"
