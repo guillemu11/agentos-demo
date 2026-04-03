@@ -25,6 +25,8 @@ import SettingsPage from './pages/SettingsPage.jsx'
 import ToolDetail from './pages/ToolDetail.jsx'
 import KnowledgeBase from './pages/KnowledgeBase.jsx'
 import AutoResearch from './pages/AutoResearch.jsx'
+import ContentStudioPage from './pages/ContentStudioPage.jsx';
+import EmailStudioPage from './pages/EmailStudioPage.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -118,6 +120,9 @@ createRoot(document.getElementById('root')).render(
                       <Route path="/research/:sessionId" element={<AutoResearch />} />
                       <Route path="/settings" element={<SettingsPage />} />
                     </Route>
+                    {/* Studio routes — full-screen, no sidebar */}
+                    <Route path="/workspace/agent/content-agent/studio" element={<ContentStudioPage />} />
+                    <Route path="/workspace/agent/html-developer/studio" element={<EmailStudioPage />} />
                   </Routes>
                 )}
               </AuthGate>
