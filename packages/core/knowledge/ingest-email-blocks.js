@@ -1,167 +1,143 @@
 /**
  * ingest-email-blocks.js
  *
- * One-time (idempotent) ingestion of Emirates email design blocks into
- * Pinecone namespace 'email-blocks'.
+ * Dynamic ingestion of Emirates email design blocks into Pinecone namespace
+ * 'email-blocks'. Reads all .html files from email_blocks/ directory, uses
+ * Claude Haiku to generate semantic descriptions, then ingests each block.
  *
+ * Idempotent: clears the namespace and re-ingests from scratch on every call.
  * Called by: POST /api/knowledge/ingest-email-blocks
- * Reuses:    ingestDocument() from ingestion.js
  */
 
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { ingestDocument } from './ingestion.js';
+import { ingestDocument, deleteDocument } from './ingestion.js';
+import { deleteNamespace } from '../ai-providers/pinecone.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BLOCKS_DIR = path.resolve(__dirname, '../../../apps/dashboard/public/email-blocks');
+const BLOCKS_DIR = path.resolve(__dirname, '../../../email_blocks');
 
-const EMAIL_BLOCKS = [
-  {
-    blockId: 'emirates-preheader-v1',
-    title: 'Emirates Preheader v1',
-    type: 'preheader',
-    file: 'emirates-preheader-v1.html',
-    description: 'Visually hidden preheader text block for Emirates emails. Controls the preview text shown in email client inbox before opening. Uses display:none with max-height:0 technique. Supports {{PREHEADER_TEXT}} placeholder.',
-  },
-  {
-    blockId: 'emirates-header-v1',
-    title: 'Emirates Header v1',
-    type: 'header',
-    file: 'emirates-header-v1.html',
-    description: 'Emirates email header block. Two-row structure: top grey bar with "View online" link, below dark (#333333) nav bar with Emirates red logo on left and member tier + Skywards Miles balance on right. Supports: {{VIEW_ONLINE_URL}}, {{LOGO_URL}}, {{ACCOUNT_URL}}, {{MEMBER_TIER}}, {{MEMBER_MILES}} placeholders.',
-  },
-  {
-    blockId: 'emirates-body-copy-v1',
-    title: 'Emirates Body Copy v1',
-    type: 'body-copy',
-    file: 'emirates-body-copy-v1.html',
-    description: 'Emirates email main body copy block. Centered paragraph text in HelveticaNeue-Light 14px, color #151515, max-width 642px. Used for personalized greeting and introductory promotional message. Supports {{BODY_COPY_TEXT}} placeholder.',
-  },
-  {
-    blockId: 'emirates-product-cards-v1',
-    title: 'Emirates Product Cards v1',
-    type: 'product-cards',
-    file: 'emirates-product-cards-v1.html',
-    description: 'Emirates 3-column product cards grid (spend Miles theme). Each card has: circular image 172x172px, bold title, description text. Cards in original email: Save more with Cash+Miles, Turn Miles into memories, Let Miles take you places. Responsive: stacks on mobile. Supports: {{CARD1_TITLE}}, {{CARD1_IMAGE}}, {{CARD1_URL}}, {{CARD1_DESCRIPTION}} (and CARD2, CARD3 variants).',
-  },
-  {
-    blockId: 'emirates-product-cards-v2',
-    title: 'Emirates Product Cards v2',
-    type: 'product-cards',
-    file: 'emirates-product-cards-v2.html',
-    description: 'Emirates 3-column product cards grid (earn Miles theme). Second variant of the product cards block. Cards in original email: Drive and earn, Travel beyond our network, Shop and earn. Same structure as v1, different content focus. Responsive: stacks on mobile. Supports: {{CARD1_TITLE}}, {{CARD1_IMAGE}}, {{CARD1_URL}}, {{CARD1_DESCRIPTION}} (and CARD2, CARD3 variants).',
-  },
-  {
-    blockId: 'emirates-footer-v1',
-    title: 'Emirates Footer v1',
-    type: 'footer',
-    file: 'emirates-footer-v1.html',
-    description: 'Emirates email footer block. Dark background (#333333). Left column: Unsubscribe, Contact us, Privacy policy links in grey (#a9a9a9) + copyright notice in white. Right column: Emirates logo bug in red (#d10911) box. Supports: {{UNSUBSCRIBE_URL}}, {{CONTACT_URL}}, {{PRIVACY_URL}}, {{LOGO_URL}}, {{YEAR}} placeholders.',
-  },
-  {
-    blockId: 'emirates-terms-v1',
-    title: 'Emirates Terms & Conditions v1',
-    type: 'terms',
-    file: 'emirates-terms-v1.html',
-    description: 'Emirates email legal disclaimers block. Two sections: 1) Skywards account security notice with links to manage account on emirates.com and abuse reporting email. 2) Corporate sender identity disclosure (Emirates Group, Dubai, UAE). Small grey text (#666666) 12px. Supports {{YEAR}} placeholder.',
-  },
+const HAIKU_ANALYSIS_PROMPT = `Analyze this Emirates Airlines email HTML block and return ONLY a valid JSON object with these fields:
 
-  // ── From email #2: Upgrade Offer ──────────────────────────────────────────
+{
+  "title": "Human-readable title in Spanish (e.g. 'CTA Rojo — Botón de acción Emirates')",
+  "description": "3-5 sentence semantic description in Spanish: what the block shows visually, when to use it, typical position in email, design tokens used, SFMC variable placeholders present",
+  "category": "one of: header, hero, body-copy, section-title, story, offer, cta, article, infographic, card, columns, flight, partner, footer",
+  "position": "where in email: top | body | footer | any",
+  "design_tokens": {
+    "primary_color": "main hex color used (e.g. #c60c30)",
+    "text_color": "main text color",
+    "background_color": "background color",
+    "font": "font family name"
+  },
+  "sfmc_variables": ["array of SFMC variable patterns found, e.g. '%%=v(variable_name)=%%'"],
+  "compatible_with": ["array of category names that work well immediately before or after this block"]
+}
 
-  {
-    blockId: 'emirates-section-heading-v1',
-    title: 'Emirates Section Heading v1',
-    type: 'section-heading',
-    file: 'emirates-section-heading-v1.html',
-    description: 'Emirates email section heading block. Two rows: 1) Small uppercase label (10px, letter-spacing 4px, HelveticaNeue-Bold) — e.g. "UPGRADE YOUR JOURNEY". 2) Large headline (36px Emirates-Bold) — e.g. "Enjoy a new level of service". Centered, max-width 642px. Used above hero images or content sections. Supports: {{SECTION_LABEL}}, {{SECTION_HEADLINE}} placeholders.',
-  },
-  {
-    blockId: 'emirates-hero-banner-v1',
-    title: 'Emirates Hero Banner v1',
-    type: 'hero',
-    file: 'emirates-hero-banner-v1.html',
-    description: 'Emirates email hero/masthead image block. Full-width clickable image (max 642px) with border-radius 3px, box-shadow, and responsive width. Used as the main visual after the section heading to establish the campaign theme. Supports: {{HERO_URL}}, {{HERO_IMAGE}}, {{HERO_ALT}} placeholders.',
-  },
-  {
-    blockId: 'emirates-cta-button-v1',
-    title: 'Emirates CTA Button v1',
-    type: 'cta',
-    file: 'emirates-cta-button-v1.html',
-    description: 'Emirates email primary CTA button block. Single full-width red button (#c60c30) centered in the email. HelveticaNeue-Bold 16px white text, 10px 20px padding, border-radius 3px, subtle box-shadow. Used as the main call-to-action after body copy. Supports: {{CTA_URL}}, {{CTA_TEXT}} placeholders.',
-  },
-  {
-    blockId: 'emirates-partner-module-v1',
-    title: 'Emirates Partner Module v1',
-    type: 'partner-module',
-    file: 'emirates-partner-module-v1.html',
-    description: 'Emirates email 2-column partner/product showcase card. Left column (185px): product image. Right column (395px): bold title (24px Emirates-Bold), red separator line (#c60c30), description text (14px), and an outlined "Learn more" button with dark border. Card has border, shadow and rounded corners. Used to highlight a service, product or partnership. Supports: {{IMAGE_URL}}, {{IMAGE_SRC}}, {{IMAGE_ALT}}, {{TITLE}}, {{TITLE_URL}}, {{DESCRIPTION}}, {{BUTTON_URL}}, {{BUTTON_TEXT}} placeholders.',
-  },
-  {
-    blockId: 'emirates-icon-text-card-v1',
-    title: 'Emirates Icon Text Card v1',
-    type: 'info-card',
-    file: 'emirates-icon-text-card-v1.html',
-    description: 'Emirates email informational card with icon + text layout. Left column (12%, ~55px): small square icon image. Right column (88%): bold title followed by description text and a "Learn more" inline link. Card has border, shadow and rounded corners. Used for secondary information, travel updates, bonus offers, or notices. Supports: {{ICON_URL}}, {{ICON_SRC}}, {{TITLE}}, {{DESCRIPTION}}, {{LINK_URL}}, {{LINK_TEXT}} placeholders.',
-  },
-];
+Return ONLY the JSON. No explanation, no markdown, no code fences.
+
+HTML:
+`;
 
 /**
- * Ingest all Emirates email blocks into the knowledge base.
- * Idempotent: skips blocks already indexed (checks by title in knowledge_documents).
+ * Use Claude Haiku to analyze an HTML block and generate semantic metadata.
+ * @param {object} anthropic - Initialized Anthropic client
+ * @param {string} filename - HTML filename (for fallback name)
+ * @param {string} html - Raw HTML content
+ * @returns {object} metadata JSON
+ */
+async function analyzeBlock(anthropic, filename, html) {
+    const response = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        messages: [{
+            role: 'user',
+            content: HAIKU_ANALYSIS_PROMPT + html,
+        }],
+    });
+
+    const text = response.content[0].text.trim();
+    try {
+        return JSON.parse(text);
+    } catch {
+        // Fallback if JSON parse fails — extract from markdown fence
+        const match = text.match(/```(?:json)?\s*([\s\S]+?)```/);
+        if (match) return JSON.parse(match[1].trim());
+        throw new Error(`Haiku returned non-JSON for ${filename}: ${text.slice(0, 200)}`);
+    }
+}
+
+/**
+ * Ingest all Emirates email blocks from email_blocks/ directory.
+ * Clears the namespace first (full reset), then re-ingests every .html file.
  *
  * @param {import('pg').Pool} pool
- * @returns {{ ingested: number, skipped: number, errors: string[] }}
+ * @param {import('@anthropic-ai/sdk').Anthropic} anthropic
+ * @returns {{ ingested: number, errors: string[] }}
  */
-export async function ingestEmailBlocks(pool) {
-  const results = { ingested: 0, skipped: 0, errors: [] };
+export async function ingestEmailBlocks(pool, anthropic) {
+    const results = { ingested: 0, errors: [] };
 
-  for (const block of EMAIL_BLOCKS) {
-    try {
-      // Idempotency check: skip if already indexed
-      const existing = await pool.query(
-        `SELECT id FROM knowledge_documents WHERE title = $1 AND source_type = 'email-block' LIMIT 1`,
-        [block.title]
-      );
-      if (existing.rows.length > 0) {
-        console.log(`[email-blocks] Skipping "${block.title}" (already indexed)`);
-        results.skipped++;
-        continue;
-      }
+    // Step 1: Clear existing email-blocks from Pinecone and PostgreSQL
+    console.log('[email-blocks] Clearing existing email-blocks namespace...');
+    await deleteNamespace('email-blocks');
 
-      // Read HTML file
-      const filePath = path.join(BLOCKS_DIR, block.file);
-      const htmlSource = fs.readFileSync(filePath, 'utf-8');
-
-      // Content = semantic description + HTML source
-      // This ensures the embedding captures both purpose and code structure
-      const content = `${block.description}\n\n--- HTML SOURCE ---\n${htmlSource}`;
-
-      await ingestDocument(pool, {
-        title: block.title,
-        content,
-        namespace: 'email-blocks',
-        sourceType: 'email-block',
-        metadata: {
-          block_id: block.blockId,
-          type: block.type,
-          brand: 'emirates',
-          version: 'v1',
-          responsive: true,
-          industry: 'aviation',
-          style: 'premium',
-          description: block.description,
-          file: block.file,
-        },
-      });
-
-      console.log(`[email-blocks] Ingested "${block.title}"`);
-      results.ingested++;
-    } catch (err) {
-      console.error(`[email-blocks] Error ingesting "${block.title}":`, err.message);
-      results.errors.push(`${block.title}: ${err.message}`);
+    const existing = await pool.query(
+        `SELECT id FROM knowledge_documents WHERE source_type = 'email-block'`
+    );
+    for (const row of existing.rows) {
+        await deleteDocument(pool, row.id);
     }
-  }
+    console.log(`[email-blocks] Cleared ${existing.rows.length} existing documents.`);
 
-  return results;
+    // Step 2: Read all .html files from email_blocks/ directory
+    if (!fs.existsSync(BLOCKS_DIR)) {
+        throw new Error(`email_blocks/ directory not found at: ${BLOCKS_DIR}`);
+    }
+    const files = fs.readdirSync(BLOCKS_DIR).filter(f => f.endsWith('.html'));
+    console.log(`[email-blocks] Found ${files.length} HTML files to ingest.`);
+
+    // Step 3: Analyze and ingest each block
+    for (const file of files) {
+        try {
+            const filePath = path.join(BLOCKS_DIR, file);
+            const html = fs.readFileSync(filePath, 'utf-8');
+            const name = file.replace('.html', '');
+
+            console.log(`[email-blocks] Analyzing ${file}...`);
+            const meta = await analyzeBlock(anthropic, file, html);
+
+            // Content = semantic description + HTML source (for chunk embedding)
+            const content = `${meta.description}\n\n--- HTML SOURCE ---\n${html}`;
+
+            await ingestDocument(pool, {
+                title: meta.title || name,
+                content,
+                namespace: 'email-blocks',
+                sourceType: 'email-block',
+                metadata: {
+                    block_id: name,
+                    category: meta.category || 'unknown',
+                    position: meta.position || 'any',
+                    design_tokens: meta.design_tokens || {},
+                    sfmc_variables: meta.sfmc_variables || [],
+                    compatible_with: meta.compatible_with || [],
+                    description: meta.description,
+                    file,
+                    brand: 'emirates',
+                    agent_modes: ['assemble'],
+                },
+            });
+
+            console.log(`[email-blocks] ✓ Ingested "${meta.title}" (${meta.category})`);
+            results.ingested++;
+        } catch (err) {
+            console.error(`[email-blocks] ✗ Error on ${file}:`, err.message);
+            results.errors.push(`${file}: ${err.message}`);
+        }
+    }
+
+    console.log(`[email-blocks] Done. Ingested: ${results.ingested}, Errors: ${results.errors.length}`);
+    return results;
 }
