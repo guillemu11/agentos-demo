@@ -82,7 +82,9 @@ async function analyzeBlock(anthropic, filename, htmlContent) {
  *
  * @param {import('pg').Pool} pool
  * @param {import('@anthropic-ai/sdk').Anthropic} anthropic
- * @returns {{ ingested: number, errors: string[] }}
+ * @returns {{ ingested: number, skipped: number, errors: string[] }}
+ * @note `skipped` is always 0 in this implementation — the endpoint performs a full
+ *   clear-and-reingest on every call, so there is no idempotency skip logic.
  */
 export async function ingestEmailBlocks(pool, anthropic) {
     if (!anthropic) throw new Error('[email-blocks] Anthropic client is required');
