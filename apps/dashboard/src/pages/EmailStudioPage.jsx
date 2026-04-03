@@ -1,0 +1,173 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLanguage } from '../i18n/LanguageContext.jsx';
+import { useAgentPipelineSession } from '../hooks/useAgentPipelineSession.js';
+import AgentChatSwitcher from '../components/agent-views/shared/AgentChatSwitcher.jsx';
+import EmailBuilderPreview from '../components/EmailBuilderPreview.jsx';
+import AgentTicketsPanel from '../components/agent-views/shared/AgentTicketsPanel.jsx';
+import HandoffModal from '../components/HandoffModal.jsx';
+
+const API_URL = import.meta.env.VITE_API_URL || '/api';
+const AGENT_ID = 'html-developer';
+
+export default function EmailStudioPage() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { t } = useLanguage();
+  const ticketId = searchParams.get('ticketId');
+
+  const [agent, setAgent] = useState(null);
+  const [activeTab, setActiveTab] = useState('chat');
+
+  // Builder state
+  const [builderHtml, setBuilderHtml] = useState('');
+  const [patchedBlock, setPatchedBlock] = useState(null);
+  const [builderStatus, setBuilderStatus] = useState('');
+  const [chatInput, setChatInput] = useState('');
+
+  const pipeline = useAgentPipelineSession(AGENT_ID);
+
+  // Load agent data on mount
+  useEffect(() => {
+    fetch(`${API_URL}/agents/${AGENT_ID}`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setAgent(data); })
+      .catch(() => {});
+  }, []);
+
+  // Pre-select ticket from URL param once tickets are loaded
+  useEffect(() => {
+    if (!ticketId || !pipeline.tickets.length || pipeline.selectedTicket) return;
+    const ticket = pipeline.tickets.find(t => String(t.id) === ticketId);
+    if (ticket) pipeline.selectTicket(ticket);
+  }, [ticketId, pipeline.tickets, pipeline.selectedTicket]);
+
+  const handleExportHtml = () => {
+    if (!builderHtml) return;
+    const blob = new Blob([builderHtml], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'email.html';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const tabs = [
+    { id: 'chat',      label: t('studio.chat') },
+    { id: 'blocks',    label: t('studio.blockLibrary') },
+    { id: 'templates', label: t('studio.templates') },
+    { id: 'tickets',   label: t('tickets.tab'), count: pipeline.tickets.length, urgent: pipeline.hasUrgentTickets },
+  ];
+
+  if (!agent) return <div className="studio-page studio-loading">Loading...</div>;
+
+  return (
+    <div className="studio-page">
+      {/* Top bar */}
+      <div className="studio-topbar">
+        <button className="studio-back-btn" onClick={() => navigate('/app/workspace/agent/html-developer')}>
+          {t('studio.backToAgent')}
+        </button>
+        {pipeline.selectedTicket && (
+          <span className="studio-campaign-badge">{pipeline.selectedTicket.project_name}</span>
+        )}
+        <span className="studio-status-chip studio-status-building">● {t('studio.building')}</span>
+        <div className="studio-topbar-actions">
+          <button className="studio-action-primary" onClick={handleExportHtml} disabled={!builderHtml}>
+            {t('studio.exportHtml')}
+          </button>
+        </div>
+      </div>
+
+      {/* Tab strip */}
+      <div className="studio-tabs-bar">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            className={`studio-tab ${activeTab === tab.id ? 'active' : ''}`}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+            {tab.count != null && (
+              <span className={`studio-tab-count${tab.urgent ? ' urgent' : ''}`}>{tab.count}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Body */}
+      <div className="studio-body">
+        {activeTab === 'chat' && (
+          <div className="email-studio-split">
+            <AgentChatSwitcher
+              agent={agent}
+              selectedTicket={pipeline.selectedTicket}
+              pipelineData={pipeline.pipelineData}
+              currentSession={pipeline.currentSession}
+              completedSessions={pipeline.completedSessions}
+              agents={pipeline.agents}
+              onClearTicket={pipeline.clearTicket}
+              onHandoffRequest={pipeline.setHandoffSession}
+              externalInput={chatInput}
+              onExternalInputConsumed={() => setChatInput('')}
+              onHtmlGenerated={(html) => {
+                setBuilderHtml(html);
+                setPatchedBlock(null);
+                setBuilderStatus('Email generado');
+                setTimeout(() => setBuilderStatus(''), 3000);
+              }}
+              onHtmlPatched={(blockName, html) => {
+                setBuilderHtml(html);
+                setPatchedBlock(blockName);
+                setBuilderStatus(`${blockName} actualizado`);
+                setTimeout(() => { setPatchedBlock(null); setBuilderStatus(''); }, 2000);
+              }}
+              onHtmlBlock={(block) => {
+                setBuilderHtml(prev => prev + block.htmlSource);
+                setBuilderStatus(`${block.title} añadido`);
+                setTimeout(() => setBuilderStatus(''), 3000);
+              }}
+            />
+            <EmailBuilderPreview
+              html={builderHtml}
+              patchedBlock={patchedBlock}
+              statusMessage={builderStatus}
+              onBlockClick={(blockName) => setChatInput(`[bloque: ${blockName}] `)}
+            />
+          </div>
+        )}
+        {activeTab === 'tickets' && (
+          <div className="studio-full-panel">
+            <AgentTicketsPanel
+              tickets={pipeline.tickets}
+              selectedTicket={pipeline.selectedTicket}
+              onSelectTicket={pipeline.selectTicket}
+              onClearTicket={pipeline.clearTicket}
+              agentId={AGENT_ID}
+            />
+          </div>
+        )}
+        {(activeTab === 'blocks' || activeTab === 'templates') && (
+          <div className="studio-full-panel" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+            <p style={{ marginBottom: 12 }}>Vuelve al agente para acceder a este panel.</p>
+            <button className="studio-back-btn" onClick={() => navigate('/app/workspace/agent/html-developer')}>
+              {t('studio.backToAgent')}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {pipeline.handoffSession && (
+        <HandoffModal
+          projectId={pipeline.selectedTicket?.project_id}
+          session={pipeline.handoffSession}
+          stages={pipeline.stages}
+          agents={pipeline.agents}
+          onClose={() => pipeline.setHandoffSession(null)}
+          onComplete={pipeline.onHandoffComplete}
+        />
+      )}
+    </div>
+  );
+}
