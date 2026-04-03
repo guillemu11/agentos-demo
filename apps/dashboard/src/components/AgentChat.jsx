@@ -4,52 +4,11 @@ import { useGeminiLive } from '../hooks/useGeminiLive.js';
 import renderMarkdown from '../utils/renderMarkdown.js';
 import { Mic, MicOff, PhoneOff, Loader, Send, FileText } from 'lucide-react';
 import EmailPreview from './EmailPreview.jsx';
+import { applyPatch } from '../utils/emailTemplate.js';
 
 const FILE_URL = (path) => `${import.meta.env.VITE_API_URL || '/api'}/kb-files/${path}`;
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
-
-function applyPatch(currentHtml, blockName, patchHtml) {
-    if (!currentHtml) return patchHtml;
-
-    // Find block by data-block-name attribute (string-based, preserves MSO comments)
-    const marker = `data-block-name="${blockName}"`;
-    const markerIdx = currentHtml.indexOf(marker);
-    if (markerIdx === -1) return currentHtml;
-
-    // Walk backwards to find the opening <table of this block
-    let tableStart = markerIdx;
-    while (tableStart > 0 && currentHtml[tableStart] !== '<') {
-        tableStart--;
-    }
-
-    // Walk forward to find the matching </table> using depth-tracking
-    const lower = currentHtml.toLowerCase();
-    let depth = 0;
-    let i = tableStart;
-    let tableEnd = -1;
-
-    while (i < currentHtml.length) {
-        const nextChar = lower[i + 6];
-        if (lower.slice(i, i + 6) === '<table' && (nextChar === '>' || nextChar === ' ' || nextChar === '\n' || nextChar === '\t' || nextChar === '\r' || nextChar === undefined)) {
-            depth++;
-            i += 6;
-        } else if (lower.slice(i, i + 8) === '</table>') {
-            depth--;
-            if (depth === 0) {
-                tableEnd = i + 8;
-                break;
-            }
-            i += 8;
-        } else {
-            i++;
-        }
-    }
-
-    if (tableEnd === -1) return currentHtml;
-
-    return currentHtml.slice(0, tableStart) + patchHtml + currentHtml.slice(tableEnd);
-}
 
 export default function AgentChat({ agentId, agentName, agentAvatar, externalInput, onExternalInputConsumed, onHtmlGenerated, onHtmlPatched, currentHtml }) {
     const { t, lang } = useLanguage();

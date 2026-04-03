@@ -158,3 +158,51 @@ export function splitIntoBlocks(html) {
 
     return blocks;
 }
+
+/**
+ * Applies a block patch to the full email HTML using string replacement.
+ * Finds the block by data-block-name attribute and replaces it with patchHtml.
+ * String-based (no DOMParser) to preserve MSO conditional comments for Outlook.
+ *
+ * @param {string} currentHtml - Full email HTML containing the block to patch
+ * @param {string} blockName - Value of data-block-name attribute to find
+ * @param {string} patchHtml - New HTML to replace the found block
+ * @returns {string} Updated full email HTML
+ */
+export function applyPatch(currentHtml, blockName, patchHtml) {
+    if (!currentHtml) return patchHtml;
+
+    const marker = `data-block-name="${blockName}"`;
+    const markerIdx = currentHtml.indexOf(marker);
+    if (markerIdx === -1) return currentHtml;
+
+    let tableStart = markerIdx;
+    while (tableStart > 0 && currentHtml[tableStart] !== '<') {
+        tableStart--;
+    }
+
+    const lower = currentHtml.toLowerCase();
+    let depth = 0;
+    let i = tableStart;
+    let tableEnd = -1;
+
+    while (i < currentHtml.length) {
+        const nextChar = lower[i + 6];
+        if (lower.slice(i, i + 6) === '<table' && (nextChar === '>' || nextChar === ' ' || nextChar === '\n' || nextChar === '\t' || nextChar === '\r' || nextChar === undefined)) {
+            depth++;
+            i += 6;
+        } else if (lower.slice(i, i + 8) === '</table>') {
+            depth--;
+            if (depth === 0) {
+                tableEnd = i + 8;
+                break;
+            }
+            i += 8;
+        } else {
+            i++;
+        }
+    }
+
+    if (tableEnd === -1) return currentHtml;
+    return currentHtml.slice(0, tableStart) + patchHtml + currentHtml.slice(tableEnd);
+}

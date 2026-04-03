@@ -13,7 +13,7 @@ const API_URL = import.meta.env.VITE_API_URL || '/api';
  * @param {Function} [options.loadConversation] - async () => messages[]
  * @param {Function} [options.onStreamEvent] - (event) => void for custom SSE events
  */
-export function useStreamingChat({ endpoint, buildBody, onResponseHeaders, loadConversation, onStreamEvent }) {
+export function useStreamingChat({ endpoint, buildBody, onResponseHeaders, loadConversation, onStreamEvent, onStreamComplete }) {
     const [messages, setMessages] = useState([]);
     const [streaming, setStreaming] = useState(false);
     const [ragSources, setRagSources] = useState([]);
@@ -94,9 +94,11 @@ export function useStreamingChat({ endpoint, buildBody, onResponseHeaders, loadC
                                 return updated;
                             });
                         } else if (parsed.html_sources) {
+                            console.log('[useStreamingChat] html_sources received:', parsed.html_sources.length);
                             const newMedia = parsed.html_sources
                                 .filter(s => s.htmlSource)
                                 .map(s => ({ mediaType: 'email_html', htmlSource: s.htmlSource, title: s.title }));
+                            console.log('[useStreamingChat] newMedia:', newMedia.length);
                             if (newMedia.length > 0) {
                                 setMessages(prev => {
                                     const updated = [...prev];
@@ -122,6 +124,7 @@ export function useStreamingChat({ endpoint, buildBody, onResponseHeaders, loadC
                     } catch {}
                 }
             }
+            if (onStreamComplete && fullResponse) onStreamComplete(fullResponse);
         } catch (err) {
             if (err.name !== 'AbortError') {
                 setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${err.message}` }]);
@@ -129,7 +132,7 @@ export function useStreamingChat({ endpoint, buildBody, onResponseHeaders, loadC
         } finally {
             setStreaming(false);
         }
-    }, [endpoint, buildBody, onResponseHeaders, onStreamEvent, streaming]);
+    }, [endpoint, buildBody, onResponseHeaders, onStreamEvent, onStreamComplete, streaming]);
 
     const triggerInitialize = useCallback(async (initEndpoint) => {
         if (streaming) return;

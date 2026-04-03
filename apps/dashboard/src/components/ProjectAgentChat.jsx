@@ -3,16 +3,18 @@ import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { useStreamingChat } from '../hooks/useStreamingChat.js';
 import renderMarkdown from '../utils/renderMarkdown.js';
 import EmailPreview from './EmailPreview.jsx';
+import { applyPatch } from '../utils/emailTemplate.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-export default function ProjectAgentChat({ projectId, session, completedSessions, stages, agents, pipelineStatus, onHandoffRequest, onViewCompletedStage, onHtmlBlock }) {
+export default function ProjectAgentChat({ projectId, session, completedSessions, stages, agents, pipelineStatus, onHandoffRequest, onViewCompletedStage, onHtmlBlock, onHtmlGenerated, onHtmlPatched, currentHtml }) {
     const { t } = useLanguage();
     const [input, setInput] = useState('');
     const [handoffSuggestion, setHandoffSuggestion] = useState(null);
     const [initializing, setInitializing] = useState(false);
     const messagesEndRef = useRef(null);
     const initRef = useRef(false);
+    const currentHtmlRef = useRef('');
 
     const agentMap = {};
     (agents || []).forEach(a => { agentMap[a.id] = a; });
@@ -30,8 +32,28 @@ export default function ProjectAgentChat({ projectId, session, completedSessions
         onStreamEvent: (event) => {
             if (event.handoff_suggestion) setHandoffSuggestion(event.reason);
             if (event.html_sources?.length > 0 && onHtmlBlock) onHtmlBlock(event.html_sources[0]);
-        }
+        },
+        onStreamComplete: (fullResponse) => {
+            const patchMatch = fullResponse.match(/<!--PATCH:([^>]+)-->([\s\S]+)/);
+            if (patchMatch) {
+                const [, blockName, patchHtml] = patchMatch;
+                if (onHtmlPatched) {
+                    const patched = applyPatch(currentHtmlRef.current || '', blockName, patchHtml);
+                    currentHtmlRef.current = patched;
+                    onHtmlPatched(blockName, patched);
+                }
+            } else if (fullResponse.includes('<!DOCTYPE') || fullResponse.includes('<html')) {
+                if (onHtmlGenerated) {
+                    currentHtmlRef.current = fullResponse;
+                    onHtmlGenerated(fullResponse);
+                }
+            }
+        },
     });
+
+    useEffect(() => {
+        if (currentHtml) currentHtmlRef.current = currentHtml;
+    }, [currentHtml]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

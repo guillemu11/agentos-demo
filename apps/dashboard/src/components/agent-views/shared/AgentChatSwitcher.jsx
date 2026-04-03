@@ -37,6 +37,9 @@ export default function AgentChatSwitcher({ agent, selectedTicket, pipelineData,
                         pipelineStatus={pipelineData.status}
                         onHandoffRequest={onHandoffRequest}
                         onHtmlBlock={onHtmlBlock}
+                        onHtmlGenerated={onHtmlGenerated}
+                        onHtmlPatched={onHtmlPatched}
+                        currentHtml={currentHtml}
                     />
                 </div>
             );
