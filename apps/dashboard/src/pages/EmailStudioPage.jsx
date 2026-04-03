@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { useAgentPipelineSession } from '../hooks/useAgentPipelineSession.js';
@@ -7,6 +7,7 @@ import EmailBuilderPreview from '../components/EmailBuilderPreview.jsx';
 import AgentTicketsPanel from '../components/agent-views/shared/AgentTicketsPanel.jsx';
 import HandoffModal from '../components/HandoffModal.jsx';
 import EmailBlocksPanel from '../components/EmailBlocksPanel.jsx';
+import { injectIntoSlot, mergeAiHtmlIntoTemplate, fetchEmailTemplate, splitIntoBlocks } from '../utils/emailTemplate.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const AGENT_ID = 'html-developer';
@@ -21,8 +22,10 @@ export default function EmailStudioPage() {
   const [activeTab, setActiveTab] = useState('chat');
   const [leftTab, setLeftTab] = useState('chat');
 
-  // Builder state
-  const [builderHtml, setBuilderHtml] = useState('');
+  // Builder state — blocks[] tracks manual blocks; aiHtml holds AI-generated full doc
+  const [blocks, setBlocks] = useState([]); // [{id, name, html}]
+  const [aiHtml, setAiHtml] = useState('');
+  const [templateHtml, setTemplateHtml] = useState('');
   const [patchedBlock, setPatchedBlock] = useState(null);
   const [builderStatus, setBuilderStatus] = useState('');
   const [chatInput, setChatInput] = useState('');
@@ -38,6 +41,36 @@ export default function EmailStudioPage() {
       .then(data => { if (data) setAgent(data); })
       .catch(() => {});
   }, []);
+
+  // Load Emirates master template once
+  useEffect(() => {
+    fetchEmailTemplate().then(html => { if (html) setTemplateHtml(html); });
+  }, []);
+
+  // Computed — always up-to-date, no stale state
+  const builderHtml = useMemo(() => {
+    if (aiHtml) return aiHtml;
+    const blocksHtml = blocks.map(b => b.html).join('');
+    if (!blocks.length) return templateHtml || '';
+    if (!templateHtml) return blocksHtml; // show blocks even if template not loaded
+    return injectIntoSlot(templateHtml, blocksHtml);
+  }, [blocks, templateHtml, aiHtml]);
+
+  // Block management
+  const addBlock = (name, html) => {
+    setBlocks(prev => [...prev, { id: Date.now() + Math.random(), name, html }]);
+    setAiHtml('');
+  };
+  const reorderBlock = (from, to) => {
+    if (from === null || from === to) return;
+    setBlocks(prev => {
+      const a = [...prev];
+      const [item] = a.splice(from, 1);
+      a.splice(to, 0, item);
+      return a;
+    });
+  };
+  const removeBlock = (i) => setBlocks(prev => prev.filter((_, idx) => idx !== i));
 
   // Fetch content variants when project changes
   useEffect(() => {
@@ -78,6 +111,28 @@ export default function EmailStudioPage() {
     { id: 'templates', label: t('studio.templates') },
     { id: 'tickets',   label: t('tickets.tab'), count: pipeline.tickets.length, urgent: pipeline.hasUrgentTickets },
   ];
+
+  async function nameBlocksAsync(parsedBlocks) {
+    try {
+      const res = await fetch(`${API_URL}/ai/name-email-blocks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ blocks: parsedBlocks.map(b => ({ id: b.id, html: b.html })) }),
+      });
+      if (!res.ok) return;
+      const { named } = await res.json();
+      setBlocks(prev => prev.map(b => {
+        const match = named.find(n => n.id === b.id);
+        if (!match) return b;
+        const updatedHtml = b.html.replace(
+          /data-block-name="[^"]*"/,
+          `data-block-name="${match.name}"`
+        );
+        return { ...b, name: match.name, html: updatedHtml };
+      }));
+    } catch {}
+  }
 
   if (!agent) return <div className="studio-page studio-loading">Loading...</div>;
 
@@ -142,20 +197,42 @@ export default function EmailStudioPage() {
                   onHandoffRequest={pipeline.setHandoffSession}
                   externalInput={chatInput}
                   onExternalInputConsumed={() => setChatInput('')}
+                  currentHtml={builderHtml}
                   onHtmlGenerated={(html) => {
-                    setBuilderHtml(html);
+                    const merged = mergeAiHtmlIntoTemplate(templateHtml, html);
+                    const parsed = splitIntoBlocks(merged);
+                    if (parsed.length > 0) {
+                      setBlocks(parsed);
+                      setAiHtml('');
+                      nameBlocksAsync(parsed);
+                    } else {
+                      setAiHtml(merged);
+                      setBlocks([]);
+                    }
                     setPatchedBlock(null);
                     setBuilderStatus('Email generado');
                     setTimeout(() => setBuilderStatus(''), 3000);
                   }}
-                  onHtmlPatched={(blockName, html) => {
-                    setBuilderHtml(html);
+                  onHtmlPatched={(blockName, fullPatchedHtml) => {
+                    setBlocks(prev => {
+                      const newBlocks = splitIntoBlocks(fullPatchedHtml);
+                      if (newBlocks.length === 0) return prev;
+                      return newBlocks.map((nb, i) => {
+                        const patchedBlock = prev.find(b =>
+                          b.name === blockName &&
+                          nb.html.includes(`data-block-name="${blockName}"`)
+                        );
+                        if (patchedBlock) return { ...patchedBlock, html: nb.html };
+                        const byPos = prev[i];
+                        return byPos ? { ...byPos, html: nb.html } : nb;
+                      });
+                    });
                     setPatchedBlock(blockName);
                     setBuilderStatus(`${blockName} actualizado`);
                     setTimeout(() => { setPatchedBlock(null); setBuilderStatus(''); }, 2000);
                   }}
                   onHtmlBlock={(block) => {
-                    setBuilderHtml(prev => prev + block.htmlSource);
+                    addBlock(block.title, block.htmlSource);
                     setBuilderStatus(`${block.title} añadido`);
                     setTimeout(() => setBuilderStatus(''), 3000);
                   }}
@@ -164,7 +241,11 @@ export default function EmailStudioPage() {
               {leftTab === 'blocks' && <EmailBlocksPanel />}
             </div>
             <EmailBuilderPreview
-              html={builderHtml}
+              html={blocks.length ? null : builderHtml}
+              blocks={blocks.length ? blocks : null}
+              templateHtml={templateHtml}
+              onReorderBlocks={reorderBlock}
+              onRemoveBlock={removeBlock}
               patchedBlock={patchedBlock}
               statusMessage={builderStatus}
               projectId={pipeline.selectedTicket?.project_id}
@@ -172,7 +253,7 @@ export default function EmailStudioPage() {
               contentReady={contentReady}
               onBlockClick={(blockName) => setChatInput(`[bloque: ${blockName}] `)}
               onBlockDrop={(block) => {
-                setBuilderHtml(prev => prev + block.html);
+                addBlock(block.name, block.html);
                 setBuilderStatus(t('emailBlocks.added').replace('{name}', block.name));
                 setTimeout(() => setBuilderStatus(''), 3000);
               }}
