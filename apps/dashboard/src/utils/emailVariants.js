@@ -7,7 +7,7 @@
  * @returns {string} HTML con variables sustituidas
  */
 export function substituteVariants(html, variant) {
-  if (!html || !variant) return html || '';
+  if (typeof html !== 'string' || !variant) return '';
   return html
     .replace(/%%=v\(@main_header\)=%%/g,  variant.heroHeadline?.value ?? '[[main_header]]')
     .replace(/%%=v\(@preheader\)=%%/g,    variant.preheader?.value    ?? '[[preheader]]')
@@ -23,5 +23,6 @@ export function countApproved(variant) {
   return Object.values(variant).filter(f => f?.status === 'approved').length;
 }
 
-/** Total de campos por variante */
+/** Total de campos por variante (subject, preheader, heroHeadline, bodyCopy, cta).
+ *  subject no tiene var SFMC pero cuenta para el progreso de aprobación. */
 export const FIELDS_PER_VARIANT = 5;
