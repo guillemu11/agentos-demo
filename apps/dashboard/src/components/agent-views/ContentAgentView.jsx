@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { contentAgentData } from '../../data/agentViewMocks.js';
 import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
@@ -31,6 +32,7 @@ const langFlags = {
 
 export default function ContentAgentView({ agent, activeTab: activeTabProp, onTabChange }) {
   const { t, lang } = useLanguage();
+  const navigate = useNavigate();
   const [localTab, setLocalTab] = useState('portfolio');
   const activeTab = activeTabProp !== undefined ? activeTabProp : localTab;
   const setActiveTab = (tab) => {
@@ -100,7 +102,7 @@ export default function ContentAgentView({ agent, activeTab: activeTabProp, onTa
 
   const handleWorkOnTicket = (ticket) => {
     pipeline.selectTicket(ticket);
-    setActiveTab('chat');
+    navigate(`/app/workspace/agent/content-agent/studio?ticketId=${ticket.id}`);
   };
 
   // Image generation state
@@ -134,7 +136,7 @@ export default function ContentAgentView({ agent, activeTab: activeTabProp, onTa
     { id: 'images', label: 'Image Studio', icon: AgentTabIcons.images, count: generatedImages.length },
     { id: 'ab', label: 'A/B Testing', icon: AgentTabIcons.ab },
     { id: 'quality', label: 'Quality Score', icon: AgentTabIcons.quality, count: data.quality.length },
-    { id: 'chat', label: 'Chat', icon: AgentTabIcons.chat },
+    { id: 'chat', label: t('studio.contentStudio'), icon: AgentTabIcons.chat, isStudio: true },
     { id: 'activity', label: 'Activity', icon: AgentTabIcons.activity },
     { id: 'settings', label: t('agentSettings.tab'), icon: AgentTabIcons.settings },
   ];
@@ -192,12 +194,28 @@ export default function ContentAgentView({ agent, activeTab: activeTabProp, onTa
         <KpiCard label={t('contentAgent.approvalRate') || 'Approval Rate'} value={`${data.kpis.approvalRate}%`} color="#10b981" />
       </div>
 
-      <ActiveTicketIndicator selectedTicket={pipeline.selectedTicket} onClear={pipeline.clearTicket} />
+      <ActiveTicketIndicator
+        selectedTicket={pipeline.selectedTicket}
+        onClear={pipeline.clearTicket}
+        studioLabel={t('studio.openContentStudio')}
+        onOpenStudio={() => navigate(`/app/workspace/agent/content-agent/studio${pipeline.selectedTicket ? `?ticketId=${pipeline.selectedTicket.id}` : ''}`)}
+      />
 
       {/* Tabs */}
       <div className="agent-tabs">
         {tabs.map((tab) => (
-          <button key={tab.id} className={`agent-tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
+          <button
+            key={tab.id}
+            className={`agent-tab ${activeTab === tab.id ? 'active' : ''}`}
+            onClick={() => {
+              if (tab.isStudio) {
+                const ticketId = pipeline.selectedTicket?.id;
+                navigate(`/app/workspace/agent/content-agent/studio${ticketId ? `?ticketId=${ticketId}` : ''}`);
+              } else {
+                setActiveTab(tab.id);
+              }
+            }}
+          >
             <span>{tab.icon}</span>
             <span>{tab.label}</span>
             {tab.count != null && <span className={`agent-tab-count${tab.urgent ? ' urgent' : ''}`}>{tab.count}</span>}
