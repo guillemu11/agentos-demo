@@ -228,7 +228,7 @@ initDatabase();
 // ─── Session Middleware ──────────────────────────────────────────────────────
 
 const sessionMiddleware = session({
-    store: new PgSession({ pool, tableName: 'sessions' }),
+    store: new PgSession({ pool, tableName: 'sessions', errorLog: (err) => console.warn('[Session store error]', err.message) }),
     secret: process.env.SESSION_SECRET || 'agentos-dev-secret-change-me',
     resave: false,
     saveUninitialized: false,
@@ -5611,6 +5611,11 @@ app.post('/api/projects/:id/pipeline/handoff', requireAuth, async (req, res) => 
             }
         }
 
+        // Attach content variants if provided by Content Agent
+        if (req.body.variants && typeof req.body.variants === 'object') {
+            handoffData.content_variants = req.body.variants;
+        }
+
         // ── PHASE B: Atomic DB update (inside transaction) ──
         const client = await pool.connect();
         try {
@@ -6217,6 +6222,13 @@ if (process.env.NODE_ENV === 'production') {
         res.sendFile(path.join(__dirname, 'dist', 'index.html'));
     });
 }
+
+process.on('uncaughtException', (err) => {
+    console.error('[Server] Uncaught exception (keeping process alive):', err.message);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('[Server] Unhandled rejection (keeping process alive):', reason?.message || reason);
+});
 
 server.listen(port, () => {
     console.log(`AgentOS API running at http://localhost:${port}`);
