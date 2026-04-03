@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { htmlDeveloperData } from '../../data/agentViewMocks.js';
 import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
@@ -31,6 +32,7 @@ const TYPE_TO_CATEGORY = {
 const BLOCK_CATEGORIES = ['All', 'Header', 'Hero', 'Content', 'CTA', 'Footer'];
 
 export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onTabChange }) {
+  const navigate = useNavigate();
   const { t, lang } = useLanguage();
   const [localTab, setLocalTab] = useState('templates');
   const activeTab = activeTabProp !== undefined ? activeTabProp : localTab;
@@ -78,7 +80,7 @@ export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onT
 
   const handleWorkOnTicket = (ticket) => {
     pipeline.selectTicket(ticket);
-    setActiveTab('builder');
+    navigate(`/app/workspace/agent/html-developer/studio?ticketId=${ticket.id}`);
   };
 
   const blocks = ragBlocks !== null ? ragBlocks : data.blocks;
@@ -88,7 +90,7 @@ export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onT
     { id: 'templates', label: 'Email Templates', icon: AgentTabIcons.templates },
     { id: 'tickets', label: t('tickets.tab'), icon: AgentTabIcons.tickets, count: pipeline.tickets.length, urgent: pipeline.hasUrgentTickets },
     { id: 'blocks', label: 'Block Library', icon: AgentTabIcons.blocks, count: blocksLoading ? null : blocks.length },
-    { id: 'builder', label: t('emailBuilder.tabBuilder') || 'Email Builder', icon: '✉️' },
+    { id: 'builder', label: t('studio.emailStudio'), icon: '✉️', isStudio: true },
     { id: 'chat', label: 'Chat', icon: AgentTabIcons.chat },
     { id: 'activity', label: 'Activity', icon: AgentTabIcons.activity },
     { id: 'settings', label: t('agentSettings.tab'), icon: AgentTabIcons.settings },
@@ -240,12 +242,24 @@ export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onT
         <KpiCard label={t('htmlDev.lastDeployed') || 'Last Deployed'} value={data.kpis.lastDeployed} color="#10b981" />
       </div>
 
-      <ActiveTicketIndicator selectedTicket={pipeline.selectedTicket} onClear={pipeline.clearTicket} />
+      <ActiveTicketIndicator
+        selectedTicket={pipeline.selectedTicket}
+        onClear={pipeline.clearTicket}
+        studioLabel={t('studio.openEmailStudio')}
+        onOpenStudio={() => navigate(`/app/workspace/agent/html-developer/studio${pipeline.selectedTicket ? `?ticketId=${pipeline.selectedTicket.id}` : ''}`)}
+      />
 
       {/* Tabs */}
       <div className="agent-tabs">
         {tabs.map((tab) => (
-          <button key={tab.id} className={`agent-tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
+          <button key={tab.id} className={`agent-tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => {
+              if (tab.isStudio) {
+                const ticketId = pipeline.selectedTicket?.id;
+                navigate(`/app/workspace/agent/html-developer/studio${ticketId ? `?ticketId=${ticketId}` : ''}`);
+              } else {
+                setActiveTab(tab.id);
+              }
+            }}>
             <span>{tab.icon}</span>
             <span>{tab.label}</span>
             {tab.count != null && <span className={`agent-tab-count${tab.urgent ? ' urgent' : ''}`}>{tab.count}</span>}
