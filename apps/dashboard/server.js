@@ -4401,6 +4401,48 @@ app.get('/api/knowledge/email-blocks', requireAuth, async (req, res) => {
     }
 });
 
+// GET /api/email-template — Serve Emirates master template shell
+app.get('/api/email-template', requireAuth, (req, res) => {
+    try {
+        const templatePath = path.join(__dirname, '..', '..', 'email_blocks', 'template_style.html');
+        const html = fs.readFileSync(templatePath, 'utf8');
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.send(html);
+    } catch (err) {
+        res.status(404).json({ error: 'Email template not found' });
+    }
+});
+
+// POST /api/ai/name-email-blocks — Name auto-decomposed email blocks with Haiku
+app.post('/api/ai/name-email-blocks', requireAuth, async (req, res) => {
+    try {
+        const { blocks } = req.body;
+        if (!blocks?.length) return res.json({ named: [] });
+
+        const prompt = blocks.map((b, i) =>
+            `Block ${i + 1} (id: ${b.id}):\n${b.html.slice(0, 600)}`
+        ).join('\n\n---\n\n');
+
+        const response = await anthropic.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 256,
+            messages: [{
+                role: 'user',
+                content: `Analyze these email HTML sections and give each a short descriptive name (2-4 words). Common types: Hero, Header, Offer, CTA, Story, Article, Footer, Body Copy, Partner Block, Columns.\n\nReturn ONLY valid JSON array: [{"id":"...","name":"..."}]\n\n${prompt}`,
+            }],
+        });
+
+        const text = response.content[0].text;
+        const jsonMatch = text.match(/\[[\s\S]+\]/);
+        if (!jsonMatch) return res.json({ named: [] });
+        const named = JSON.parse(jsonMatch[0]);
+        res.json({ named });
+    } catch (err) {
+        console.error('name-email-blocks error:', err.message);
+        res.json({ named: [] }); // silently fail — blocks keep generic names
+    }
+});
+
 // POST /api/knowledge/upload — Upload and ingest a file (image or PDF)
 app.post('/api/knowledge/upload', requireAuth, kbUpload.single('file'), async (req, res) => {
     try {
