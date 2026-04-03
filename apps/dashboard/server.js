@@ -5992,6 +5992,7 @@ app.post('/api/projects/:id/sessions/:sessionId/initialize', requireAuth, async 
             : { context: '', sources: [] };
 
         const agent = {
+            id: session.agent_id,
             name: session.agent_name, role: session.agent_role,
             department: session.agent_department,
             skills: session.agent_skills, tools: session.agent_tools
@@ -6119,6 +6120,7 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
             : { context: '', sources: [], mediaResults: [] };
 
         const agent = {
+            id: session.agent_id,
             name: session.agent_name, role: session.agent_role,
             department: session.agent_department,
             skills: session.agent_skills, tools: session.agent_tools

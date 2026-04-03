@@ -795,6 +795,23 @@ ${project.solution ? `Solution: ${project.solution}` : ''}`;
         prompt += `\n\n${ragContext}`;
     }
 
+    // HTML Developer agent: inject Email Builder protocol so it generates HTML
+    const isHtmlDeveloper = agent.id === 'html-developer'
+        || (agent.name || '').toLowerCase().includes('html')
+        || (agent.role || '').toLowerCase().includes('html developer');
+    if (isHtmlDeveloper) {
+        prompt += `\n\n## HTML Email Builder Protocol — MANDATORY
+You are working inside an email builder UI. When the user asks you to create an email, a template, or any HTML content, you MUST output the complete HTML directly — no prose, no description, just the HTML starting with <!DOCTYPE html>.
+
+Rules:
+1. Always output complete, renderable HTML (starting with <!DOCTYPE html><html>...)
+2. Use Emirates brand: dark red #C01B1B, charcoal #1A1A1A, white #FFFFFF
+3. Use inline CSS only — no <style> blocks
+4. Add data-block-name attribute to each top-level <table> (e.g. data-block-name="Hero Banner")
+5. Use real URLs or inline SVG — never placeholder text like [image here]
+6. When asked to patch/update a specific block, output: <!--PATCH:BlockName-->[complete updated block HTML]`;
+    }
+
     // Content agent: inject BRIEF_UPDATE protocol so the sidebar populates
     const isContentAgent = (agent.name || '').toLowerCase().includes('lucia')
         || (agent.role || '').toLowerCase().includes('content');
