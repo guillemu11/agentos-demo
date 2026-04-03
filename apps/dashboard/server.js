@@ -24,6 +24,7 @@ import { initPinecone, isPineconeReady, describeIndex } from '../../packages/cor
 import multer from 'multer';
 import { generateEodReport } from '../../packages/core/workspace-skills/eod-generator.js';
 import { getAgentProfile } from '../../packages/core/agents/profiles.js';
+import nodemailer from 'nodemailer';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -4117,6 +4118,41 @@ app.post('/api/campaigns/:campaignId/emails/:id/duplicate', requireAuth, async (
         );
 
         res.status(201).json({ id: result.rows[0].id });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/emails/send-test — Send HTML email to a test address
+app.post('/api/emails/send-test', requireAuth, async (req, res) => {
+    try {
+        const { to, html, subject = 'Test Email Preview', variantLabel } = req.body;
+        if (!to || !html) return res.status(400).json({ error: 'Missing to or html' });
+
+        const smtpHost = process.env.SMTP_HOST;
+        if (!smtpHost) {
+            console.log(`[send-test] SMTP not configured. Would send to: ${to}`);
+            return res.json({ sent: true, to, note: 'SMTP not configured, email not actually sent' });
+        }
+
+        const transporter = nodemailer.createTransport({
+            host: smtpHost,
+            port: parseInt(process.env.SMTP_PORT || '587'),
+            secure: process.env.SMTP_SECURE === 'true',
+            auth: {
+                user: process.env.SMTP_USER,
+                pass: process.env.SMTP_PASS,
+            },
+        });
+
+        await transporter.sendMail({
+            from: process.env.SMTP_FROM || process.env.SMTP_USER,
+            to,
+            subject: variantLabel ? `[TEST] ${subject} — ${variantLabel}` : `[TEST] ${subject}`,
+            html,
+        });
+
+        res.json({ sent: true, to });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
