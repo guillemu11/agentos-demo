@@ -185,7 +185,7 @@ export default function ContentStudioPage() {
         )}
         {(activeTab === 'images' || activeTab === 'ab' || activeTab === 'quality') && (
           <div className="studio-full-panel" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-            <p style={{ marginBottom: 12 }}>{t('studio.backToAgent')} para acceder a este panel.</p>
+            <p style={{ marginBottom: 12 }}>Vuelve al agente para acceder a este panel.</p>
             <button className="studio-back-btn" onClick={() => navigate('/app/workspace/agent/content-agent')}>
               {t('studio.backToAgent')}
             </button>
@@ -197,7 +197,10 @@ export default function ContentStudioPage() {
         <HandoffModal
           projectId={pipeline.selectedTicket?.project_id}
           session={pipeline.handoffSession}
+          stages={pipeline.stages}
+          agents={pipeline.agents}
           onClose={() => pipeline.setHandoffSession(null)}
+          onComplete={pipeline.onHandoffComplete}
         />
       )}
     </div>
