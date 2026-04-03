@@ -14,6 +14,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { ingestDocument } from './ingestion.js';
 import { deleteNamespace } from '../ai-providers/pinecone.js';
+import { getGeminiClient } from '../ai-providers/gemini.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BLOCKS_DIR = path.resolve(__dirname, '../../../email_blocks');
@@ -41,10 +42,10 @@ HTML:
 `;
 
 /**
- * Use Claude Haiku to analyze an HTML block and generate semantic metadata.
- * @param {object} anthropic - Initialized Anthropic client
- * @param {string} filename - HTML filename (for fallback name)
- * @param {string} html - Raw HTML content
+ * Analyze an HTML block using Anthropic (Haiku) if available, else Gemini.
+ * @param {object|null} anthropic - Initialized Anthropic client (optional)
+ * @param {string} filename
+ * @param {string} htmlContent
  * @returns {object} metadata JSON
  */
 async function analyzeBlock(anthropic, filename, htmlContent) {
@@ -52,27 +53,33 @@ async function analyzeBlock(anthropic, filename, htmlContent) {
     const html = htmlContent.length > MAX_HTML_CHARS
         ? htmlContent.slice(0, MAX_HTML_CHARS)
         : htmlContent;
-    if (htmlContent.length > MAX_HTML_CHARS) {
-        console.warn(`[email-blocks] ${filename} is ${htmlContent.length} chars — truncating to ${MAX_HTML_CHARS} for Haiku`);
+
+    let text;
+
+    if (anthropic) {
+        // Use Claude Haiku
+        const response = await anthropic.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 1024,
+            messages: [{ role: 'user', content: HAIKU_ANALYSIS_PROMPT + html }],
+        });
+        text = response.content[0].text.trim();
+    } else {
+        // Fallback: use Gemini
+        const client = getGeminiClient();
+        const response = await client.models.generateContent({
+            model: 'gemini-2.0-flash',
+            contents: [{ role: 'user', parts: [{ text: HAIKU_ANALYSIS_PROMPT + html }] }],
+        });
+        text = response.candidates[0].content.parts[0].text.trim();
     }
 
-    const response = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        messages: [{
-            role: 'user',
-            content: HAIKU_ANALYSIS_PROMPT + html,
-        }],
-    });
-
-    const text = response.content[0].text.trim();
     try {
         return JSON.parse(text);
     } catch {
-        // Fallback if JSON parse fails — extract from markdown fence
         const match = text.match(/```(?:json)?\s*([\s\S]+?)```/);
         if (match) return JSON.parse(match[1].trim());
-        throw new Error(`Haiku returned non-JSON for ${filename}: ${text.slice(0, 200)}`);
+        throw new Error(`LLM returned non-JSON for ${filename}: ${text.slice(0, 200)}`);
     }
 }
 
@@ -87,13 +94,19 @@ async function analyzeBlock(anthropic, filename, htmlContent) {
  *   clear-and-reingest on every call, so there is no idempotency skip logic.
  */
 export async function ingestEmailBlocks(pool, anthropic) {
-    if (!anthropic) throw new Error('[email-blocks] Anthropic client is required');
+    if (!anthropic) console.log('[email-blocks] No Anthropic client — using Gemini for block analysis.');
 
     const results = { ingested: 0, skipped: 0, errors: [] };
 
     // Step 1: Clear existing email-blocks from Pinecone and PostgreSQL
     console.log('[email-blocks] Clearing existing email-blocks namespace...');
-    await deleteNamespace('email-blocks');
+    try {
+        await deleteNamespace('email-blocks');
+    } catch (err) {
+        // 404 means namespace doesn't exist yet — safe to continue
+        if (!err.message?.includes('404')) throw err;
+        console.log('[email-blocks] Namespace did not exist, skipping Pinecone clear.');
+    }
 
     const deleted = await pool.query(
         `DELETE FROM knowledge_documents WHERE source_type = 'email-block' RETURNING id`
@@ -129,7 +142,8 @@ export async function ingestEmailBlocks(pool, anthropic) {
                     block_id: name,
                     category: meta.category || 'unknown',
                     position: meta.position || 'any',
-                    design_tokens: meta.design_tokens || {},
+                    // Pinecone requires flat values — serialize objects to JSON strings
+                    design_tokens: JSON.stringify(meta.design_tokens || {}),
                     sfmc_variables: meta.sfmc_variables || [],
                     compatible_with: meta.compatible_with || [],
                     description: meta.description,
