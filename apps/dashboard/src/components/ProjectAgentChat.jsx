@@ -145,7 +145,6 @@ export default function ProjectAgentChat({ projectId, session, completedSessions
                         {msg.role === 'assistant'
                             ? <div className="md-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content || '') }} />
                             : <div className="chat-bubble-content">{msg.content}</div>}
-                        {msg.role === 'assistant' && msg.media?.length > 0 && console.log('[DEBUG] rendering media:', msg.media.length, msg.media.map(m=>m.mediaType))}
                         {msg.role === 'assistant' && msg.media?.length > 0 && (
                             <div className="chat-inline-media">
                                 {msg.media.map((m, j) => (

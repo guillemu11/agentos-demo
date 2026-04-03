@@ -94,11 +94,9 @@ export function useStreamingChat({ endpoint, buildBody, onResponseHeaders, loadC
                                 return updated;
                             });
                         } else if (parsed.html_sources) {
-                            console.log('[useStreamingChat] html_sources received:', parsed.html_sources.length);
                             const newMedia = parsed.html_sources
                                 .filter(s => s.htmlSource)
                                 .map(s => ({ mediaType: 'email_html', htmlSource: s.htmlSource, title: s.title }));
-                            console.log('[useStreamingChat] newMedia:', newMedia.length);
                             if (newMedia.length > 0) {
                                 setMessages(prev => {
                                     const updated = [...prev];
