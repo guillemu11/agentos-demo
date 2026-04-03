@@ -2,7 +2,7 @@ import React from 'react';
 import { useLanguage } from '../../../i18n/LanguageContext.jsx';
 import { Zap, X } from 'lucide-react';
 
-export default function ActiveTicketIndicator({ selectedTicket, onClear }) {
+export default function ActiveTicketIndicator({ selectedTicket, onClear, studioLabel, onOpenStudio }) {
     const { t } = useLanguage();
 
     if (!selectedTicket) return null;
@@ -17,6 +17,11 @@ export default function ActiveTicketIndicator({ selectedTicket, onClear }) {
             <span className="active-ticket-indicator-stage">
                 [{selectedTicket.stage_order}] {selectedTicket.stage_name}
             </span>
+            {studioLabel && onOpenStudio && (
+                <button className="active-ticket-studio-btn" onClick={onOpenStudio}>
+                    {studioLabel}
+                </button>
+            )}
             <button
                 className="active-ticket-indicator-close"
                 onClick={onClear}
