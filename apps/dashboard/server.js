@@ -615,9 +615,12 @@ app.get('/api/projects/:id/content-preview-html', requireAuth, async (req, res) 
         const luciaRes = await pool.query(
             `SELECT deliverables FROM project_agent_sessions
              WHERE project_id = $1 AND (agent_id = 'lucia'
-                OR agent_role ILIKE '%content agent%'
-                OR agent_role ILIKE '%content strategist%'
-                OR agent_role ILIKE '%content creator%')
+                OR agent_id IN (
+                    SELECT id FROM agents WHERE
+                        role ILIKE '%content agent%'
+                        OR role ILIKE '%content strategist%'
+                        OR role ILIKE '%content creator%'
+                ))
              ORDER BY created_at DESC LIMIT 1`,
             [id]
         );
