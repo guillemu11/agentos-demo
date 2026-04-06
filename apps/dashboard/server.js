@@ -594,6 +594,62 @@ app.get('/api/projects/:id/content-variants', requireAuth, async (req, res) => {
     }
 });
 
+// GET /api/projects/:id/content-preview-html — HTML with Lucía's variables filled inline
+app.get('/api/projects/:id/content-preview-html', requireAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Get latest email HTML
+        const emailRes = await pool.query(
+            `SELECT html_content FROM email_proposals
+             WHERE project_id = $1
+             ORDER BY created_at DESC LIMIT 1`,
+            [id]
+        );
+        if (!emailRes.rows[0]?.html_content) {
+            return res.json({ html: null, is_stale: false, html_version: 0, preview_version: 0 });
+        }
+        const templateHtml = emailRes.rows[0].html_content;
+
+        // Get Lucía's variable_values from her latest session
+        const luciaRes = await pool.query(
+            `SELECT deliverables FROM project_agent_sessions
+             WHERE project_id = $1 AND (agent_id = 'lucia'
+                OR agent_role ILIKE '%content agent%'
+                OR agent_role ILIKE '%content strategist%'
+                OR agent_role ILIKE '%content creator%')
+             ORDER BY created_at DESC LIMIT 1`,
+            [id]
+        );
+        const deliverables = luciaRes.rows[0]?.deliverables || {};
+        const variables = deliverables.variable_values || {};
+
+        // Build preview by replacing %%=v(@var)=%% with actual values
+        let previewHtml = templateHtml;
+        for (const [varName, value] of Object.entries(variables)) {
+            const key = varName.replace(/^@/, '');
+            previewHtml = previewHtml.split(`%%=v(@${key})=%%`).join(value);
+        }
+
+        // Stale detection
+        const projRes = await pool.query('SELECT email_spec FROM projects WHERE id = $1', [id]);
+        const spec = projRes.rows[0]?.email_spec || {};
+        const htmlVersion = spec.html_version || 0;
+        const previewVersion = deliverables.preview_version || 0;
+
+        res.json({
+            html: previewHtml,
+            is_stale: htmlVersion > previewVersion,
+            html_version: htmlVersion,
+            preview_version: previewVersion,
+            variable_count: Object.keys(variables).length
+        });
+    } catch (err) {
+        console.error('GET /api/projects/:id/content-preview-html error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // POST /api/projects/:id/emails — save a new email version
 app.post('/api/projects/:id/emails', requireAuth, async (req, res) => {
   const { id } = req.params;
