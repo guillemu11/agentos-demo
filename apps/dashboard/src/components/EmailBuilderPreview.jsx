@@ -1,10 +1,37 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
-import { Monitor, Smartphone, Download, Mail, Maximize2, Save, ChevronDown, FlaskConical } from 'lucide-react';
+import { Monitor, Smartphone, Mail, Maximize2, Save, ChevronDown, FlaskConical, X } from 'lucide-react';
 import { substituteVariants, countApproved, FIELDS_PER_VARIANT } from '../utils/emailVariants.js';
 import VariantPreviewModal from './VariantPreviewModal.jsx';
 
-export default function EmailBuilderPreview({ html, patchedBlock, statusMessage, onBlockClick, onBlockDrop, projectId, contentVariants, contentReady }) {
+// Auto-sizing iframe for a single block
+function BlockIframe({ html, templateHead }) {
+  const ref = useRef(null);
+  const [height, setHeight] = useState(120);
+  useEffect(() => {
+    if (!ref.current) return;
+    const onLoad = () => {
+      try {
+        const h = ref.current.contentDocument?.body?.scrollHeight;
+        if (h) setHeight(h + 4);
+      } catch {}
+    };
+    ref.current.addEventListener('load', onLoad);
+    return () => ref.current?.removeEventListener('load', onLoad);
+  }, [html]);
+  const head = templateHead || '<meta charset="utf-8"><style>*{box-sizing:border-box}body{margin:0;padding:0;}</style>';
+  return (
+    <iframe
+      ref={ref}
+      sandbox="allow-same-origin"
+      srcDoc={`<!DOCTYPE html><html><head>${head}</head><body style="margin:0;padding:0;">${html}</body></html>`}
+      style={{ width: '100%', height, border: 'none', display: 'block', pointerEvents: 'none' }}
+      scrolling="no"
+    />
+  );
+}
+
+export default function EmailBuilderPreview({ html, blocks, templateHtml, onReorderBlocks, onRemoveBlock, patchedBlock, statusMessage, onBlockClick, onBlockDrop, projectId, contentVariants, contentReady, onTemplateSaved }) {
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState('preview');
   const [viewMode, setViewMode] = useState('desktop'); // 'desktop' | 'mobile'
@@ -14,6 +41,28 @@ export default function EmailBuilderPreview({ html, patchedBlock, statusMessage,
   const [activeVariant, setActiveVariant] = useState(null);
   const [variantDropdownOpen, setVariantDropdownOpen] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [canvasDragIndex, setCanvasDragIndex] = useState(null);
+  const [canvasDragOver, setCanvasDragOver] = useState(null);
+  const [showSavePopover, setShowSavePopover] = useState(false);
+  const [saveTemplateName, setSaveTemplateName] = useState('');
+  const [saveToast, setSaveToast] = useState(false);
+  const savePopoverRef = useRef(null);
+
+  useEffect(() => {
+    if (!showSavePopover) return;
+    function handleClickOutside(e) {
+      if (savePopoverRef.current && !savePopoverRef.current.contains(e.target)) {
+        setShowSavePopover(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showSavePopover]);
+
+  // Extract <head> content from template once for block iframes
+  const templateHead = templateHtml
+    ? (templateHtml.match(/<head[^>]*>([\s\S]*?)<\/head>/i)?.[1] || '')
+    : '';
 
   const variantKeys = Object.keys(contentVariants || {});
   const previewHtml = (activeVariant && contentVariants?.[activeVariant])
@@ -37,32 +86,29 @@ export default function EmailBuilderPreview({ html, patchedBlock, statusMessage,
     return () => iframe.removeEventListener('load', onLoad);
   }, [html]);
 
-  function handleExport() {
-    if (!html) return;
-    const blob = new Blob([html], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'email.html';
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function handleSaveTemplate() {
-    if (!html || !projectId) return;
-    fetch(`${import.meta.env.VITE_API_URL || '/api'}/projects/${projectId}/emails`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        market: 'all',
-        language: 'all',
-        tier: null,
-        html_content: html,
-        subject_line: 'Template Draft',
-        variant_name: `Template Draft ${new Date().toLocaleDateString()}`,
-      }),
-    }).catch(() => {});
+  async function handleSaveTemplate() {
+    if (!html || !projectId || !saveTemplateName.trim()) return;
+    const API_URL = import.meta.env.VITE_API_URL || '/api';
+    try {
+      await fetch(`${API_URL}/projects/${projectId}/emails`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          market: 'all',
+          language: 'all',
+          tier: null,
+          html_content: html,
+          subject_line: saveTemplateName.trim(),
+          variant_name: saveTemplateName.trim(),
+        }),
+      });
+      setShowSavePopover(false);
+      setSaveTemplateName('');
+      setSaveToast(true);
+      setTimeout(() => setSaveToast(false), 2500);
+      if (onTemplateSaved) onTemplateSaved();
+    } catch {}
   }
 
   const tabs = [
@@ -85,6 +131,53 @@ export default function EmailBuilderPreview({ html, patchedBlock, statusMessage,
     const blockName = e.dataTransfer.getData('text/plain');
     if (blockHtml && onBlockDrop) onBlockDrop({ name: blockName, html: blockHtml });
   };
+
+  // Blocks canvas — each block is its own iframe with drag+remove overlay
+  const BlocksCanvas = blocks && blocks.length > 0 ? (
+    <div className="email-preview-body email-blocks-canvas-body"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={e => {
+        // Allow dropping new blocks from panel onto the canvas
+        const blockHtml = e.dataTransfer.getData('text/html');
+        const blockName = e.dataTransfer.getData('text/plain');
+        if (blockHtml && onBlockDrop && !canvasDragIndex) onBlockDrop({ name: blockName, html: blockHtml });
+        setIsDragOver(false);
+      }}
+    >
+      {isDragOver && canvasDragIndex === null && (
+        <div className="email-preview-drop-overlay">{t('emailBlocks.dropHere')}</div>
+      )}
+      <div className={`email-preview-iframe-wrapper ${viewMode}`}>
+      <div className="email-blocks-canvas">
+        {blocks.map((block, i) => (
+          <div
+            key={block.id}
+            className={`email-block-canvas-row${canvasDragOver === i ? ' canvas-drag-over' : ''}${canvasDragIndex === i ? ' canvas-dragging' : ''}`}
+            draggable
+            onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setCanvasDragIndex(i); }}
+            onDragOver={e => { e.preventDefault(); e.stopPropagation(); setCanvasDragOver(i); }}
+            onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setCanvasDragOver(null); }}
+            onDrop={e => {
+              e.preventDefault(); e.stopPropagation();
+              if (canvasDragIndex !== null && onReorderBlocks) onReorderBlocks(canvasDragIndex, i);
+              setCanvasDragIndex(null); setCanvasDragOver(null);
+            }}
+            onDragEnd={() => { setCanvasDragIndex(null); setCanvasDragOver(null); }}
+          >
+            <BlockIframe html={block.html} templateHead={templateHead} />
+            <div className="email-block-canvas-overlay">
+              <span className="email-block-canvas-drag-hint">⠿ {block.name}</span>
+              {onRemoveBlock && (
+                <button className="email-block-canvas-remove" onClick={() => onRemoveBlock(i)} title="Eliminar bloque">×</button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      </div>
+    </div>
+  ) : null;
 
   const PreviewContent = (
     <div
@@ -192,25 +285,54 @@ export default function EmailBuilderPreview({ html, patchedBlock, statusMessage,
         >
           {viewMode === 'desktop' ? <Smartphone size={13} /> : <Monitor size={13} />}
         </button>
+
+        {/* Save with popover */}
+        <div style={{ position: 'relative' }} ref={savePopoverRef}>
+          <button
+            className="email-preview-toolbar-btn email-preview-toolbar-btn--text"
+            onClick={() => { if (html && projectId) setShowSavePopover(o => !o); }}
+            disabled={!html || !projectId}
+          >
+            <Save size={13} />
+            <span>{t('emailBuilder.saveTemplate')}</span>
+          </button>
+          {showSavePopover && (
+            <div className="email-save-popover">
+              <input
+                className="email-save-popover-input"
+                placeholder={t('emailBuilder.savePopoverPlaceholder')}
+                value={saveTemplateName}
+                onChange={e => setSaveTemplateName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleSaveTemplate(); if (e.key === 'Escape') setShowSavePopover(false); }}
+                autoFocus
+              />
+              <div className="email-save-popover-actions">
+                <button
+                  className="email-save-popover-confirm"
+                  onClick={handleSaveTemplate}
+                  disabled={!saveTemplateName.trim()}
+                >
+                  {t('emailBuilder.saveConfirm')}
+                </button>
+                <button className="email-save-popover-cancel" onClick={() => setShowSavePopover(false)}>
+                  <X size={12} />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Preview & Test */}
         <button
-          className="email-preview-toolbar-btn"
-          onClick={handleSaveTemplate}
-          disabled={!html || !projectId}
-          title={t('emailBuilder.saveTemplate')}
-        >
-          <Save size={13} />
-        </button>
-        <button className="email-preview-toolbar-btn" onClick={handleExport} title={t('emailBuilder.exportHtml')}>
-          <Download size={13} />
-        </button>
-        <button
-          className="email-preview-toolbar-btn"
+          className="email-preview-toolbar-btn email-preview-toolbar-btn--text email-preview-toolbar-btn--purple"
           onClick={() => setShowPreviewModal(true)}
           disabled={!html || !contentReady}
-          title={t('emailBuilder.previewTest')}
+          title={!contentReady ? t('emailBuilder.waitingVariants') : t('emailBuilder.previewTest')}
         >
           <FlaskConical size={13} />
+          <span>{t('emailBuilder.previewTest')}</span>
         </button>
+
         <button
           className="email-preview-toolbar-btn"
           onClick={() => setFullscreen(f => !f)}
@@ -221,7 +343,7 @@ export default function EmailBuilderPreview({ html, patchedBlock, statusMessage,
       </div>
 
       {/* Body */}
-      {activeTab === 'preview' && PreviewContent}
+      {activeTab === 'preview' && (BlocksCanvas || PreviewContent)}
       {activeTab === 'html' && (
         <pre className="email-preview-html-source">{html || '<!-- no email yet -->'}</pre>
       )}
@@ -231,6 +353,10 @@ export default function EmailBuilderPreview({ html, patchedBlock, statusMessage,
         <span className={`status-dot ${html ? (patchedBlock ? 'updating' : 'stable') : 'idle'}`} />
         <span>{statusMessage || (html ? '✓ Email listo' : t('emailBuilder.noEmailYet'))}</span>
       </div>
+
+      {saveToast && (
+        <div className="email-save-toast">{t('emailBuilder.savedToast')}</div>
+      )}
 
       {showPreviewModal && (
         <VariantPreviewModal
