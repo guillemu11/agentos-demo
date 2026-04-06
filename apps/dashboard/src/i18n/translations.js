@@ -1412,6 +1412,25 @@ export const translations = {
       waitingVariants: 'Esperando variants de Sofia',
     },
 
+    emailSpec: {
+        title: 'Email Spec',
+        warningBadge: '⚠ Email Spec no definido — los agentes trabajarán sin contrato compartido',
+        designNotes: 'Notas de diseño',
+        designNotesPlaceholder: 'Layout, colores, estilo... Describe cómo debe verse el email',
+        blocks: 'Bloques',
+        addBlock: '+ Añadir bloque',
+        blockName: 'Nombre',
+        blockGuidance: 'Guía de contenido',
+        blockVariablesPlaceholder: '@headline, @cta_text...',
+        removeBlock: 'Eliminar',
+        variableList: 'Variables AMPscript',
+        variableListNote: 'Se actualiza al guardar un email',
+        contentPreview: 'Preview con contenido',
+        templateView: 'Template',
+        staleWarning: '⚠ Preview desactualizado — el Developer añadió nuevos bloques',
+        noPreview: 'Lucía no ha generado contenido aún',
+    },
+
     contentAgent: {
       briefSidebar: 'Brief en construcción',
       blocksProgress: '{completed}/{total} bloques',
@@ -1467,6 +1486,7 @@ export const translations = {
       templatesLoading: 'Cargando...',
       templateDeleteYes: 'Sí',
       templateDeleteNo: 'No',
+      templateEdit: 'Editar',
     },
 
     emailBlocks: {
@@ -2919,6 +2939,25 @@ export const translations = {
       waitingVariants: "Waiting for Sofia's variants",
     },
 
+    emailSpec: {
+        title: 'Email Spec',
+        warningBadge: '⚠ Email Spec not defined — agents will work without shared contract',
+        designNotes: 'Design notes',
+        designNotesPlaceholder: 'Layout, colors, style... Describe how the email should look',
+        blocks: 'Blocks',
+        addBlock: '+ Add block',
+        blockName: 'Name',
+        blockGuidance: 'Content guidance',
+        blockVariablesPlaceholder: '@headline, @cta_text...',
+        removeBlock: 'Remove',
+        variableList: 'AMPscript variables',
+        variableListNote: 'Auto-updated when you save an email',
+        contentPreview: 'Content preview',
+        templateView: 'Template',
+        staleWarning: '⚠ Preview outdated — Developer added new blocks',
+        noPreview: 'Lucía has not generated content yet',
+    },
+
     contentAgent: {
       briefSidebar: 'Brief in progress',
       blocksProgress: '{completed}/{total} blocks',
@@ -2974,6 +3013,7 @@ export const translations = {
       templatesLoading: 'Loading...',
       templateDeleteYes: 'Yes',
       templateDeleteNo: 'No',
+      templateEdit: 'Edit',
     },
 
     emailBlocks: {

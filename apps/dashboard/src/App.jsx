@@ -386,6 +386,21 @@ function App() {
             )}
           </section>
 
+          {/* Email Spec warning badge */}
+          {!editMode && (!selectedProject.email_spec?.design_notes && !(selectedProject.email_spec?.blocks?.length > 0)) && (
+            <div style={{
+              background: '#fef9c3',
+              border: '1px solid #eab308',
+              borderRadius: '8px',
+              padding: '10px 16px',
+              marginBottom: '16px',
+              fontSize: '0.85rem',
+              color: '#92400e'
+            }}>
+              {t('emailSpec.warningBadge')}
+            </div>
+          )}
+
           {/* PM Notes */}
           {selectedProject.pm_notes && (
             <section className="card" style={{ marginBottom: '24px' }}>
@@ -397,6 +412,123 @@ function App() {
               </div>
             </section>
           )}
+
+          {/* Email Spec */}
+          <section className="card" style={{ marginBottom: '24px' }}>
+            <h3 style={{ marginBottom: '16px', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent-blue)' }}>
+              ✉ {t('emailSpec.title')}
+            </h3>
+
+            {editMode ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                    {t('emailSpec.designNotes')}
+                  </label>
+                  <textarea
+                    className="edit-subtitle-full"
+                    rows={3}
+                    placeholder={t('emailSpec.designNotesPlaceholder')}
+                    value={selectedProject.email_spec?.design_notes || ''}
+                    onChange={e => setSelectedProject({
+                      ...selectedProject,
+                      email_spec: { ...(selectedProject.email_spec || {}), design_notes: e.target.value }
+                    })}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                    {t('emailSpec.blocks')}
+                  </label>
+                  {(selectedProject.email_spec?.blocks || []).map((block, i) => (
+                    <div key={i} style={{ background: 'var(--bg-section)', borderRadius: '8px', padding: '10px', marginBottom: '8px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                      <input
+                        className="edit-select"
+                        style={{ flex: '0 0 120px', fontSize: '0.8rem' }}
+                        placeholder={t('emailSpec.blockName')}
+                        value={block.name || ''}
+                        onChange={e => {
+                          const blocks = [...(selectedProject.email_spec?.blocks || [])];
+                          blocks[i] = { ...blocks[i], name: e.target.value };
+                          setSelectedProject({ ...selectedProject, email_spec: { ...(selectedProject.email_spec || {}), blocks } });
+                        }}
+                      />
+                      <input
+                        className="edit-select"
+                        style={{ flex: 1, fontSize: '0.8rem' }}
+                        placeholder={t('emailSpec.blockGuidance')}
+                        value={block.guidance || ''}
+                        onChange={e => {
+                          const blocks = [...(selectedProject.email_spec?.blocks || [])];
+                          blocks[i] = { ...blocks[i], guidance: e.target.value };
+                          setSelectedProject({ ...selectedProject, email_spec: { ...(selectedProject.email_spec || {}), blocks } });
+                        }}
+                      />
+                      <button
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent-red)', fontSize: '1.1rem', lineHeight: 1, padding: '4px' }}
+                        onClick={() => {
+                          const blocks = (selectedProject.email_spec?.blocks || []).filter((_, j) => j !== i);
+                          setSelectedProject({ ...selectedProject, email_spec: { ...(selectedProject.email_spec || {}), blocks } });
+                        }}
+                        title={t('emailSpec.removeBlock')}
+                      >×</button>
+                    </div>
+                  ))}
+                  <button
+                    className="back-button"
+                    style={{ fontSize: '0.8rem', padding: '4px 12px' }}
+                    onClick={() => {
+                      const blocks = [...(selectedProject.email_spec?.blocks || []), { name: '', guidance: '', variables: [] }];
+                      setSelectedProject({ ...selectedProject, email_spec: { ...(selectedProject.email_spec || {}), blocks } });
+                    }}
+                  >{t('emailSpec.addBlock')}</button>
+                </div>
+
+                {(selectedProject.email_spec?.variable_list?.length > 0) && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                      {t('emailSpec.variableList')} <span style={{ opacity: 0.6 }}>({t('emailSpec.variableListNote')})</span>
+                    </label>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {selectedProject.email_spec.variable_list.map(v => (
+                        <span key={v} style={{ background: 'var(--bg-section)', border: '1px solid var(--border-default)', borderRadius: '4px', padding: '2px 8px', fontSize: '0.8rem', fontFamily: 'monospace' }}>{v}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div>
+                {selectedProject.email_spec?.design_notes && (
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+                    {selectedProject.email_spec.design_notes}
+                  </p>
+                )}
+                {(selectedProject.email_spec?.blocks?.length > 0) ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
+                    {selectedProject.email_spec.blocks.map((b, i) => (
+                      <div key={i} style={{ display: 'flex', gap: '12px', fontSize: '0.85rem', background: 'var(--bg-section)', padding: '8px 12px', borderRadius: '6px', alignItems: 'flex-start' }}>
+                        <span style={{ fontWeight: 600, minWidth: '90px', color: 'var(--text-main)' }}>{b.name}</span>
+                        <span style={{ color: 'var(--text-secondary)', flex: 1 }}>{b.guidance}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontStyle: 'italic', marginBottom: '12px' }}>
+                    {t('emailSpec.warningBadge')}
+                  </p>
+                )}
+                {(selectedProject.email_spec?.variable_list?.length > 0) && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {selectedProject.email_spec.variable_list.map(v => (
+                      <span key={v} style={{ background: 'var(--bg-section)', border: '1px solid var(--border-default)', borderRadius: '4px', padding: '2px 8px', fontSize: '0.8rem', fontFamily: 'monospace' }}>{v}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
 
           {/* Pipeline stages from endpoint */}
           {pipelineData && pipelineData.stages && pipelineData.stages.length > 0 && (
