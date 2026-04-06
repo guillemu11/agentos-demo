@@ -132,6 +132,7 @@ export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onT
     { id: 'tickets', label: t('tickets.tab'), icon: AgentTabIcons.tickets, count: pipeline.tickets.length, urgent: pipeline.hasUrgentTickets },
     { id: 'blocks', label: 'Block Library', icon: AgentTabIcons.blocks, count: blocksLoading ? null : blocks.length },
     { id: 'builder', label: t('studio.emailStudio'), icon: '✉️', isStudio: true },
+    { id: 'block-studio', label: t('blockStudio.title'), icon: '⊞', isStudio: true, studioPath: 'block-studio' },
     { id: 'chat', label: 'Chat', icon: AgentTabIcons.chat },
     { id: 'activity', label: 'Activity', icon: AgentTabIcons.activity },
     { id: 'settings', label: t('agentSettings.tab'), icon: AgentTabIcons.settings },
@@ -296,7 +297,9 @@ export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onT
           <button key={tab.id} className={`agent-tab ${activeTab === tab.id ? 'active' : ''}`} onClick={() => {
               if (tab.isStudio) {
                 const ticketId = pipeline.selectedTicket?.id;
-                navigate(`/app/workspace/agent/html-developer/studio${ticketId ? `?ticketId=${ticketId}` : ''}`);
+                const path = tab.studioPath || 'studio';
+                const query = ticketId && path === 'studio' ? `?ticketId=${ticketId}` : '';
+                navigate(`/app/workspace/agent/html-developer/${path}${query}`);
               } else {
                 setActiveTab(tab.id);
               }
