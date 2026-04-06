@@ -416,61 +416,74 @@ export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onT
 
         {activeTab === 'builder' && (
           <div className="email-builder-split">
-            <div className="email-builder-chat-panel">
-              <AgentChatSwitcher
-                agent={agent}
-                selectedTicket={pipeline.selectedTicket}
-                pipelineData={pipeline.pipelineData}
-                currentSession={pipeline.currentSession}
-                completedSessions={pipeline.completedSessions}
-                agents={pipeline.agents}
-                onClearTicket={pipeline.clearTicket}
-                onHandoffRequest={pipeline.setHandoffSession}
-                externalInput={chatInput}
-                onExternalInputConsumed={() => setChatInput('')}
-                onHtmlGenerated={(html) => {
-                  setAiHtml(mergeAiHtmlIntoTemplate(templateHtml, html));
-                  setBuilderBlocks([]);
-                  setPatchedBlock(null);
-                  setBuilderStatus('Email generado');
-                  setTimeout(() => setBuilderStatus(''), 3000);
-                }}
-                onHtmlPatched={(blockName, html) => {
-                  setAiHtml(html);
-                  setPatchedBlock(blockName);
-                  setBuilderStatus(`${blockName} actualizado`);
-                  setTimeout(() => { setPatchedBlock(null); setBuilderStatus(''); }, 2000);
-                }}
-                canvasBlocks={builderBlocks}
-                onHtmlBlock={(block) => {
-                  addBlock(block.title, block.htmlSource, block.insertAfter);
-                  setBuilderStatus(`${block.title} añadido`);
-                  setTimeout(() => setBuilderStatus(''), 3000);
-                }}
-              />
-              {builderBlocks.length > 0 && (
-                <div className="email-block-order-panel">
-                  <div className="email-block-order-header">
-                    <span className="email-block-order-title">Estructura ({builderBlocks.length})</span>
-                  </div>
-                  {builderBlocks.map((block, i) => (
-                    <div
-                      key={block.id}
-                      className={`email-block-order-item${dragOverIndex === i ? ' drag-over' : ''}`}
-                      draggable
-                      onDragStart={() => setDragIndex(i)}
-                      onDragOver={e => { e.preventDefault(); setDragOverIndex(i); }}
-                      onDragLeave={() => setDragOverIndex(null)}
-                      onDrop={() => { reorderBlock(dragIndex, i); setDragIndex(null); setDragOverIndex(null); }}
-                      onDragEnd={() => { setDragIndex(null); setDragOverIndex(null); }}
-                    >
-                      <span className="email-block-order-drag">⠿</span>
-                      <span className="email-block-order-name" title={block.name}>{block.name}</span>
-                      <button className="email-block-order-remove" onClick={() => removeBlock(i)} title="Eliminar">×</button>
+            <div className="email-builder-chat-panel" style={{ display: 'flex', flexDirection: 'column' }}>
+              <div className="email-left-panel-tabs">
+                <button
+                  className={`email-left-tab ${leftTab === 'chat' ? 'active' : ''}`}
+                  onClick={() => setLeftTab('chat')}
+                >{t('emailBlocks.tabChat')}</button>
+                <button
+                  className={`email-left-tab ${leftTab === 'blocks' ? 'active' : ''}`}
+                  onClick={() => setLeftTab('blocks')}
+                >{t('emailBlocks.tabBlocks')}</button>
+              </div>
+              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: leftTab === 'chat' ? 'flex' : 'none', flexDirection: 'column' }}>
+                <AgentChatSwitcher
+                  agent={agent}
+                  selectedTicket={pipeline.selectedTicket}
+                  pipelineData={pipeline.pipelineData}
+                  currentSession={pipeline.currentSession}
+                  completedSessions={pipeline.completedSessions}
+                  agents={pipeline.agents}
+                  onClearTicket={pipeline.clearTicket}
+                  onHandoffRequest={pipeline.setHandoffSession}
+                  externalInput={chatInput}
+                  onExternalInputConsumed={() => setChatInput('')}
+                  onHtmlGenerated={(html) => {
+                    setAiHtml(mergeAiHtmlIntoTemplate(templateHtml, html));
+                    setBuilderBlocks([]);
+                    setPatchedBlock(null);
+                    setBuilderStatus('Email generado');
+                    setTimeout(() => setBuilderStatus(''), 3000);
+                  }}
+                  onHtmlPatched={(blockName, html) => {
+                    setAiHtml(html);
+                    setPatchedBlock(blockName);
+                    setBuilderStatus(`${blockName} actualizado`);
+                    setTimeout(() => { setPatchedBlock(null); setBuilderStatus(''); }, 2000);
+                  }}
+                  canvasBlocks={builderBlocks}
+                  onHtmlBlock={(block) => {
+                    addBlock(block.title, block.htmlSource, block.insertAfter);
+                    setBuilderStatus(`${block.title} añadido`);
+                    setTimeout(() => setBuilderStatus(''), 3000);
+                  }}
+                />
+                {builderBlocks.length > 0 && (
+                  <div className="email-block-order-panel">
+                    <div className="email-block-order-header">
+                      <span className="email-block-order-title">Estructura ({builderBlocks.length})</span>
                     </div>
-                  ))}
-                </div>
-              )}
+                    {builderBlocks.map((block, i) => (
+                      <div
+                        key={block.id}
+                        className={`email-block-order-item${dragOverIndex === i ? ' drag-over' : ''}`}
+                        draggable
+                        onDragStart={() => setDragIndex(i)}
+                        onDragOver={e => { e.preventDefault(); setDragOverIndex(i); }}
+                        onDragLeave={() => setDragOverIndex(null)}
+                        onDrop={() => { reorderBlock(dragIndex, i); setDragIndex(null); setDragOverIndex(null); }}
+                        onDragEnd={() => { setDragIndex(null); setDragOverIndex(null); }}
+                      >
+                        <span className="email-block-order-drag">⠿</span>
+                        <span className="email-block-order-name" title={block.name}>{block.name}</span>
+                        <button className="email-block-order-remove" onClick={() => removeBlock(i)} title="Eliminar">×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {leftTab === 'blocks' && <EmailBlocksPanel />}
             </div>
             <EmailBuilderPreview
               html={builderBlocks.length ? null : builderHtml}
@@ -478,6 +491,11 @@ export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onT
               templateHtml={templateHtml}
               onReorderBlocks={reorderBlock}
               onRemoveBlock={removeBlock}
+              onBlockDrop={(block) => {
+                addBlock(block.name, block.html);
+                setBuilderStatus(`${block.name} añadido`);
+                setTimeout(() => setBuilderStatus(''), 3000);
+              }}
               patchedBlock={patchedBlock}
               statusMessage={builderStatus}
               onBlockClick={(blockName) => setChatInput(`[bloque: ${blockName}] `)}
