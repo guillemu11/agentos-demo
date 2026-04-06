@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { Monitor, Smartphone, Mail, Maximize2, Save, ChevronDown, FlaskConical, X } from 'lucide-react';
 import { substituteVariants, countApproved, FIELDS_PER_VARIANT } from '../utils/emailVariants.js';
@@ -53,6 +53,7 @@ export default function EmailBuilderPreview({ html, blocks, templateHtml, onReor
     function handleClickOutside(e) {
       if (savePopoverRef.current && !savePopoverRef.current.contains(e.target)) {
         setShowSavePopover(false);
+        setSaveTemplateName('');
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -90,7 +91,7 @@ export default function EmailBuilderPreview({ html, blocks, templateHtml, onReor
     if (!html || !projectId || !saveTemplateName.trim()) return;
     const API_URL = import.meta.env.VITE_API_URL || '/api';
     try {
-      await fetch(`${API_URL}/projects/${projectId}/emails`, {
+      const res = await fetch(`${API_URL}/projects/${projectId}/emails`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -103,10 +104,11 @@ export default function EmailBuilderPreview({ html, blocks, templateHtml, onReor
           variant_name: saveTemplateName.trim(),
         }),
       });
+      if (!res.ok) return;
       setShowSavePopover(false);
       setSaveTemplateName('');
       setSaveToast(true);
-      setTimeout(() => setSaveToast(false), 2500);
+      const toastTimer = setTimeout(() => setSaveToast(false), 2500);
       if (onTemplateSaved) onTemplateSaved();
     } catch {}
   }
@@ -303,7 +305,7 @@ export default function EmailBuilderPreview({ html, blocks, templateHtml, onReor
                 placeholder={t('emailBuilder.savePopoverPlaceholder')}
                 value={saveTemplateName}
                 onChange={e => setSaveTemplateName(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleSaveTemplate(); if (e.key === 'Escape') setShowSavePopover(false); }}
+                onKeyDown={e => { if (e.key === 'Enter' && saveTemplateName.trim()) handleSaveTemplate(); if (e.key === 'Escape') { setShowSavePopover(false); setSaveTemplateName(''); } }}
                 autoFocus
               />
               <div className="email-save-popover-actions">
@@ -314,7 +316,7 @@ export default function EmailBuilderPreview({ html, blocks, templateHtml, onReor
                 >
                   {t('emailBuilder.saveConfirm')}
                 </button>
-                <button className="email-save-popover-cancel" onClick={() => setShowSavePopover(false)}>
+                <button className="email-save-popover-cancel" onClick={() => { setShowSavePopover(false); setSaveTemplateName(''); }}>
                   <X size={12} />
                 </button>
               </div>
