@@ -591,33 +591,57 @@ app.patch('/api/emails/:id/status', requireAuth, async (req, res) => {
   }
 });
 
-// PATCH /api/emails/:id — rename or set as final template
+// ── Emails (template management) ──
 app.patch('/api/emails/:id', requireAuth, async (req, res) => {
   const { id } = req.params;
   const { variant_name, set_final, project_id } = req.body;
 
   try {
     if (set_final && project_id) {
-      // Clear approved status from all templates in project, then set this one
-      await pool.query(
-        `UPDATE email_proposals SET status = 'draft', updated_at = NOW()
-         WHERE project_id = $1 AND status = 'approved'`,
-        [project_id]
-      );
-      const result = await pool.query(
-        `UPDATE email_proposals SET status = 'approved', updated_at = NOW()
-         WHERE id = $1 RETURNING *`,
-        [id]
-      );
-      if (result.rows.length === 0) return res.status(404).json({ error: 'Email not found' });
-      return res.json(result.rows[0]);
+      // Wrap in transaction to ensure atomicity
+      const numericProjectId = parseInt(project_id, 10);
+      const numericId = parseInt(id, 10);
+      if (!numericProjectId || !numericId) return res.status(400).json({ error: 'Invalid id or project_id' });
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `UPDATE email_proposals SET status = 'draft', updated_at = NOW()
+           WHERE project_id = $1 AND status = 'approved'`,
+          [numericProjectId]
+        );
+        const result = await client.query(
+          `UPDATE email_proposals SET status = 'approved', updated_at = NOW()
+           WHERE id = $1 RETURNING *`,
+          [numericId]
+        );
+        if (result.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Email not found' });
+        }
+        await client.query('COMMIT');
+        return res.json(result.rows[0]);
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
     }
 
     if (variant_name !== undefined) {
+      // Validate variant_name before update
+      if (typeof variant_name !== 'string' || !variant_name.trim()) {
+        return res.status(400).json({ error: 'variant_name must be a non-empty string' });
+      }
+      const numericId = parseInt(id, 10);
+      if (!numericId) return res.status(400).json({ error: 'Invalid id' });
+
       const result = await pool.query(
         `UPDATE email_proposals SET variant_name = $1, updated_at = NOW()
          WHERE id = $2 RETURNING *`,
-        [variant_name, id]
+        [variant_name.trim(), numericId]
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'Email not found' });
       return res.json(result.rows[0]);
@@ -632,11 +656,13 @@ app.patch('/api/emails/:id', requireAuth, async (req, res) => {
 
 // DELETE /api/emails/:id — delete a template
 app.delete('/api/emails/:id', requireAuth, async (req, res) => {
-  const { id } = req.params;
+  const numericId = parseInt(req.params.id, 10);
+  if (!numericId) return res.status(400).json({ error: 'Invalid id' });
+
   try {
     const result = await pool.query(
       `DELETE FROM email_proposals WHERE id = $1 RETURNING id`,
-      [id]
+      [numericId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Email not found' });
     res.json({ deleted: true, id: result.rows[0].id });
