@@ -304,7 +304,7 @@ export default function EmailBuilderPreview({ html, saveHtml, blocks, templateHt
         ))}
         {projectId && (
           <button
-            className={`email-tab-btn${previewMode === 'content' ? ' active' : ''}`}
+            className={`email-preview-tab${previewMode === 'content' ? ' active' : ''}`}
             style={{ marginLeft: 'auto' }}
             onClick={() => setPreviewMode(prev => prev === 'content' ? 'template' : 'content')}
           >
