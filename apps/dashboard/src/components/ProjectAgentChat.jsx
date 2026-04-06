@@ -58,11 +58,10 @@ export default function ProjectAgentChat({ projectId, session, completedSessions
             }
 
             // NEW_BLOCK: explicit marker — always add to canvas regardless of hadSources
-            const newBlockMatch = fullResponse.match(/<!--NEW_BLOCK:([^>]+)-->([\s\S]*?<\/table>)/i);
+            const newBlockMatch = fullResponse.match(/<!--NEW_BLOCK:([^>]+)-->\s*(<table[\s\S]+<\/table>)/i);
             if (newBlockMatch && onHtmlBlock) {
-                const [, blockName, blockHtml] = newBlockMatch;
-                const tableMatch = blockHtml.match(/(<table[\s\S]+<\/table>)/i);
-                onHtmlBlock({ title: blockName.trim(), htmlSource: tableMatch ? tableMatch[1] : blockHtml, insertAfter: lastInsertAfterRef.current });
+                const [, blockName, tableHtml] = newBlockMatch;
+                onHtmlBlock({ title: blockName.trim(), htmlSource: tableHtml, insertAfter: lastInsertAfterRef.current });
                 return;
             }
 
