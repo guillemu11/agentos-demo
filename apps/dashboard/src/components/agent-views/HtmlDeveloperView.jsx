@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import { htmlDeveloperData } from '../../data/agentViewMocks.js';
@@ -11,6 +11,8 @@ import KpiCard from './shared/KpiCard.jsx';
 import { AgentTabIcons, HtmlDevIcons } from '../icons.jsx';
 import AgentSettingsPanel from './AgentSettingsPanel.jsx';
 import EmailBuilderPreview from '../EmailBuilderPreview.jsx';
+import EmailBlocksPanel from '../EmailBlocksPanel.jsx';
+import { injectIntoSlot, mergeAiHtmlIntoTemplate, fetchEmailTemplate } from '../../utils/emailTemplate.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -45,31 +47,70 @@ export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onT
   const [blockFilter, setBlockFilter] = useState('All');
   const [selectedBlock, setSelectedBlock] = useState(null);
   const [ragBlocks, setRagBlocks] = useState(null); // null = loading
-  const [builderHtml, setBuilderHtml] = useState('');
+  const [builderBlocks, setBuilderBlocks] = useState([]); // [{id, name, html}]
+  const [aiHtml, setAiHtml] = useState('');
+  const [templateHtml, setTemplateHtml] = useState('');
   const [patchedBlock, setPatchedBlock] = useState(null);
   const [builderStatus, setBuilderStatus] = useState('');
   const [chatInput, setChatInput] = useState('');
+  const [leftTab, setLeftTab] = useState('chat'); // 'chat' | 'blocks'
   const data = htmlDeveloperData;
   const pipeline = useAgentPipelineSession(agent.id);
 
   useEffect(() => {
-    fetch(`${API_URL}/knowledge/search`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: 'emirates email block', namespace: 'email-blocks', topK: 20 }),
-    })
+    fetchEmailTemplate().then(html => { if (html) setTemplateHtml(html); });
+  }, []);
+
+  const builderHtml = useMemo(() => {
+    if (aiHtml) return aiHtml;
+    const blocksHtml = builderBlocks.map(b => b.html).join('');
+    if (!builderBlocks.length) return templateHtml || '';
+    if (!templateHtml) return blocksHtml;
+    return injectIntoSlot(templateHtml, blocksHtml);
+  }, [builderBlocks, templateHtml, aiHtml]);
+
+  const [dragIndex, setDragIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
+
+  const addBlock = (name, html, insertAfterName) => {
+    setBuilderBlocks(prev => {
+      const newBlock = { id: Date.now() + Math.random(), name, html };
+      if (insertAfterName) {
+        const idx = prev.findIndex(b => b.name.toLowerCase() === insertAfterName.toLowerCase());
+        if (idx >= 0) {
+          const arr = [...prev];
+          arr.splice(idx + 1, 0, newBlock);
+          return arr;
+        }
+      }
+      return [...prev, newBlock];
+    });
+    setAiHtml('');
+  };
+  const reorderBlock = (from, to) => {
+    if (from === null || from === to) return;
+    setBuilderBlocks(prev => {
+      const a = [...prev];
+      const [item] = a.splice(from, 1);
+      a.splice(to, 0, item);
+      return a;
+    });
+  };
+  const removeBlock = (i) => setBuilderBlocks(prev => prev.filter((_, idx) => idx !== i));
+
+  useEffect(() => {
+    fetch(`${API_URL}/knowledge/email-blocks`, { credentials: 'include' })
       .then((r) => r.json())
       .then((result) => {
-        if (result.results && result.results.length > 0) {
-          setRagBlocks(result.results.map((r) => ({
-            id: r.metadata?.block_id || r.id,
-            name: r.title || r.metadata?.block_id,
-            category: TYPE_TO_CATEGORY[r.metadata?.type] || 'Content',
-            type: r.metadata?.type,
-            brand: r.metadata?.brand,
-            description: r.metadata?.description || r.content_preview,
-            html: r.htmlSource || '',
-            score: r.score,
+        if (result.blocks && result.blocks.length > 0) {
+          setRagBlocks(result.blocks.map((b) => ({
+            id: b.id,
+            name: b.title,
+            category: TYPE_TO_CATEGORY[b.category] || 'Content',
+            type: b.category,
+            brand: 'emirates',
+            description: b.description,
+            html: b.html,
           })));
         } else {
           setRagBlocks([]);
@@ -388,26 +429,55 @@ export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onT
                 externalInput={chatInput}
                 onExternalInputConsumed={() => setChatInput('')}
                 onHtmlGenerated={(html) => {
-                  setBuilderHtml(html);
+                  setAiHtml(mergeAiHtmlIntoTemplate(templateHtml, html));
+                  setBuilderBlocks([]);
                   setPatchedBlock(null);
                   setBuilderStatus('Email generado');
                   setTimeout(() => setBuilderStatus(''), 3000);
                 }}
                 onHtmlPatched={(blockName, html) => {
-                  setBuilderHtml(html);
+                  setAiHtml(html);
                   setPatchedBlock(blockName);
                   setBuilderStatus(`${blockName} actualizado`);
                   setTimeout(() => { setPatchedBlock(null); setBuilderStatus(''); }, 2000);
                 }}
+                canvasBlocks={builderBlocks}
                 onHtmlBlock={(block) => {
-                  setBuilderHtml(prev => prev + block.htmlSource);
+                  addBlock(block.title, block.htmlSource, block.insertAfter);
                   setBuilderStatus(`${block.title} añadido`);
                   setTimeout(() => setBuilderStatus(''), 3000);
                 }}
               />
+              {builderBlocks.length > 0 && (
+                <div className="email-block-order-panel">
+                  <div className="email-block-order-header">
+                    <span className="email-block-order-title">Estructura ({builderBlocks.length})</span>
+                  </div>
+                  {builderBlocks.map((block, i) => (
+                    <div
+                      key={block.id}
+                      className={`email-block-order-item${dragOverIndex === i ? ' drag-over' : ''}`}
+                      draggable
+                      onDragStart={() => setDragIndex(i)}
+                      onDragOver={e => { e.preventDefault(); setDragOverIndex(i); }}
+                      onDragLeave={() => setDragOverIndex(null)}
+                      onDrop={() => { reorderBlock(dragIndex, i); setDragIndex(null); setDragOverIndex(null); }}
+                      onDragEnd={() => { setDragIndex(null); setDragOverIndex(null); }}
+                    >
+                      <span className="email-block-order-drag">⠿</span>
+                      <span className="email-block-order-name" title={block.name}>{block.name}</span>
+                      <button className="email-block-order-remove" onClick={() => removeBlock(i)} title="Eliminar">×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <EmailBuilderPreview
-              html={builderHtml}
+              html={builderBlocks.length ? null : builderHtml}
+              blocks={builderBlocks.length ? builderBlocks : null}
+              templateHtml={templateHtml}
+              onReorderBlocks={reorderBlock}
+              onRemoveBlock={removeBlock}
               patchedBlock={patchedBlock}
               statusMessage={builderStatus}
               onBlockClick={(blockName) => setChatInput(`[bloque: ${blockName}] `)}
