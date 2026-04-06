@@ -795,21 +795,72 @@ ${project.solution ? `Solution: ${project.solution}` : ''}`;
         prompt += `\n\n${ragContext}`;
     }
 
+    // Email spec injection — shared contract for both email agents
+    const emailSpec = project.email_spec;
+    const hasEmailSpec = emailSpec && (emailSpec.design_notes || (emailSpec.blocks && emailSpec.blocks.length > 0));
+    if (hasEmailSpec) {
+        const isHtmlDev = agent.id === 'html-developer'
+            || (agent.name || '').toLowerCase().includes('html')
+            || (agent.role || '').toLowerCase().includes('html developer');
+        const isContentAg = !isHtmlDev && (
+            (agent.name || '').toLowerCase().includes('lucia')
+            || (agent.role || '').toLowerCase().includes('content agent')
+            || (agent.role || '').toLowerCase().includes('content strategist')
+            || (agent.role || '').toLowerCase().includes('content creator')
+        );
+
+        if (isHtmlDev) {
+            const blockLines = (emailSpec.blocks || [])
+                .map(b => `  - ${b.name}: ${b.guidance}${b.variables?.length ? ` → Variables: ${b.variables.join(', ')}` : ''}`)
+                .join('\n');
+            const varList = (emailSpec.variable_list || []).join(', ');
+            prompt += `\n\n## Email Specification (Campaign Brief)
+${emailSpec.design_notes ? `Design Notes: ${emailSpec.design_notes}\n` : ''}${blockLines ? `Required Blocks:\n${blockLines}\n` : ''}${varList ? `Expected AMPscript Variables: ${varList}\n` : ''}Use %%=v(@variable_name)=%% syntax for all personalizable content (e.g. %%=v(@headline)=%%). Every text element that varies per send should use a variable.`;
+        }
+
+        if (isContentAg) {
+            const blockLines = (emailSpec.blocks || [])
+                .map(b => `  - ${b.name}: ${b.guidance}`)
+                .join('\n');
+            const varGuidance = (emailSpec.variable_list || [])
+                .map(v => `  - ${v}: ${emailSpec.variable_context?.[v] || 'No guidance defined'}`)
+                .join('\n');
+            prompt += `\n\n## Email Specification (Campaign Brief)
+${blockLines ? `Content Requirements by Block:\n${blockLines}\n` : ''}${varGuidance ? `Variable Guidance:\n${varGuidance}` : ''}`;
+        }
+    }
+
     // HTML Developer agent: inject Email Builder protocol so it generates HTML
     const isHtmlDeveloper = agent.id === 'html-developer'
         || (agent.name || '').toLowerCase().includes('html')
         || (agent.role || '').toLowerCase().includes('html developer');
     if (isHtmlDeveloper) {
         prompt += `\n\n## HTML Email Builder Protocol — MANDATORY
-You are working inside an email builder UI. When the user asks you to create an email, a template, or any HTML content, you MUST output the complete HTML directly — no prose, no description, just the HTML starting with <!DOCTYPE html>.
+You are working inside an email builder UI with a live canvas.
 
-Rules:
-1. Always output complete, renderable HTML (starting with <!DOCTYPE html><html>...)
-2. Use Emirates brand: dark red #C01B1B, charcoal #1A1A1A, white #FFFFFF
-3. Use inline CSS only — no <style> blocks
-4. Add data-block-name attribute to each top-level <table> (e.g. data-block-name="Hero Banner")
-5. Use real URLs or inline SVG — never placeholder text like [image here]
-6. When asked to patch/update a specific block, output: <!--PATCH:BlockName-->[complete updated block HTML]`;
+**IMPORTANT — The canvas system handles block placement automatically.**
+When the user message contains [Canvas blocks in order: ...], the canvas already has blocks. NEVER output <!DOCTYPE html> in this case — that would replace the entire canvas.
+
+**RULE 1 — PATCH** (modify an existing block):
+If message contains [bloque: X] or [block: X]:
+Output ONLY: <!--PATCH:BlockName-->[complete updated block HTML]
+
+**RULE 2 — ADD NEW BLOCK** (add/insert a new block):
+If message contains [Canvas blocks in order: ...] OR words like add/insert/añade/agrega:
+Output ONLY the new block HTML as a standalone fragment (starting with <table>, NOT <!DOCTYPE html>).
+Use Emirates brand: dark red #C01B1B, charcoal #1A1A1A. Inline CSS only. Max-width 642px.
+No prose before or after — just the HTML fragment.
+
+**RULE 3 — BLOCK ASSEMBLY** (full email from library blocks):
+If [RELEVANT KNOWLEDGE] has email blocks:
+Those blocks are automatically placed on the canvas by the system — you do NOT need to output HTML.
+⚠️ CRITICAL: NEVER output HTML code (no code fences, no raw tags, no full HTML documents) in your text response.
+Your text response must be PLAIN TEXT ONLY: briefly list which blocks were placed (e.g. "I've added Header, Body Copy, CTA and Footer to the canvas.") and ask what adjustments are needed.
+
+**RULE 4 — HTML GENERATION** (no library blocks found, canvas empty):
+Only use this rule if [RELEVANT KNOWLEDGE] contains NO email blocks.
+Output complete <!DOCTYPE html> document.
+Emirates brand: #C01B1B, #1A1A1A. Inline CSS. data-block-name on each <table>.`;
     }
 
     // Content agent: inject BRIEF_UPDATE protocol so the sidebar populates
