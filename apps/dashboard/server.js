@@ -591,6 +591,61 @@ app.patch('/api/emails/:id/status', requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /api/emails/:id — rename or set as final template
+app.patch('/api/emails/:id', requireAuth, async (req, res) => {
+  const { id } = req.params;
+  const { variant_name, set_final, project_id } = req.body;
+
+  try {
+    if (set_final && project_id) {
+      // Clear approved status from all templates in project, then set this one
+      await pool.query(
+        `UPDATE email_proposals SET status = 'draft', updated_at = NOW()
+         WHERE project_id = $1 AND status = 'approved'`,
+        [project_id]
+      );
+      const result = await pool.query(
+        `UPDATE email_proposals SET status = 'approved', updated_at = NOW()
+         WHERE id = $1 RETURNING *`,
+        [id]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ error: 'Email not found' });
+      return res.json(result.rows[0]);
+    }
+
+    if (variant_name !== undefined) {
+      const result = await pool.query(
+        `UPDATE email_proposals SET variant_name = $1, updated_at = NOW()
+         WHERE id = $2 RETURNING *`,
+        [variant_name, id]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ error: 'Email not found' });
+      return res.json(result.rows[0]);
+    }
+
+    res.status(400).json({ error: 'Nothing to update' });
+  } catch (err) {
+    console.error('PATCH /api/emails/:id error:', err);
+    res.status(500).json({ error: 'Failed to update email' });
+  }
+});
+
+// DELETE /api/emails/:id — delete a template
+app.delete('/api/emails/:id', requireAuth, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query(
+      `DELETE FROM email_proposals WHERE id = $1 RETURNING id`,
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Email not found' });
+    res.json({ deleted: true, id: result.rows[0].id });
+  } catch (err) {
+    console.error('DELETE /api/emails/:id error:', err);
+    res.status(500).json({ error: 'Failed to delete email' });
+  }
+});
+
 // ── Pipeline ──
 app.get('/api/pipeline', async (req, res) => {
     try {
@@ -2694,14 +2749,20 @@ app.post('/api/chat/agent/:agentId', async (req, res) => {
             ? agent.tools.map(t => typeof t === 'object' ? t.name : t).join(', ')
             : '';
         const profile = getAgentProfile(agentId);
-        const isContentAgent = (agent.role || '').toLowerCase().includes('content')
-          || (agent.name || '').toLowerCase().includes('content');
         const isEmailBuilder = agentId === 'html-developer'
           || agentId === 'lucia'
           || (agent.role || '').toLowerCase().includes('html')
           || (agent.role || '').toLowerCase().includes('email template')
           || (agent.role || '').toLowerCase().includes('email developer')
           || (agent.department || '').toLowerCase().includes('email');
+        // Note: check for specific content roles, NOT just 'content' — html-developer role
+        // contains 'content blocks' which would incorrectly trigger BRIEF_UPDATE
+        const isContentAgent = !isEmailBuilder && (
+          (agent.name || '').toLowerCase().includes('lucia')
+          || (agent.role || '').toLowerCase().includes('content agent')
+          || (agent.role || '').toLowerCase().includes('content strategist')
+          || (agent.role || '').toLowerCase().includes('content creator')
+        );
         const personality = agent.personality || profile.personality;
         const systemPrompt = `You are ${agent.name}, an AI agent working in the ${agent.department} department.
 
@@ -2751,27 +2812,28 @@ Never redirect to another tab. Never say you cannot create images.
             + (isEmailBuilder ? `
 
 ## HTML Email Builder Protocol — MANDATORY
-You are working inside an email builder UI that renders HTML in real time in a live preview panel.
+You are working inside an email builder UI with a live canvas that renders blocks in real time.
 
-**CRITICAL RULES — never break these:**
-1. When asked to create or show ANY email block or section, you MUST respond with the complete HTML code directly. Do NOT describe it in prose, do NOT explain what you will do — just output the HTML immediately.
-2. Every time you output HTML, it MUST be a complete, renderable HTML document (starting with <!DOCTYPE html> or a complete <html> tag) OR a full block wrapped in a data-block-name div.
-3. NEVER use placeholder URLs like [Emirates Logo URL] — use real inline SVG, data URIs, or real CDN URLs (e.g. https://www.emirates.com/assets/images/logo.svg).
-4. Use inline CSS only — no <style> blocks, no external stylesheets (email client compatibility).
+**CRITICAL — Block Assembly Mode:**
+When the knowledge base context contains email blocks from [RELEVANT KNOWLEDGE] (marked as Source: with block titles), those blocks are ALREADY being rendered in the canvas automatically by the system. In this case:
+- DO NOT output any HTML code
+- Respond with a short confirmation: list the blocks by name that were found and placed in the canvas, ask if the user wants to reorder, modify, or add more blocks
+- Example: "I've placed the following blocks in the canvas: Hero Image, Body Copy, Red CTA, Dark Footer. Would you like to adjust the order or modify any block?"
 
-**Block structure — always use data-block-name on each section:**
-- <div data-block-name="header">...</div>
-- <div data-block-name="hero">...</div>
-- <div data-block-name="body">...</div>
-- <div data-block-name="cta">...</div>
-- <div data-block-name="footer">...</div>
+**HTML Generation Mode (only when NO blocks from the knowledge base are available):**
+If there are no relevant blocks in the knowledge base context, THEN output complete HTML directly — no prose, no description.
+1. Output a complete, renderable HTML document (starting with <!DOCTYPE html><html>...)
+2. NEVER use placeholder URLs — use real inline SVG or real CDN URLs
+3. Use inline CSS only — no <style> blocks (email client compatibility)
+4. Use data-block-name on each top-level <table> section
 
-**Patch protocol — when asked to modify a specific block (message contains [bloque: X] or [block: X]):**
-Only return the updated block prefixed with the patch marker:
-<!--PATCH:block-name--><div data-block-name="block-name">...updated html...</div>
+**New Block Mode — when asked to INSERT or ADD a new block not in the library:**
+Output ONLY: <!--NEW_BLOCK:BlockName-->[complete block HTML, starting with <table...>]
+No explanation before or after. The block will be added to the canvas automatically.
 
-**When asked to show/use a block from the knowledge base:**
-Extract the HTML from the RAG context and render it directly. Do not describe it — output the actual HTML.` : '');
+**Patch protocol — when asked to MODIFY an existing block (message contains [bloque: X] or [block: X]):**
+Output ONLY the updated block prefixed with the patch marker:
+<!--PATCH:block-name-->[complete updated block HTML]` : '');
 
         // Load or create conversation row
         let convRes = await pool.query(
@@ -6067,7 +6129,7 @@ Keep it concise (3-4 paragraphs max). Be warm but professional.`;
 // POST /api/projects/:id/sessions/:sessionId/chat — SSE streaming chat in pipeline
 app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, res) => {
     try {
-        const { message } = req.body;
+        const { message, canvasBlocks: canvasBlockNames } = req.body;
         const sessionId = parseInt(req.params.sessionId);
         const projectId = parseInt(req.params.id);
         if (!message) return res.status(400).json({ error: 'Message is required' });
@@ -6113,11 +6175,37 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
         const blockKeywords = /\b(block|header|footer|preheader|hero|banner|cta|button|product.?card|body.?copy|section.?heading|partner|icon|terms|module)\b/i;
         const isBlockQuery = session.agent_id === 'html-developer' && blockKeywords.test(message) && ragNamespaces.includes('email-blocks');
         if (isBlockQuery) ragNamespaces = ['email-blocks'];
+        // "full email" requests want multiple blocks assembled together
+        const isFullEmailQuery = isBlockQuery && /\b(completo|complete|full|entero|todos|all|email|correo)\b/i.test(message);
+        // "insertion" requests: user wants to add/insert at a specific position — let AI handle via NEW_BLOCK marker
+        const isInsertionQuery = isBlockQuery && /\b(add|insert|añade|agrega|inserta|between|after|before|entre|después|despues|antes|encima|debajo)\b/i.test(message);
         const visualKeywords = /\b(show|display|ver|mostrar|look like|see|visualiz|email|imagen|image|picture|inline)\b/i;
         const isVisualQuery = visualKeywords.test(message);
+
+        // Parse which specific block types the user requested (for full email queries)
+        const requestedBlockCategories = [];
+        if (isFullEmailQuery) {
+            if (/\bpreheader\b/i.test(message)) requestedBlockCategories.push('preheader');
+            if (/\bheader\b/i.test(message)) requestedBlockCategories.push('header');
+            if (/\bhero\b|\bbanner\b/i.test(message)) requestedBlockCategories.push('hero');
+            if (/\bsection.?heading\b/i.test(message)) requestedBlockCategories.push('section-heading');
+            if (/\bbody\b|\bbody.?copy\b/i.test(message)) requestedBlockCategories.push('body-copy');
+            if (/\bstory\b/i.test(message)) requestedBlockCategories.push('story');
+            if (/\barticle\b/i.test(message)) requestedBlockCategories.push('article');
+            if (/\bcolumns?\b/i.test(message)) requestedBlockCategories.push('columns');
+            if (/\boffer\b/i.test(message)) requestedBlockCategories.push('offer');
+            if (/\bcard\b/i.test(message)) requestedBlockCategories.push('card');
+            if (/\bflight\b/i.test(message)) requestedBlockCategories.push('flight');
+            if (/\bcta\b|\bcall.to.action\b|\bbutton\b/i.test(message)) requestedBlockCategories.push('cta');
+            if (/\bpartner\b/i.test(message)) requestedBlockCategories.push('partner');
+            if (/\bfooter\b/i.test(message)) requestedBlockCategories.push('footer');
+            if (/\bterms\b/i.test(message)) requestedBlockCategories.push('terms');
+        }
+        const blockMaxResults = isFullEmailQuery ? 8 : 1;
         const ragResult = typeof isKBReady === 'function' && isKBReady()
-            ? await buildRAGContext(pool, message, { namespaces: ragNamespaces, visualQuery: isVisualQuery, maxTokens: isVisualQuery ? 4000 : 3000, maxMedia: isBlockQuery ? 1 : (isVisualQuery ? 4 : 2), minScore: isBlockQuery ? 0.6 : undefined, maxResults: isBlockQuery ? 1 : undefined })
+            ? await buildRAGContext(pool, message, { namespaces: ragNamespaces, visualQuery: isVisualQuery, maxTokens: isVisualQuery ? 4000 : 3000, maxMedia: isBlockQuery ? blockMaxResults : (isVisualQuery ? 4 : 2), minScore: isBlockQuery ? 0.5 : undefined, maxResults: isBlockQuery ? blockMaxResults : undefined, topKOverride: isBlockQuery ? 30 : undefined })
             : { context: '', sources: [], mediaResults: [] };
+        console.log(`[Pipeline:RAG] agent=${session.agent_id} isBlockQuery=${isBlockQuery} isFullEmail=${isFullEmailQuery} isVisual=${isVisualQuery} namespaces=${JSON.stringify(ragNamespaces)} sources=${ragResult.sources?.length} htmlSources=${ragResult.sources?.filter(s=>s.htmlSource).length} mediaHtml=${ragResult.mediaResults?.filter(m=>m.mediaType==='email_html').length}`);
 
         const agent = {
             id: session.agent_id,
@@ -6126,7 +6214,12 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
             skills: session.agent_skills, tools: session.agent_tools
         };
         const stage = { name: session.stage_name, description: session.stage_description };
-        const systemPrompt = buildPipelineSystemPrompt(agent, stage, project, accumulatedContext, ragResult.context);
+        let systemPrompt = buildPipelineSystemPrompt(agent, stage, project, accumulatedContext, ragResult.context);
+        // Inject canvas state so the AI knows what's already on the canvas
+        if (canvasBlockNames?.length > 0) {
+            systemPrompt += `\n\n## Current Canvas State\nThe canvas already has these blocks in order: ${canvasBlockNames.map(n => `"${n}"`).join(', ')}.\nDo NOT generate a full HTML document — only output a new block fragment (no <!DOCTYPE html>).`;
+        }
+        // Block assembly mode note will be injected after filteredPipelineHtml is computed (below)
 
         const historyRes = await pool.query(
             `SELECT role, content FROM pipeline_session_messages
@@ -6157,14 +6250,68 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
         // Send email html as SSE event (too large for HTTP headers)
         const pipelineHtmlSources = ragResult.sources?.filter(s => s.htmlSource) || [];
         const pipelineHtmlMedia = ragResult.mediaResults?.filter(m => m.mediaType === 'email_html' && m.htmlSource) || [];
-        const allPipelineHtml = [...pipelineHtmlSources, ...pipelineHtmlMedia].filter((m, i, arr) => arr.findIndex(x => (x.title || x.documentTitle) === (m.title || m.documentTitle)) === i);
-        if (allPipelineHtml.length > 0) {
-            res.write(`data: ${JSON.stringify({ html_sources: allPipelineHtml.map(s => ({ htmlSource: s.htmlSource, title: s.title || s.documentTitle, filePath: s.filePath })) })}\n\n`);
+        const allPipelineHtmlRaw = [...pipelineHtmlSources, ...pipelineHtmlMedia].filter((m, i, arr) => arr.findIndex(x => (x.title || x.documentTitle) === (m.title || m.documentTitle)) === i);
+        // Sort blocks by logical email position: header → hero → body → cta → footer
+        const POSITION_ORDER = { header: 0, preheader: 0, 'section-heading': 1, 'section-title': 1, hero: 2, 'body-copy': 3, story: 4, offer: 5, article: 5, card: 5, columns: 5, flight: 5, cta: 6, partner: 7, infographic: 7, footer: 8, terms: 9 };
+        const POSITION_META_ORDER = { top: 0, body: 1, any: 2, footer: 3 };
+        const allPipelineHtml = allPipelineHtmlRaw.sort((a, b) => {
+            const aCat = a.category || '';
+            const bCat = b.category || '';
+            const aPos = a.position || 'any';
+            const bPos = b.position || 'any';
+            const aOrder = POSITION_ORDER[aCat] ?? (POSITION_META_ORDER[aPos] ?? 2) * 10;
+            const bOrder = POSITION_ORDER[bCat] ?? (POSITION_META_ORDER[bPos] ?? 2) * 10;
+            return aOrder - bOrder;
+        });
+        // Filter to exactly one block per requested category, in requested order
+        let filteredPipelineHtml;
+        if (isFullEmailQuery && requestedBlockCategories.length > 0) {
+            filteredPipelineHtml = [];
+            for (const cat of requestedBlockCategories) {
+                const match = allPipelineHtml.find(s => s.category === cat && !filteredPipelineHtml.includes(s));
+                if (match) filteredPipelineHtml.push(match);
+            }
+            console.log(`[Pipeline:filter] requested=${JSON.stringify(requestedBlockCategories)} matched=${filteredPipelineHtml.map(s=>s.category).join(',')}`);
+        } else {
+            filteredPipelineHtml = allPipelineHtml;
+        }
+        // Inject block assembly note now that filteredPipelineHtml is known
+        if (isBlockQuery && filteredPipelineHtml.length > 0) {
+            const blockTitles = filteredPipelineHtml.map(s => s.title || s.documentTitle).filter(Boolean).join(', ');
+            systemPrompt += `\n\n## ⚠️ BLOCK ASSEMBLY MODE — MANDATORY\nThe canvas system has automatically placed these blocks: ${blockTitles}.\nYour text response MUST be plain text ONLY — absolutely NO HTML code, NO \`\`\`html blocks, NO raw tags.\nSimply acknowledge in 1-2 sentences which blocks were placed and ask what adjustments are needed.`;
+        }
+        // Parse insertion position from user message using canvas block names sent by frontend
+        let insertAfterName = null;
+        if (isInsertionQuery && canvasBlockNames?.length > 0) {
+            const afterMatch = message.match(/\b(?:after|debajo\s+de(?:l)?|below|under|beneath|después\s+de(?:l)?|despues\s+de(?:l)?)\s+(?:the\s+|el\s+|la\s+|los\s+|las\s+)?(.+?)(?:\s*$|\s+and\b|\s+block\b)/i);
+            const beforeMatch = message.match(/\b(?:before|encima\s+de(?:l)?|above|over|antes\s+de(?:l)?)\s+(?:the\s+|el\s+|la\s+|los\s+|las\s+)?(.+?)(?:\s*$|\s+and\b|\s+block\b)/i);
+            const betweenMatch = message.match(/\b(?:between|entre)\s+(?:the\s+|el\s+|la\s+)?(.+?)\s+(?:and|y)\s+(?:the\s+|el\s+|la\s+)?(.+?)(?:\s*$|\s+block\b)/i);
+            const keyword = afterMatch?.[1]?.trim() || betweenMatch?.[1]?.trim();
+            const beforeKeyword = beforeMatch?.[1]?.trim() || betweenMatch?.[2]?.trim();
+            if (keyword) {
+                insertAfterName = canvasBlockNames.find(n => n.toLowerCase().includes(keyword.toLowerCase())) || null;
+            } else if (beforeKeyword) {
+                const idx = canvasBlockNames.findIndex(n => n.toLowerCase().includes(beforeKeyword.toLowerCase()));
+                if (idx > 0) insertAfterName = canvasBlockNames[idx - 1];
+            }
+            console.log(`[Pipeline:insert] keyword="${keyword}" beforeKeyword="${beforeKeyword}" insertAfterName="${insertAfterName}" canvasBlocks=${JSON.stringify(canvasBlockNames)}`);
+        }
+        if (filteredPipelineHtml.length > 0) {
+            const sources = filteredPipelineHtml.map(s => ({
+                htmlSource: s.htmlSource,
+                title: s.title || s.documentTitle,
+                filePath: s.filePath,
+                ...(isInsertionQuery && insertAfterName ? { insertAfter: insertAfterName } : {}),
+            }));
+            res.write(`data: ${JSON.stringify({ html_sources: sources })}\n\n`);
         }
 
         // Detect image generation request — generate inline before LLM text response
         const imageRequestRE = /\b(imagen?|image|foto|photo|banner|hero|visual|picture|ilustra|generat|crea(?:r)?|diseña|design|make)\b.{0,80}\b(imagen?|image|foto|photo|banner|hero|avion|plane|aircraft|logo|background|fondo)\b/i;
-        const isContentSession = session.agent_id === 'lucia' || (session.agent_role || '').toLowerCase().includes('content');
+        const isContentSession = session.agent_id === 'lucia'
+            || (session.agent_role || '').toLowerCase().includes('content agent')
+            || (session.agent_role || '').toLowerCase().includes('content strategist')
+            || (session.agent_role || '').toLowerCase().includes('content creator');
         const isImageRequest = imageRequestRE.test(message) && isGeminiReady() && isContentSession;
         console.log(`[Chat:image-detect] isGeminiReady=${isGeminiReady()} isContentSession=${isContentSession} isImageRequest=${isImageRequest} agent=${session.agent_id}`);
         if (imageRequestRE.test(message) && isContentSession && !isGeminiReady()) {
@@ -6192,6 +6339,23 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
             } catch (imgErr) {
                 console.warn('[Chat] Inline image generation failed:', imgErr.message);
             }
+        }
+
+        // When blocks were placed automatically, skip Claude and send a plain-text confirmation
+        if (isBlockQuery && filteredPipelineHtml.length > 0) {
+            const blockNames = filteredPipelineHtml.map(s => s.title || s.documentTitle).filter(Boolean);
+            const missingCats = requestedBlockCategories.filter(c => !filteredPipelineHtml.some(s => s.category === c));
+            let confirmText = `I've added ${blockNames.join(', ')} to the canvas.`;
+            if (missingCats.length > 0) confirmText += ` Note: ${missingCats.join(', ')} not found in the block library.`;
+            confirmText += ' What adjustments would you like to make?';
+            res.write(`data: ${JSON.stringify({ text: confirmText })}\n\n`);
+            await pool.query(
+                `INSERT INTO pipeline_session_messages (session_id, role, content) VALUES ($1, 'assistant', $2)`,
+                [sessionId, confirmText]
+            );
+            res.write('data: [DONE]\n\n');
+            res.end();
+            return;
         }
 
         let fullResponse = '';
