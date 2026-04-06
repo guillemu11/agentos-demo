@@ -389,13 +389,13 @@ function App() {
           {/* Email Spec warning badge */}
           {!editMode && (!selectedProject.email_spec?.design_notes && !(selectedProject.email_spec?.blocks?.length > 0)) && (
             <div style={{
-              background: '#fef9c3',
-              border: '1px solid #eab308',
+              background: 'color-mix(in srgb, var(--accent-yellow) 15%, transparent)',
+              border: '1px solid var(--accent-yellow)',
               borderRadius: '8px',
               padding: '10px 16px',
               marginBottom: '16px',
               fontSize: '0.85rem',
-              color: '#92400e'
+              color: 'var(--text-main)'
             }}>
               {t('emailSpec.warningBadge')}
             </div>
