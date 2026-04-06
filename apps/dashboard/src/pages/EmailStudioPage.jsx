@@ -7,6 +7,7 @@ import EmailBuilderPreview from '../components/EmailBuilderPreview.jsx';
 import AgentTicketsPanel from '../components/agent-views/shared/AgentTicketsPanel.jsx';
 import HandoffModal from '../components/HandoffModal.jsx';
 import EmailBlocksPanel from '../components/EmailBlocksPanel.jsx';
+import VariantPreviewModal from '../components/VariantPreviewModal.jsx';
 import { injectIntoSlot, mergeAiHtmlIntoTemplate, fetchEmailTemplate, splitIntoBlocks } from '../utils/emailTemplate.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
@@ -31,6 +32,9 @@ export default function EmailStudioPage() {
   const [chatInput, setChatInput] = useState('');
   const [contentVariants, setContentVariants] = useState({});
   const [contentReady, setContentReady] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
 
   const pipeline = useAgentPipelineSession(AGENT_ID);
 
@@ -72,6 +76,20 @@ export default function EmailStudioPage() {
   };
   const removeBlock = (i) => setBlocks(prev => prev.filter((_, idx) => idx !== i));
 
+  async function fetchTemplates() {
+    const projectId = pipeline.selectedTicket?.project_id;
+    if (!projectId) return;
+    setTemplatesLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/projects/${projectId}/emails`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setTemplates(Array.isArray(data) ? data : (data.emails || []));
+      }
+    } catch {}
+    setTemplatesLoading(false);
+  }
+
   // Fetch content variants when project changes
   useEffect(() => {
     const projectId = pipeline.selectedTicket?.project_id;
@@ -86,6 +104,10 @@ export default function EmailStudioPage() {
       })
       .catch(() => {});
   }, [pipeline.selectedTicket?.project_id]);
+
+  useEffect(() => {
+    if (activeTab === 'templates') fetchTemplates();
+  }, [activeTab, pipeline.selectedTicket?.project_id]);
 
   // Pre-select ticket from URL param once tickets are loaded
   useEffect(() => {
@@ -135,6 +157,123 @@ export default function EmailStudioPage() {
   }
 
   if (!agent) return <div className="studio-page studio-loading">Loading...</div>;
+
+function TemplateCard({ template, contentReady, contentVariants, projectId, deletingId, setDeletingId, onRefresh, t }) {
+  const API_URL = import.meta.env.VITE_API_URL || '/api';
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState(template.variant_name || '');
+  const [showModal, setShowModal] = useState(false);
+  const isFinal = template.status === 'approved';
+
+  async function saveName() {
+    if (!nameValue.trim() || nameValue === template.variant_name) { setEditingName(false); return; }
+    await fetch(`${API_URL}/emails/${template.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ variant_name: nameValue.trim() }),
+    });
+    setEditingName(false);
+    onRefresh();
+  }
+
+  async function setAsFinal() {
+    await fetch(`${API_URL}/emails/${template.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ set_final: true, project_id: projectId }),
+    });
+    onRefresh();
+  }
+
+  async function deleteTemplate() {
+    await fetch(`${API_URL}/emails/${template.id}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    setDeletingId(null);
+    onRefresh();
+  }
+
+  const date = new Date(template.created_at).toLocaleDateString();
+
+  return (
+    <div className={`email-template-card${isFinal ? ' email-template-card--final' : ''}`}>
+      {/* Thumbnail */}
+      <div className="email-template-thumb">
+        <iframe
+          sandbox="allow-same-origin"
+          srcDoc={template.html_content || ''}
+          className="email-template-thumb-iframe"
+          scrolling="no"
+          tabIndex={-1}
+        />
+      </div>
+
+      {/* Info */}
+      <div className="email-template-info">
+        <div className="email-template-name-row">
+          {editingName ? (
+            <input
+              className="email-template-name-input"
+              value={nameValue}
+              onChange={e => setNameValue(e.target.value)}
+              onBlur={saveName}
+              onKeyDown={e => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setEditingName(false); }}
+              autoFocus
+            />
+          ) : (
+            <span className="email-template-name" onClick={() => setEditingName(true)} title="Click para renombrar">
+              {template.variant_name || 'Sin nombre'}
+            </span>
+          )}
+          <span className={`email-template-badge${isFinal ? ' email-template-badge--final' : ''}`}>
+            {isFinal ? t('studio.templateFinal') : 'draft'}
+          </span>
+        </div>
+        <span className="email-template-date">{date}</span>
+
+        <div className="email-template-actions">
+          <button
+            className="email-template-btn email-template-btn--test"
+            onClick={() => setShowModal(true)}
+            disabled={!contentReady}
+            title={!contentReady ? t('emailBuilder.waitingVariants') : t('emailBuilder.previewTest')}
+          >
+            🧪 {t('emailBuilder.previewTest')}
+          </button>
+          {!isFinal ? (
+            <button className="email-template-btn email-template-btn--use" onClick={setAsFinal}>
+              ⭐ {t('studio.templateUseThis')}
+            </button>
+          ) : (
+            <span className="email-template-btn email-template-btn--chosen">✓ {t('studio.templateUseThis')}</span>
+          )}
+          {deletingId === template.id ? (
+            <>
+              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{t('studio.templateDeleteConfirm')}</span>
+              <button className="email-template-btn email-template-btn--danger" onClick={deleteTemplate}>Sí</button>
+              <button className="email-template-btn" onClick={() => setDeletingId(null)}>No</button>
+            </>
+          ) : (
+            <button className="email-template-btn email-template-btn--delete" onClick={() => setDeletingId(template.id)}>
+              🗑
+            </button>
+          )}
+        </div>
+      </div>
+
+      {showModal && (
+        <VariantPreviewModal
+          html={template.html_content}
+          contentVariants={contentVariants}
+          onClose={() => setShowModal(false)}
+        />
+      )}
+    </div>
+  );
+}
 
   return (
     <div className="studio-page">
@@ -252,6 +391,7 @@ export default function EmailStudioPage() {
                 setBuilderStatus(t('emailBlocks.added').replace('{name}', block.name));
                 setTimeout(() => setBuilderStatus(''), 3000);
               }}
+              onTemplateSaved={fetchTemplates}
             />
           </div>
         )}
@@ -267,12 +407,38 @@ export default function EmailStudioPage() {
             />
           </div>
         )}
-        {(activeTab === 'blocks' || activeTab === 'templates') && (
+        {activeTab === 'blocks' && (
           <div className="studio-full-panel" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
             <p style={{ marginBottom: 12 }}>Vuelve al agente para acceder a este panel.</p>
             <button className="studio-back-btn" onClick={() => navigate('/app/workspace/agent/html-developer')}>
               {t('studio.backToAgent')}
             </button>
+          </div>
+        )}
+
+        {activeTab === 'templates' && (
+          <div className="studio-full-panel email-templates-panel">
+            {templatesLoading && <p style={{ color: 'var(--text-muted)', padding: 24 }}>Cargando...</p>}
+            {!templatesLoading && templates.length === 0 && (
+              <p className="email-templates-empty">{t('studio.noTemplates')}</p>
+            )}
+            {!templatesLoading && templates.length > 0 && (
+              <div className="email-template-list">
+                {templates.map(tpl => (
+                  <TemplateCard
+                    key={tpl.id}
+                    template={tpl}
+                    contentReady={contentReady}
+                    contentVariants={contentVariants}
+                    projectId={pipeline.selectedTicket?.project_id}
+                    deletingId={deletingId}
+                    setDeletingId={setDeletingId}
+                    onRefresh={fetchTemplates}
+                    t={t}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
