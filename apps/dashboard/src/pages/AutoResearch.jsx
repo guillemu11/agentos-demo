@@ -4,6 +4,7 @@ import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { Search, Plus, Loader, X, Globe, Database, Zap, Trash2 } from 'lucide-react';
 import AutoResearchPresentation from '../components/AutoResearchPresentation.jsx';
 import AutoExperimentDashboard from '../components/AutoExperimentDashboard.jsx';
+import ResearchLabTab from '../components/ResearchLabTab.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -121,6 +122,7 @@ export default function AutoResearch() {
         { id: 'concept', label: t('autoExperiment.tabConcept') },
         { id: 'research', label: t('autoExperiment.tabResearch') },
         { id: 'experiments', label: t('autoExperiment.tabExperiments') },
+        { id: 'lab', label: t('researchLab.tabLabel') },
     ];
 
     return (
@@ -338,6 +340,9 @@ export default function AutoResearch() {
 
             {/* Tab: Experiments */}
             {activeTab === 'experiments' && <AutoExperimentDashboard />}
+
+            {/* Tab: Lab */}
+            {activeTab === 'lab' && <ResearchLabTab />}
         </div>
     );
 }
