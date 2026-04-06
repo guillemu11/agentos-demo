@@ -1406,6 +1406,10 @@ export const translations = {
       allVariants: 'Todas las variantes',
       noVariantsReady: 'Sin variantes disponibles',
       sentCount: '{n} enviado(s)',
+      savePopoverPlaceholder: 'Nombre de la template',
+      saveConfirm: 'Guardar',
+      savedToast: 'Template guardada ✓',
+      waitingVariants: 'Esperando variants de Sofia',
     },
 
     contentAgent: {
@@ -1452,6 +1456,11 @@ export const translations = {
       chat: 'Chat',
       blockLibrary: 'Biblioteca de bloques',
       templates: 'Plantillas',
+      templateUseThis: 'Usar esta',
+      templateFinal: 'final',
+      templateDelete: 'Borrar',
+      templateDeleteConfirm: '¿Seguro?',
+      noTemplates: 'No hay templates guardadas. Pulsa "💾 Save" para guardar la actual.',
     },
 
     emailBlocks: {
@@ -2898,6 +2907,10 @@ export const translations = {
       allVariants: 'All variants',
       noVariantsReady: 'No variants available',
       sentCount: '{n} sent',
+      savePopoverPlaceholder: 'Template name',
+      saveConfirm: 'Save',
+      savedToast: 'Template saved ✓',
+      waitingVariants: "Waiting for Sofia's variants",
     },
 
     contentAgent: {
@@ -2944,6 +2957,11 @@ export const translations = {
       chat: 'Chat',
       blockLibrary: 'Block Library',
       templates: 'Templates',
+      templateUseThis: 'Use this',
+      templateFinal: 'final',
+      templateDelete: 'Delete',
+      templateDeleteConfirm: 'Sure?',
+      noTemplates: 'No templates saved yet. Click "💾 Save" to save the current one.',
     },
 
     emailBlocks: {
