@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { CAMPAIGN_GROUPS, CAMPAIGNS } from '../data/emiratesCampaigns.js';
 import { BAU_CAMPAIGN_TYPES, BAU_CATEGORIES, getAllBauCategories } from '../data/emiratesBauTypes.js';
+import WaTab from '../components/WaTab.jsx';
 
 const complexityColors = {
     low: '#10b981',
@@ -71,6 +72,19 @@ export default function CampaignsHub() {
                     onClick={() => setTab('lifecycle')}
                 >
                     {t('campaigns.lifecycleTab')} ({CAMPAIGNS.length})
+                </button>
+                <button
+                    className={`weekly-toggle-btn ${tab === 'whatsapp' ? 'active' : ''}`}
+                    onClick={() => setTab('whatsapp')}
+                    style={tab === 'whatsapp' ? { borderColor: 'var(--wa-green)', color: 'var(--wa-green)' } : {}}
+                >
+                    {t('whatsapp.tabLabel')}&nbsp;
+                    <span style={{
+                        fontSize: '0.6rem', fontWeight: 800, background: 'var(--wa-green)',
+                        color: '#0b1a11', padding: '1px 5px', borderRadius: 6, verticalAlign: 'middle',
+                    }}>
+                        {t('whatsapp.newBadge')}
+                    </span>
                 </button>
             </div>
 
@@ -300,6 +314,9 @@ export default function CampaignsHub() {
                     })}
                 </>
             )}
+
+            {/* ─── WHATSAPP TAB ─── */}
+            {tab === 'whatsapp' && <WaTab />}
         </div>
     );
 }
