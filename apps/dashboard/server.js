@@ -339,6 +339,57 @@ function requireOwnerOrAdmin(req, res, next) {
 
 // app.use('/api', requireAuth); // TODO: re-enable auth when ready
 
+// ─── Email Template Helpers ──────────────────────────────────────────────────
+
+// Extract AMPscript %%=v(@varName)=%% variables from HTML
+function extractAmpscriptVars(html) {
+    const pattern = /%%=v\(@(\w+)\)=%%/g;
+    const vars = new Set();
+    let match;
+    while ((match = pattern.exec(html)) !== null) {
+        vars.add(`@${match[1]}`);
+    }
+    return [...vars];
+}
+
+// Parse [EMAIL_VARIABLES]...[/EMAIL_VARIABLES] block from Lucía's response
+function parseEmailVariables(text) {
+    const match = text.match(/\[EMAIL_VARIABLES\]([\s\S]*?)\[\/EMAIL_VARIABLES\]/);
+    if (!match) return null;
+    const variables = {};
+    const lines = match[1].trim().split('\n');
+    for (const line of lines) {
+        const colonIdx = line.indexOf(':');
+        if (colonIdx === -1) continue;
+        const key = line.substring(0, colonIdx).trim();
+        const value = line.substring(colonIdx + 1).trim();
+        if (key.startsWith('@') && value) {
+            variables[key] = value;
+        }
+    }
+    return Object.keys(variables).length > 0 ? variables : null;
+}
+
+// Parse [CONTENT_BY_BLOCK]...[/CONTENT_BY_BLOCK] block
+function parseContentByBlock(text) {
+    const match = text.match(/\[CONTENT_BY_BLOCK\]([\s\S]*?)\[\/CONTENT_BY_BLOCK\]/);
+    if (!match) return null;
+    const result = {};
+    const lines = match[1].trim().split('\n');
+    let currentBlock = null;
+    for (const line of lines) {
+        const blockMatch = line.match(/^block:\s*(\w+)/);
+        if (blockMatch) { currentBlock = blockMatch[1]; result[currentBlock] = {}; continue; }
+        if (!currentBlock) continue;
+        const colonIdx = line.indexOf(':');
+        if (colonIdx === -1) continue;
+        const key = line.substring(0, colonIdx).trim();
+        const value = line.substring(colonIdx + 1).trim();
+        if (key.startsWith('@') && value) result[currentBlock][key] = value;
+    }
+    return Object.keys(result).length > 0 ? result : null;
+}
+
 // ─── Crypto Helpers (for API key encryption) ────────────────────────────────
 
 function getEncryptionKey() {
@@ -551,7 +602,6 @@ app.post('/api/projects/:id/emails', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'market, language, html_content are required' });
   }
   try {
-    // Get next version number for this combination
     const versionRes = await pool.query(
       `SELECT COALESCE(MAX(version), 0) + 1 AS next_version
        FROM email_proposals
@@ -568,6 +618,27 @@ app.post('/api/projects/:id/emails', requireAuth, async (req, res) => {
        html_content, subject_line || '', variant_name || `v${version}`, status || 'draft']
     );
     res.status(201).json(result.rows[0]);
+
+    // Fire-and-forget: extract AMPscript variables and update email_spec
+    const extracted = extractAmpscriptVars(html_content);
+    if (extracted.length > 0) {
+        pool.query('SELECT email_spec FROM projects WHERE id = $1', [id])
+            .then(projRes => {
+                const spec = projRes.rows[0]?.email_spec || {};
+                const existing = spec.variable_list || [];
+                const merged = [...new Set([...existing, ...extracted])];
+                const newHtmlVersion = (spec.html_version || 0) + 1;
+                return pool.query(
+                    `UPDATE projects
+                     SET email_spec = email_spec
+                       || jsonb_build_object('variable_list', $1::jsonb)
+                       || jsonb_build_object('html_version', $2::int)
+                     WHERE id = $3`,
+                    [JSON.stringify(merged), newHtmlVersion, id]
+                );
+            })
+            .catch(e => console.warn('[email-save] Variable extraction error:', e.message));
+    }
   } catch (err) {
     console.error('POST /api/projects/:id/emails error:', err);
     res.status(500).json({ error: 'Failed to save email version' });
@@ -6105,6 +6176,57 @@ app.post('/api/projects/:id/sessions/:sessionId/initialize', requireAuth, async 
         const stage = { name: session.stage_name, description: session.stage_description };
         let systemPrompt = buildPipelineSystemPrompt(agent, stage, project, accumulatedContext, ragResult.context);
 
+        // If this is Lucía, inject the latest email template HTML so she can fill variables
+        const isLuciaAgent = session.agent_id === 'lucia'
+            || (session.agent_role || '').toLowerCase().includes('content agent')
+            || (session.agent_role || '').toLowerCase().includes('content strategist')
+            || (session.agent_role || '').toLowerCase().includes('content creator');
+        if (isLuciaAgent) {
+            const emailRes = await pool.query(
+                `SELECT html_content FROM email_proposals
+                 WHERE project_id = $1
+                 ORDER BY created_at DESC LIMIT 1`,
+                [projectId]
+            );
+            const latestHtml = emailRes.rows[0]?.html_content;
+            if (latestHtml) {
+                const extractedVars = extractAmpscriptVars(latestHtml);
+                const spec = project.email_spec || {};
+                const varGuidance = extractedVars.map(v =>
+                    `  - ${v}: ${spec.variable_context?.[v] || 'Generate campaign-appropriate content'}`
+                ).join('\n');
+                systemPrompt += `\n\n## Email Template (from HTML Developer)
+The following HTML template has been created. It uses AMPscript variables that you must fill with campaign-appropriate content.
+Extracted variables: ${extractedVars.join(', ')}
+${varGuidance ? `\nVariable guidance:\n${varGuidance}` : ''}
+
+When you are ready to provide content for these variables, output them in this exact format:
+[EMAIL_VARIABLES]
+@variableName: value here
+@otherVariable: value here
+[/EMAIL_VARIABLES]
+
+If you find variables in the template that aren't listed above, fill them automatically based on the campaign brief.
+
+HTML Template (truncated for context):
+${latestHtml.substring(0, 6000)}${latestHtml.length > 6000 ? '\n...(truncated)' : ''}`;
+            } else {
+                // No HTML yet — instruct Lucía to output CONTENT_BY_BLOCK
+                systemPrompt += `\n\n## Email Content Mode
+No HTML template exists yet. Generate content per block from the Email Specification above.
+Output format:
+[CONTENT_BY_BLOCK]
+block: hero
+@headline: value here
+@preheader: value here
+
+block: cta
+@main_cta: value here
+@cta_url: https://placeholder.com
+[/CONTENT_BY_BLOCK]`;
+            }
+        }
+
         // 3. Append initial message instructions
         systemPrompt += `\n\n## INITIAL MESSAGE
 This is your very first message in this stage session. You MUST:
@@ -6263,6 +6385,29 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
             systemPrompt += `\n\n## Current Canvas State\nThe canvas already has these blocks in order: ${canvasBlockNames.map(n => `"${n}"`).join(', ')}.\nDo NOT generate a full HTML document — only output a new block fragment (no <!DOCTYPE html>).`;
         }
         // Block assembly mode note will be injected after filteredPipelineHtml is computed (below)
+
+        // Inject email template variable context for Lucía in every chat turn
+        const isLuciaChat = session.agent_id === 'lucia'
+            || (session.agent_role || '').toLowerCase().includes('content agent')
+            || (session.agent_role || '').toLowerCase().includes('content strategist')
+            || (session.agent_role || '').toLowerCase().includes('content creator');
+        if (isLuciaChat) {
+            const emailChatRes = await pool.query(
+                `SELECT html_content FROM email_proposals
+                 WHERE project_id = $1
+                 ORDER BY created_at DESC LIMIT 1`,
+                [projectId]
+            );
+            const chatHtml = emailChatRes.rows[0]?.html_content;
+            if (chatHtml) {
+                const chatVars = extractAmpscriptVars(chatHtml);
+                if (chatVars.length > 0) {
+                    systemPrompt += `\n\n## Email Template Variables Available
+Variables to fill: ${chatVars.join(', ')}
+When providing variable content, use [EMAIL_VARIABLES]...[/EMAIL_VARIABLES] format.`;
+                }
+            }
+        }
 
         const historyRes = await pool.query(
             `SELECT role, content FROM pipeline_session_messages
@@ -6428,6 +6573,42 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
         if (stageReadyMatch) {
             res.write(`data: ${JSON.stringify({ handoff_suggestion: true, reason: stageReadyMatch[1] })}\n\n`);
             fullResponse = fullResponse.replace(/\[STAGE_READY:\s*.+?\]/, '').trim();
+        }
+
+        // Parse Lucía's [EMAIL_VARIABLES] or [CONTENT_BY_BLOCK] output
+        const isLuciaResponse = session.agent_id === 'lucia'
+            || (session.agent_role || '').toLowerCase().includes('content agent')
+            || (session.agent_role || '').toLowerCase().includes('content strategist');
+        if (isLuciaResponse) {
+            const emailVars = parseEmailVariables(fullResponse);
+            const contentByBlock = !emailVars ? parseContentByBlock(fullResponse) : null;
+
+            if (emailVars || contentByBlock) {
+                const currentSpec = (await pool.query('SELECT email_spec FROM projects WHERE id = $1', [projectId])).rows[0]?.email_spec || {};
+                const deliverableUpdate = {};
+
+                if (emailVars) {
+                    deliverableUpdate.variable_values = emailVars;
+                    deliverableUpdate.preview_version = currentSpec.html_version || 0;
+                }
+                if (contentByBlock) {
+                    deliverableUpdate.content_by_block = contentByBlock;
+                    const flatVars = {};
+                    for (const blockVars of Object.values(contentByBlock)) {
+                        Object.assign(flatVars, blockVars);
+                    }
+                    deliverableUpdate.variable_values = flatVars;
+                    deliverableUpdate.preview_version = currentSpec.html_version || 0;
+                }
+
+                await pool.query(
+                    `UPDATE project_agent_sessions
+                     SET deliverables = COALESCE(deliverables, '{}'::jsonb) || $1::jsonb
+                     WHERE id = $2`,
+                    [JSON.stringify(deliverableUpdate), sessionId]
+                );
+                res.write(`data: ${JSON.stringify({ email_variables_saved: true })}\n\n`);
+            }
         }
 
         await pool.query(
