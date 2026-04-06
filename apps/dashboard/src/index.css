@@ -12453,34 +12453,41 @@ body.sidebar-collapsed > .inbox-drawer {
 
 .email-save-popover {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 8px);
   right: 0;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  background: #1e1e2e;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
   padding: 12px;
-  width: 220px;
+  width: 230px;
   z-index: 200;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.3);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .email-save-popover-input {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 7px 10px;
-  color: var(--text-primary);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 7px;
+  padding: 8px 10px;
+  color: #f1f5f9;
   font-size: 13px;
   width: 100%;
   outline: none;
   box-sizing: border-box;
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+
+.email-save-popover-input::placeholder {
+  color: rgba(255,255,255,0.3);
 }
 
 .email-save-popover-input:focus {
-  border-color: var(--accent-green, #22c55e);
+  border-color: var(--accent-green, #10b981);
+  background: rgba(255,255,255,0.09);
 }
 
 .email-save-popover-actions {
@@ -12491,38 +12498,49 @@ body.sidebar-collapsed > .inbox-drawer {
 
 .email-save-popover-confirm {
   flex: 1;
-  background: var(--accent-green, #22c55e);
-  color: #000;
+  background: var(--accent-green, #10b981);
+  color: #fff;
   border: none;
-  border-radius: 5px;
-  padding: 6px 10px;
+  border-radius: 6px;
+  padding: 7px 10px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.email-save-popover-confirm:hover:not(:disabled) {
+  opacity: 0.88;
 }
 
 .email-save-popover-confirm:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
 .email-save-popover-cancel {
-  background: var(--bg-tertiary, #2a2a3e);
-  border: none;
-  border-radius: 5px;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
   padding: 6px 8px;
-  color: var(--text-muted);
+  color: rgba(255,255,255,0.5);
   cursor: pointer;
   display: flex;
   align-items: center;
+  transition: background 0.15s;
+}
+
+.email-save-popover-cancel:hover {
+  background: rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.8);
 }
 
 .email-save-toast {
   position: absolute;
   bottom: 40px;
   right: 16px;
-  background: var(--accent-green, #22c55e);
-  color: #000;
+  background: #10b981;
+  color: #fff;
   padding: 7px 14px;
   border-radius: 6px;
   font-size: 13px;
@@ -12684,6 +12702,15 @@ body.sidebar-collapsed > .inbox-drawer {
   cursor: not-allowed;
 }
 
+.email-template-btn--edit {
+  background: rgba(99, 102, 241, 0.12);
+  color: #818cf8;
+}
+
+.email-template-btn--edit:hover {
+  background: rgba(99, 102, 241, 0.2);
+}
+
 .email-template-btn--test {
   background: rgba(34, 197, 94, 0.12);
   color: var(--accent-green, #22c55e);
@@ -12717,6 +12744,252 @@ body.sidebar-collapsed > .inbox-drawer {
   background: rgba(239, 68, 68, 0.15);
   color: #ef4444;
 }
-  border-radius: 12px;
-  padding: 14px;
+
+/* ── Block Studio ──────────────────────────────────── */
+.block-studio-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
 }
+
+.block-studio-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Block Manager (Blocks tab) */
+.block-manager-layout {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.block-manager-grid-panel {
+  display: flex;
+  flex-direction: column;
+  width: 55%;
+  border-right: 1px solid var(--border-light);
+  min-height: 0;
+}
+
+.block-manager-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+
+.block-manager-search {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.block-manager-search:focus {
+  border-color: var(--primary);
+}
+
+.block-manager-filters {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+
+.block-manager-filter-chip {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.block-manager-filter-chip:hover { color: var(--text-primary); }
+
+.block-manager-filter-chip.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.block-manager-grid {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 14px;
+  overflow-y: auto;
+  align-content: flex-start;
+}
+
+.block-manager-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 8px;
+  width: 130px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.block-manager-card:hover {
+  border-color: var(--primary);
+}
+
+.block-manager-card.selected {
+  border: 2px solid var(--primary);
+  background: var(--bg-hover, rgba(124,58,237,0.08));
+}
+
+.block-manager-thumb {
+  width: 100%;
+  height: 60px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  border: none;
+}
+
+.block-manager-card-name {
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  font-weight: 500;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.block-manager-card-cat {
+  font-size: 0.7rem;
+  color: var(--primary);
+}
+
+/* Block Manager — action panel (right side) */
+.block-manager-action-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  min-height: 0;
+}
+
+.block-manager-preview {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-primary);
+}
+
+.block-manager-preview-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.block-manager-meta {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+
+.block-manager-meta-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 3px;
+}
+
+.block-manager-meta-cat {
+  font-size: 0.78rem;
+  color: var(--primary);
+  margin-bottom: 5px;
+}
+
+.block-manager-meta-desc {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.block-manager-actions {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.block-manager-action-btn {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: opacity 0.15s;
+}
+
+.block-manager-action-btn:hover { opacity: 0.88; }
+
+.block-manager-action-btn.secondary {
+  background: transparent;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+}
+
+.block-manager-action-hint {
+  font-size: 0.7rem;
+  font-weight: 400;
+  opacity: 0.75;
+  margin-top: 2px;
+}
+
+.block-manager-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  padding: 20px;
+  text-align: center;
+}
+
+.block-studio-reingest-btn {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.block-studio-reingest-btn:hover { color: var(--text-primary); border-color: var(--primary); }
+.block-studio-reingest-btn:disabled { opacity: 0.5; cursor: not-allowed; }

@@ -1489,6 +1489,22 @@ export const translations = {
       templateEdit: 'Editar',
     },
 
+    blockStudio: {
+      title: 'Block Studio',
+      tabBuilder: 'Builder',
+      tabBlocks: 'Blocks',
+      addToCanvas: 'Añadir al canvas',
+      addToCanvasHint: 'Lo añade como bloque nuevo al final',
+      useAsBase: 'Usar como base',
+      useAsBaseHint: 'Abre en Builder con chat listo para modificarlo',
+      reingest: 'Re-ingest',
+      reingestConfirm: '¿Re-indexar todos los bloques? Esto puede tardar unos minutos.',
+      reingesting: 'Indexando...',
+      reingestDone: 'Bloques indexados correctamente',
+      reingestError: 'Error al indexar bloques',
+      noBlockSelected: 'Selecciona un bloque para ver opciones',
+    },
+
     emailBlocks: {
       tabChat: 'Chat',
       tabBlocks: 'Blocks',
@@ -3014,6 +3030,22 @@ export const translations = {
       templateDeleteYes: 'Yes',
       templateDeleteNo: 'No',
       templateEdit: 'Edit',
+    },
+
+    blockStudio: {
+      title: 'Block Studio',
+      tabBuilder: 'Builder',
+      tabBlocks: 'Blocks',
+      addToCanvas: 'Add to canvas',
+      addToCanvasHint: 'Adds it as a new block at the end',
+      useAsBase: 'Use as base',
+      useAsBaseHint: 'Opens in Builder with chat ready to modify it',
+      reingest: 'Re-ingest',
+      reingestConfirm: 'Re-index all blocks? This may take a few minutes.',
+      reingesting: 'Indexing...',
+      reingestDone: 'Blocks indexed successfully',
+      reingestError: 'Error indexing blocks',
+      noBlockSelected: 'Select a block to see options',
     },
 
     emailBlocks: {
