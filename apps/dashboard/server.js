@@ -457,16 +457,18 @@ app.get('/api/projects/:id', async (req, res) => {
 
 app.put('/api/projects/:id', async (req, res) => {
     try {
-        const { name, problem, solution, status, blocks, success_metrics, department, sub_area, pain_points, requirements, risks, estimated_budget, estimated_timeline, future_improvements } = req.body;
+        const { name, problem, solution, status, blocks, success_metrics, department, sub_area, pain_points, requirements, risks, estimated_budget, estimated_timeline, future_improvements, email_spec } = req.body;
         await pool.query(
             `UPDATE projects
              SET name=$1, problem=$2, solution=$3, status=$4, blocks=$5, success_metrics=$6,
                  department=$7, sub_area=$8, pain_points=$9, requirements=$10, risks=$11,
-                 estimated_budget=$12, estimated_timeline=$13, future_improvements=$14, updated_at=NOW()
-             WHERE id=$15`,
+                 estimated_budget=$12, estimated_timeline=$13, future_improvements=$14,
+                 email_spec=$15, updated_at=NOW()
+             WHERE id=$16`,
             [name, problem, solution, status, JSON.stringify(blocks), JSON.stringify(success_metrics),
              department, sub_area, JSON.stringify(pain_points), JSON.stringify(requirements),
-             JSON.stringify(risks), estimated_budget, estimated_timeline, JSON.stringify(future_improvements), req.params.id]
+             JSON.stringify(risks), estimated_budget, estimated_timeline, JSON.stringify(future_improvements),
+             JSON.stringify(email_spec || {}), req.params.id]
         );
         res.json({ success: true });
     } catch (err) {
