@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { CAMPAIGNS, CAMPAIGN_GROUPS, INDUSTRY_BENCHMARKS } from '../data/emiratesCampaigns.js';
+import { WA_CAMPAIGNS } from '../data/emiratesWhatsAppCampaigns.js';
+import WaMessagesTab from '../components/WaMessagesTab.jsx';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { Mail, Bot, BarChart3, MessageSquare, Trash2, Zap, Loader } from 'lucide-react';
 import EmailProposalGenerator from '../components/EmailProposalGenerator.jsx';
@@ -15,6 +17,8 @@ export default function CampaignDetail() {
     const { t } = useLanguage();
 
     const campaign = CAMPAIGNS.find(c => c.id === campaignId);
+    const waCampaign = WA_CAMPAIGNS.find(c => c.id === campaignId);
+    const isWa = Boolean(waCampaign);
     const group = campaign ? CAMPAIGN_GROUPS.find(g => g.id === campaign.group) : null;
 
     // Tab state
@@ -66,7 +70,7 @@ export default function CampaignDetail() {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages, streaming]);
 
-    if (!campaign) {
+    if (!campaign && !waCampaign) {
         return (
             <div className="dashboard-container animate-fade-in">
                 <button className="back-button" onClick={() => navigate('/app/campaigns')}>
@@ -75,6 +79,85 @@ export default function CampaignDetail() {
                 <div className="card" style={{ padding: 40, textAlign: 'center', marginTop: 24 }}>
                     <p style={{ color: 'var(--text-muted)' }}>{t('campaigns.notFound')}</p>
                 </div>
+            </div>
+        );
+    }
+
+    if (isWa) {
+        return (
+            <div className="dashboard-container animate-fade-in">
+                <button className="back-button" onClick={() => navigate('/app/campaigns')}>
+                    ← {t('campaigns.backToCampaigns')}
+                </button>
+
+                {/* WA Campaign header */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 0 }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: `${waCampaign.groupColor}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.3rem', flexShrink: 0 }}>
+                        {waCampaign.icon}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                            <h1 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0 }}>{waCampaign.name}</h1>
+                            <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '2px 8px', borderRadius: 8, background: 'var(--wa-green-dim)', color: 'var(--wa-green)', border: '1px solid var(--wa-green-border)' }}>
+                                💬 WhatsApp
+                            </span>
+                            <span className="campaign-status-badge live">● {waCampaign.status}</span>
+                            {waCampaign.autoResearch.active && (
+                                <span className="wa-badge-research"><span className="wa-research-dot" /> AutoResearch</span>
+                            )}
+                        </div>
+                        <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                            {waCampaign.group} · {waCampaign.trigger}
+                        </p>
+                    </div>
+                </div>
+
+                {/* Tabs */}
+                <div className="kb-tabs" style={{ marginTop: 16, marginBottom: 20 }}>
+                    {['overview', 'messages', 'autoresearch'].map(tab => (
+                        <button
+                            key={tab}
+                            className={`kb-tab ${activeTab === tab ? 'active' : ''}`}
+                            onClick={() => setActiveTab(tab)}
+                            style={{ textTransform: 'capitalize' }}
+                        >
+                            {tab === 'messages' ? 'Messages' : tab === 'autoresearch' ? 'AutoResearch' : 'Overview'}
+                        </button>
+                    ))}
+                </div>
+
+                {/* Overview tab */}
+                {activeTab === 'overview' && (
+                    <div className="workspace-stats-bar" style={{ flexWrap: 'wrap' }}>
+                        <div className="stat-chip stat-chip-active">
+                            <strong style={{ color: 'var(--wa-green)' }}>{waCampaign.kpis.responseRate}%</strong>&nbsp;{t('whatsapp.responseRate')}
+                        </div>
+                        {waCampaign.kpis.ctaClickRate && (
+                            <div className="stat-chip"><strong>{waCampaign.kpis.ctaClickRate}%</strong>&nbsp;{t('whatsapp.ctaClickRate')}</div>
+                        )}
+                        {waCampaign.kpis.conversionRate && (
+                            <div className="stat-chip"><strong>{waCampaign.kpis.conversionRate}%</strong>&nbsp;{t('whatsapp.conversionRate')}</div>
+                        )}
+                    </div>
+                )}
+
+                {/* Messages tab */}
+                {activeTab === 'messages' && <WaMessagesTab campaign={waCampaign} />}
+
+                {/* AutoResearch tab */}
+                {activeTab === 'autoresearch' && (
+                    <div className="card" style={{ padding: 32, textAlign: 'center' }}>
+                        <div style={{ fontSize: '1.5rem', marginBottom: 12 }}>🔬</div>
+                        <p style={{ color: 'var(--text-muted)', marginBottom: 16 }}>
+                            {waCampaign.autoResearch.active
+                                ? `Run #${waCampaign.autoResearch.runNumber} active — challenger up +${waCampaign.autoResearch.lift}%`
+                                : 'Not yet enrolled in AutoResearch.'}
+                        </p>
+                        <button className="kb-action-btn" onClick={() => navigate('/app/research')}>
+                            Open Research Lab →
+                        </button>
+                    </div>
+                )}
             </div>
         );
     }
