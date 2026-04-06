@@ -31,7 +31,7 @@ function BlockIframe({ html, templateHead }) {
   );
 }
 
-export default function EmailBuilderPreview({ html, blocks, templateHtml, onReorderBlocks, onRemoveBlock, patchedBlock, statusMessage, onBlockClick, onBlockDrop, projectId, contentVariants, contentReady, onTemplateSaved }) {
+export default function EmailBuilderPreview({ html, saveHtml, blocks, templateHtml, onReorderBlocks, onRemoveBlock, patchedBlock, statusMessage, onBlockClick, onBlockDrop, projectId, contentVariants, contentReady, onTemplateSaved, editingTemplate }) {
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState('preview');
   const [viewMode, setViewMode] = useState('desktop'); // 'desktop' | 'mobile'
@@ -47,6 +47,10 @@ export default function EmailBuilderPreview({ html, blocks, templateHtml, onReor
   const [saveTemplateName, setSaveTemplateName] = useState('');
   const [saveToast, setSaveToast] = useState(false);
   const savePopoverRef = useRef(null);
+  const [previewMode, setPreviewMode] = useState('template'); // 'template' | 'content'
+  const [contentPreviewHtml, setContentPreviewHtml] = useState(null);
+  const [contentPreviewStale, setContentPreviewStale] = useState(false);
+  const [contentPreviewLoading, setContentPreviewLoading] = useState(false);
 
   useEffect(() => {
     if (!showSavePopover) return;
@@ -59,6 +63,23 @@ export default function EmailBuilderPreview({ html, blocks, templateHtml, onReor
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showSavePopover]);
+
+  // Fetch content preview from Lucía's session
+  useEffect(() => {
+    if (!projectId || previewMode !== 'content') return;
+    let cancelled = false;
+    setContentPreviewLoading(true);
+    fetch(`${import.meta.env.VITE_API_URL || '/api'}/projects/${projectId}/content-preview-html`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data) return;
+        setContentPreviewHtml(data.html);
+        setContentPreviewStale(data.is_stale);
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setContentPreviewLoading(false); });
+    return () => { cancelled = true; };
+  }, [projectId, previewMode]);
 
   // Extract <head> content from template once for block iframes
   const templateHead = templateHtml
@@ -87,8 +108,27 @@ export default function EmailBuilderPreview({ html, blocks, templateHtml, onReor
     return () => iframe.removeEventListener('load', onLoad);
   }, [html]);
 
+  async function handleUpdateTemplate() {
+    const htmlToSave = saveHtml || html;
+    if (!htmlToSave || !editingTemplate?.id) return;
+    const API_URL = import.meta.env.VITE_API_URL || '/api';
+    try {
+      const res = await fetch(`${API_URL}/emails/${editingTemplate.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ html_content: htmlToSave }),
+      });
+      if (!res.ok) return;
+      setSaveToast(true);
+      setTimeout(() => setSaveToast(false), 2500);
+      if (onTemplateSaved) onTemplateSaved();
+    } catch {}
+  }
+
   async function handleSaveTemplate() {
-    if (!html || !projectId || !saveTemplateName.trim()) return;
+    const htmlToSave = saveHtml || html;
+    if (!htmlToSave || !projectId || !saveTemplateName.trim()) return;
     const API_URL = import.meta.env.VITE_API_URL || '/api';
     try {
       const res = await fetch(`${API_URL}/projects/${projectId}/emails`, {
@@ -99,7 +139,7 @@ export default function EmailBuilderPreview({ html, blocks, templateHtml, onReor
           market: 'all',
           language: 'all',
           tier: null,
-          html_content: html,
+          html_content: htmlToSave,
           subject_line: saveTemplateName.trim(),
           variant_name: saveTemplateName.trim(),
         }),
@@ -108,9 +148,11 @@ export default function EmailBuilderPreview({ html, blocks, templateHtml, onReor
       setShowSavePopover(false);
       setSaveTemplateName('');
       setSaveToast(true);
-      const toastTimer = setTimeout(() => setSaveToast(false), 2500);
+      setTimeout(() => setSaveToast(false), 2500);
       if (onTemplateSaved) onTemplateSaved();
-    } catch {}
+    } catch (err) {
+      console.error('[SaveTemplate] fetch failed:', err);
+    }
   }
 
   const tabs = [
@@ -194,7 +236,39 @@ export default function EmailBuilderPreview({ html, blocks, templateHtml, onReor
         </div>
       )}
       <div className={`email-preview-iframe-wrapper ${viewMode}`}>
-        {html ? (
+        {previewMode === 'content' ? (
+          contentPreviewLoading ? (
+            <div className="email-preview-empty"><span>{t('common.loading') || 'Cargando...'}</span></div>
+          ) : contentPreviewHtml ? (
+            <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+              {contentPreviewStale && (
+                <div style={{
+                  background: 'color-mix(in srgb, var(--accent-yellow) 15%, transparent)',
+                  border: '1px solid var(--accent-yellow)',
+                  borderRadius: '4px',
+                  padding: '8px 12px',
+                  margin: '8px',
+                  fontSize: '0.8rem',
+                  color: 'var(--text-main)'
+                }}>
+                  {t('emailSpec.staleWarning')}
+                </div>
+              )}
+              <iframe
+                sandbox="allow-same-origin"
+                srcDoc={contentPreviewHtml}
+                title="Content Preview"
+                className="email-preview-iframe"
+                style={{ flex: 1 }}
+              />
+            </div>
+          ) : (
+            <div className="email-preview-empty">
+              <span style={{ fontSize: '2rem' }}>🤖</span>
+              <span>{t('emailSpec.noPreview')}</span>
+            </div>
+          )
+        ) : html ? (
           <iframe
             ref={iframeRef}
             sandbox="allow-same-origin"
@@ -228,6 +302,15 @@ export default function EmailBuilderPreview({ html, blocks, templateHtml, onReor
             {tab.label}
           </button>
         ))}
+        {projectId && (
+          <button
+            className={`email-tab-btn${previewMode === 'content' ? ' active' : ''}`}
+            style={{ marginLeft: 'auto' }}
+            onClick={() => setPreviewMode(prev => prev === 'content' ? 'template' : 'content')}
+          >
+            {previewMode === 'content' ? t('emailSpec.templateView') : t('emailSpec.contentPreview')}
+          </button>
+        )}
         <div className="email-preview-toolbar-spacer" />
 
         {/* Variant selector */}
@@ -288,12 +371,23 @@ export default function EmailBuilderPreview({ html, blocks, templateHtml, onReor
           {viewMode === 'desktop' ? <Smartphone size={13} /> : <Monitor size={13} />}
         </button>
 
-        {/* Save with popover */}
+        {/* Save — update mode if editingTemplate, else new with popover */}
+        {editingTemplate ? (
+          <button
+            className="email-preview-toolbar-btn email-preview-toolbar-btn--text"
+            onClick={handleUpdateTemplate}
+            disabled={!(saveHtml || html)}
+            title={editingTemplate.name}
+          >
+            <Save size={13} />
+            <span>Actualizar</span>
+          </button>
+        ) : (
         <div style={{ position: 'relative' }} ref={savePopoverRef}>
           <button
             className="email-preview-toolbar-btn email-preview-toolbar-btn--text"
-            onClick={() => { if (html && projectId) setShowSavePopover(o => !o); }}
-            disabled={!html || !projectId}
+            onClick={() => { if ((saveHtml || html) && projectId) setShowSavePopover(o => !o); }}
+            disabled={!(saveHtml || html) || !projectId}
           >
             <Save size={13} />
             <span>{t('emailBuilder.saveTemplate')}</span>
@@ -323,6 +417,7 @@ export default function EmailBuilderPreview({ html, blocks, templateHtml, onReor
             </div>
           )}
         </div>
+        )}
 
         {/* Preview & Test */}
         <button
