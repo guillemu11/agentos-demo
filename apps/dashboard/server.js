@@ -216,6 +216,9 @@ async function initDatabase() {
             await pool.query(sql);
         }
 
+        // email_spec column migration
+        await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS email_spec JSONB DEFAULT '{}'`);
+
         // Run initial EOD refresh + migration
         await refreshEodDates();
         await migrateEodFormat();
@@ -594,7 +597,7 @@ app.patch('/api/emails/:id/status', requireAuth, async (req, res) => {
 // ── Emails (template management) ──
 app.patch('/api/emails/:id', requireAuth, async (req, res) => {
   const { id } = req.params;
-  const { variant_name, set_final, project_id } = req.body;
+  const { variant_name, set_final, project_id, html_content } = req.body;
 
   try {
     if (set_final && project_id) {
@@ -642,6 +645,18 @@ app.patch('/api/emails/:id', requireAuth, async (req, res) => {
         `UPDATE email_proposals SET variant_name = $1, updated_at = NOW()
          WHERE id = $2 RETURNING *`,
         [variant_name.trim(), numericId]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ error: 'Email not found' });
+      return res.json(result.rows[0]);
+    }
+
+    if (html_content !== undefined) {
+      const numericId = parseInt(id, 10);
+      if (!numericId) return res.status(400).json({ error: 'Invalid id' });
+      const result = await pool.query(
+        `UPDATE email_proposals SET html_content = $1, updated_at = NOW()
+         WHERE id = $2 RETURNING *`,
+        [html_content, numericId]
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'Email not found' });
       return res.json(result.rows[0]);

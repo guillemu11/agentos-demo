@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS projects (
     pm_notes TEXT,
     key_metrics JSONB DEFAULT '[]',
     compliance_notes JSONB DEFAULT '[]',
+    email_spec JSONB DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
