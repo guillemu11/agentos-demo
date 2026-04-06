@@ -1503,6 +1503,9 @@ export const translations = {
       reingestDone: 'Bloques indexados correctamente',
       reingestError: 'Error al indexar bloques',
       noBlockSelected: 'Selecciona un bloque para ver opciones',
+      search: 'Buscar bloques...',
+      loading: 'Cargando bloques...',
+      noResults: 'No hay bloques que coincidan',
     },
 
     emailBlocks: {
@@ -3046,6 +3049,9 @@ export const translations = {
       reingestDone: 'Blocks indexed successfully',
       reingestError: 'Error indexing blocks',
       noBlockSelected: 'Select a block to see options',
+      search: 'Search blocks...',
+      loading: 'Loading blocks...',
+      noResults: 'No blocks match your search',
     },
 
     emailBlocks: {

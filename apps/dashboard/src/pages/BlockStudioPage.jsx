@@ -271,7 +271,7 @@ export default function BlockStudioPage() {
                 <input
                   className="block-manager-search"
                   type="text"
-                  placeholder="🔍 Buscar bloques..."
+                  placeholder={`🔍 ${t('blockStudio.search')}`}
                   value={blockSearch}
                   onChange={e => setBlockSearch(e.target.value)}
                 />
@@ -294,9 +294,9 @@ export default function BlockStudioPage() {
                 ))}
               </div>
               <div className="block-manager-grid">
-                {ragBlocks === null && <div className="block-manager-empty">Cargando bloques...</div>}
+                {ragBlocks === null && <div className="block-manager-empty">{t('blockStudio.loading')}</div>}
                 {ragBlocks !== null && filteredBlocks.length === 0 && (
-                  <div className="block-manager-empty">No hay bloques que coincidan</div>
+                  <div className="block-manager-empty">{t('blockStudio.noResults')}</div>
                 )}
                 {filteredBlocks.map(block => (
                   <div
