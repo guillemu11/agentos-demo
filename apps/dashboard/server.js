@@ -378,7 +378,7 @@ function parseContentByBlock(text) {
     const lines = match[1].trim().split('\n');
     let currentBlock = null;
     for (const line of lines) {
-        const blockMatch = line.match(/^block:\s*(\w+)/);
+        const blockMatch = line.match(/^block:\s*([\w-]+)/);
         if (blockMatch) { currentBlock = blockMatch[1]; result[currentBlock] = {}; continue; }
         if (!currentBlock) continue;
         const colonIdx = line.indexOf(':');
@@ -6578,7 +6578,8 @@ When providing variable content, use [EMAIL_VARIABLES]...[/EMAIL_VARIABLES] form
         // Parse Lucía's [EMAIL_VARIABLES] or [CONTENT_BY_BLOCK] output
         const isLuciaResponse = session.agent_id === 'lucia'
             || (session.agent_role || '').toLowerCase().includes('content agent')
-            || (session.agent_role || '').toLowerCase().includes('content strategist');
+            || (session.agent_role || '').toLowerCase().includes('content strategist')
+            || (session.agent_role || '').toLowerCase().includes('content creator');
         if (isLuciaResponse) {
             const emailVars = parseEmailVariables(fullResponse);
             const contentByBlock = !emailVars ? parseContentByBlock(fullResponse) : null;
