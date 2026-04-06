@@ -115,8 +115,8 @@ export default function ResearchLabTab() {
             <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--wa-green)', marginBottom: 8 }}>
               🧠 {t('researchLab.agentInsight')} — just now
             </div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              Run #14 challenger is trending <strong style={{ color: 'var(--text-primary)' }}>+52% above baseline</strong>. If it holds, <strong style={{ color: 'var(--text-primary)' }}>Thursday 09:30 GST + name-first copy</strong> becomes the new default for all WhatsApp expiry campaigns.
+            <div style={{ fontSize: '0.78rem', color: '#c4c4cc', lineHeight: 1.5 }}>
+              Run #14 challenger is trending <strong style={{ color: '#e1e1e6' }}>+52% above baseline</strong>. If it holds, <strong style={{ color: '#e1e1e6' }}>Thursday 09:30 GST + name-first copy</strong> becomes the new default for all WhatsApp expiry campaigns.
             </div>
           </div>
 

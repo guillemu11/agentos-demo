@@ -82,7 +82,7 @@ export default function WaCampaignCard({ campaign }) {
           background: 'var(--wa-bubble-in)',
           borderRadius: '0 8px 8px 8px',
           padding: '7px 10px',
-          fontSize: '0.72rem', color: 'var(--text-secondary)',
+          fontSize: '0.72rem', color: '#c4c4cc',
           lineHeight: 1.4, flex: 1,
         }}>
           {campaign.preview.message}

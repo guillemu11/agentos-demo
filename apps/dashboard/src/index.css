@@ -12332,8 +12332,8 @@ body.sidebar-collapsed > .inbox-drawer {
 }
 .wa-flow-step {
   display: flex; align-items: center; gap: 5px;
-  background: var(--card-bg);
-  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
   border-radius: 20px;
   padding: 4px 12px;
   font-size: 0.75rem;
@@ -12351,7 +12351,7 @@ body.sidebar-collapsed > .inbox-drawer {
   border-radius: 50%;
   background: var(--wa-green);
 }
-.wa-flow-arrow { color: var(--border); font-size: 0.8rem; }
+.wa-flow-arrow { color: var(--text-muted); font-size: 0.8rem; }
 
 /* Message designer card */
 .wa-message-designer {
@@ -12359,8 +12359,8 @@ body.sidebar-collapsed > .inbox-drawer {
   grid-template-columns: 210px 1fr;
   gap: 20px;
   align-items: start;
-  background: var(--card-bg);
-  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
   border-radius: 12px;
   padding: 18px;
   margin-bottom: 14px;
@@ -12381,7 +12381,7 @@ body.sidebar-collapsed > .inbox-drawer {
   padding: 14px 16px;
 }
 .variant-box { border-radius: 8px; padding: 12px; }
-.variant-box.baseline { background: var(--surface-hover); border: 1px solid var(--border); }
+.variant-box.baseline { background: var(--bg-card); border: 1px solid var(--border-light); }
 .variant-box.challenger { background: #0d1f14; border: 1px solid var(--wa-green-border); }
 .variant-label {
   font-size: 0.65rem;
@@ -12392,7 +12392,8 @@ body.sidebar-collapsed > .inbox-drawer {
 }
 .variant-box.baseline .variant-label { color: var(--text-muted); }
 .variant-box.challenger .variant-label { color: var(--wa-green); }
-.variant-text { font-size: 0.75rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 8px; font-style: italic; }
+.variant-text { font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 8px; font-style: italic; }
+.variant-box.challenger .variant-text { color: #c4c4cc; }
 .variant-metric-val { font-size: 1.1rem; font-weight: 800; }
 .variant-box.baseline .variant-metric-val { color: var(--text-muted); }
 .variant-box.challenger .variant-metric-val { color: var(--wa-green); }
