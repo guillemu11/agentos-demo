@@ -1461,6 +1461,12 @@ export const translations = {
       templateDelete: 'Borrar',
       templateDeleteConfirm: '¿Seguro?',
       noTemplates: 'No hay templates guardadas. Pulsa "💾 Save" para guardar la actual.',
+      templateNoName: 'Sin nombre',
+      templateRenameHint: 'Click para renombrar',
+      templateDraft: 'draft',
+      templatesLoading: 'Cargando...',
+      templateDeleteYes: 'Sí',
+      templateDeleteNo: 'No',
     },
 
     emailBlocks: {
@@ -2962,6 +2968,12 @@ export const translations = {
       templateDelete: 'Delete',
       templateDeleteConfirm: 'Sure?',
       noTemplates: 'No templates saved yet. Click "💾 Save" to save the current one.',
+      templateNoName: 'Untitled',
+      templateRenameHint: 'Click to rename',
+      templateDraft: 'draft',
+      templatesLoading: 'Loading...',
+      templateDeleteYes: 'Yes',
+      templateDeleteNo: 'No',
     },
 
     emailBlocks: {
