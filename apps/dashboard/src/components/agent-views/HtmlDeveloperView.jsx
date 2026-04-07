@@ -524,6 +524,8 @@ export default function HtmlDeveloperView({ agent, activeTab: activeTabProp, onT
             tickets={pipeline.tickets}
             selectedTicket={pipeline.selectedTicket}
             onSelectTicket={handleWorkOnTicket}
+            completedTickets={pipeline.completedTickets}
+            onReopenComplete={pipeline.onReopenComplete}
           />
         )}
 

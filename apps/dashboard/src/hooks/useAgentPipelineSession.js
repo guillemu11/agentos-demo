@@ -78,14 +78,29 @@ export function useAgentPipelineSession(agentId) {
 
     const hasUrgentTickets = tickets.some(t => t.status === 'awaiting_handoff');
 
-    // Work history count for tab badge
+    // Work history — completed sessions for this agent
+    const [completedTickets, setCompletedTickets] = useState([]);
     const [completedWorkCount, setCompletedWorkCount] = useState(null);
-    useEffect(() => {
-        fetch(`${API_URL}/agents/${agentId}/pipeline-work`, { credentials: 'include' })
-            .then(r => r.json())
-            .then(data => setCompletedWorkCount(Array.isArray(data) ? data.length : 0))
-            .catch(() => {});
+
+    const fetchCompletedWork = useCallback(async () => {
+        try {
+            const res = await fetch(`${API_URL}/agents/${agentId}/pipeline-work`, { credentials: 'include' });
+            if (!res.ok) return;
+            const data = await res.json();
+            const arr = Array.isArray(data) ? data : [];
+            setCompletedTickets(arr);
+            setCompletedWorkCount(arr.length);
+        } catch { /* silent */ }
     }, [agentId]);
+
+    useEffect(() => {
+        fetchCompletedWork();
+    }, [fetchCompletedWork]);
+
+    const onReopenComplete = useCallback(() => {
+        fetchTickets();
+        fetchCompletedWork();
+    }, [fetchTickets, fetchCompletedWork]);
 
     return {
         tickets,
@@ -103,5 +118,7 @@ export function useAgentPipelineSession(agentId) {
         loading,
         hasUrgentTickets,
         completedWorkCount,
+        completedTickets,
+        onReopenComplete,
     };
 }

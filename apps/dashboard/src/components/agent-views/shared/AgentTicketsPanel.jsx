@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useLanguage } from '../../../i18n/LanguageContext.jsx';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
+import ReopenTicketModal from './ReopenTicketModal.jsx';
 
 const STATUS_ORDER = ['active', 'awaiting_handoff'];
 
@@ -13,10 +14,15 @@ function groupByStatus(tickets) {
     return groups;
 }
 
-export default function AgentTicketsPanel({ tickets, selectedTicket, onSelectTicket }) {
+export default function AgentTicketsPanel({ tickets, selectedTicket, onSelectTicket, completedTickets, onReopenComplete }) {
     const { t } = useLanguage();
+    const [historyOpen, setHistoryOpen] = useState(false);
+    const [reopenTarget, setReopenTarget] = useState(null);
 
-    if (!tickets || tickets.length === 0) {
+    const hasActive = tickets && tickets.length > 0;
+    const hasCompleted = completedTickets && completedTickets.length > 0;
+
+    if (!hasActive && !hasCompleted) {
         return (
             <div className="agent-tickets-panel">
                 <div className="empty-state">{t('tickets.noTickets')}</div>
@@ -24,7 +30,7 @@ export default function AgentTicketsPanel({ tickets, selectedTicket, onSelectTic
         );
     }
 
-    const groups = groupByStatus(tickets);
+    const groups = groupByStatus(tickets || []);
 
     return (
         <div className="agent-tickets-panel">
@@ -88,8 +94,62 @@ export default function AgentTicketsPanel({ tickets, selectedTicket, onSelectTic
                             );
                         })}
                     </div>
-                );
-            })}
+                )}
+            )}
+
+            {/* Completed history section */}
+            {hasCompleted && (
+                <div className="ticket-status-group">
+                    <button
+                        className="ticket-status-header"
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', padding: '0 4px' }}
+                        onClick={() => setHistoryOpen(v => !v)}
+                    >
+                        <span className="ticket-status-dot completed" />
+                        <span className="ticket-status-label">{t('tickets.completedHistory')}</span>
+                        <span className="ticket-status-count">{completedTickets.length}</span>
+                        <span style={{ marginLeft: 'auto', color: 'var(--text-muted)' }}>
+                            {historyOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        </span>
+                    </button>
+
+                    {historyOpen && completedTickets.map(ticket => (
+                        <div key={ticket.id} className="ticket-card" style={{ borderLeftColor: 'var(--text-muted)', opacity: 0.85 }}>
+                            <div className="ticket-card-body">
+                                <h4 className="ticket-card-project">{ticket.project_name}</h4>
+                                <div className="ticket-card-stage">
+                                    <span className="ticket-card-stage-badge">{ticket.stage_order}</span>
+                                    {ticket.stage_name}
+                                </div>
+                                {ticket.completed_at && (
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                                        {t('tickets.completedAt').replace('{date}', new Date(ticket.completed_at).toLocaleDateString())}
+                                    </div>
+                                )}
+                            </div>
+                            <button
+                                className="ticket-card-action"
+                                style={{ background: 'var(--bg-main)', color: 'var(--text-secondary)', borderColor: 'var(--border-light)' }}
+                                onClick={() => setReopenTarget(ticket)}
+                            >
+                                {t('tickets.reopen')}
+                                <ChevronRight size={14} />
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {reopenTarget && (
+                <ReopenTicketModal
+                    ticket={reopenTarget}
+                    onClose={() => setReopenTarget(null)}
+                    onComplete={() => {
+                        setReopenTarget(null);
+                        if (onReopenComplete) onReopenComplete();
+                    }}
+                />
+            )}
         </div>
     );
 }
