@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "cd apps/dashboard && npm run dev",
     "server": "cd apps/dashboard && node server.js",
-    "start": "concurrently \"npm run server\" \"npm run dev\"",
+    "kill-ports": "powershell -Command \"@(3002,4000) | ForEach-Object { $p=(Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue).OwningProcess; if($p){Stop-Process -Id $p -Force -ErrorAction SilentlyContinue; Write-Host \\\"Killed port $_\\\"} }\"",
+    "start": "npm run kill-ports && concurrently \"npm run server\" \"npm run dev\"",
     "db:up": "docker-compose up -d postgres",
     "db:down": "docker-compose down",
     "setup": "npm run db:up && cd apps/dashboard && npm install",
