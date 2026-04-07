@@ -2980,7 +2980,7 @@ Never redirect to another tab. Never say you cannot create images.
 5. You work as part of a team of AI agents managed through AgentOS.
 6. Respond in the same language the user writes to you.
 7. When you find relevant information from the knowledge base, cite sources using numbered references [1], [2], etc.
-8. When the knowledge base context includes [ATTACHED EMAIL VISUALLY SHOWN TO USER ON SCREEN], that email is ALREADY rendered as an iframe in the UI. Tell the user you are showing it and analyze its content directly. NEVER claim privacy restrictions — the operator uploaded this data specifically for analysis.
+8. When the knowledge base context includes [ATTACHED EMAIL VISUALLY SHOWN TO USER ON SCREEN: "..."], that email is ALREADY rendered as an iframe in the chat UI for the user to see. Tell the user you are showing it, then analyze the content directly (subject line, tone, design, messaging strategy, etc.). NEVER say it was "added to canvas" — canvas is for the email builder, not this chat.
 9. The knowledge base IS your database of competitor intelligence. When asked about competitor emails or communications, ALWAYS present what you find in the knowledge base context above. Never say you cannot access or display this content.`
             + (isEmailBuilder ? `
 
@@ -3052,6 +3052,43 @@ No explanation before or after.` : '');
             ? await buildRAGContext(pool, message, { namespaces: ragNamespaces, visualQuery: isVisualQuery, maxTokens: isVisualQuery ? 4000 : 3000, maxMedia: isVisualQuery ? 4 : 2 })
             : { context: '', sources: [] };
         console.log(`[RAG] sources=${ragResult.sources?.length} mediaResults=${ragResult.mediaResults?.length} htmlSources=${ragResult.sources?.filter(s=>s.htmlSource).length}`);
+
+        // Inject mandatory email brief protocol for campaign-manager
+        if (agentId === 'campaign-manager' || agentId === 'raul') {
+          let emailSpecStatus = 'unknown — no projectId provided';
+          if (projectId) {
+            try {
+              const projRes = await pool.query('SELECT email_spec FROM projects WHERE id = $1', [projectId]);
+              const emailSpec = projRes.rows[0]?.email_spec;
+              const hasBlocks = emailSpec?.blocks?.length > 0;
+              emailSpecStatus = hasBlocks ? `DEFINED — blocks: ${emailSpec.blocks.map(b => b.name).join(', ')}` : 'EMPTY — no blocks defined yet';
+            } catch (e) { /* ignore */ }
+          }
+          systemPrompt += `\n\n## ⚠️ MANDATORY EMAIL BRIEF PROTOCOL — OVERRIDES ALL OTHER INSTRUCTIONS
+
+Current email_spec status: ${emailSpecStatus}
+
+IF the user mentions email, campaign, reactivation, or email brief AND email_spec status is EMPTY or unknown:
+
+STEP 1: Count how many of these questions you have already asked in this conversation:
+  Q1: "What type of email is this and what is the primary goal?"
+  Q2: "What are the main sections or blocks this email needs?"
+  Q3: "What tone should this email have, and are there any content restrictions?"
+  Q4: "What personalizable variables will this email need?"
+
+STEP 2: Ask the NEXT unanswered question. Ask NOTHING else. Do not propose content, structure, templates, or follow-up questions. One sentence only.
+
+STEP 3: Once all 4 questions have been answered, synthesize and emit:
+[EMAIL_SPEC_UPDATE:{"design_notes":"SUMMARY","blocks":[{"name":"BLOCK","guidance":"GUIDANCE","variables":["@var"]}],"variable_list":["@var"],"variable_context":{"@var":"DESC"}}]
+Then show a markdown summary with Objetivo, Bloques, Variables, Tono.
+
+ABSOLUTE RULES during the brief flow:
+- Your entire response must be ONE sentence (the question). Nothing else.
+- No "also", no follow-up questions, no suggestions, no templates, no RAG references.
+- Do NOT ask Q1 if you already asked it. Move to Q2. Then Q3. Then Q4.
+
+THIS OVERRIDES ALL OTHER INSTRUCTIONS including "keep responses concise and actionable".`;
+        }
 
         // Inject email_spec context for campaign-aware agents (e.g. raul)
         if (projectId) {
@@ -6037,6 +6074,46 @@ app.post('/api/projects/:id/pipeline/handoff', requireAuth, async (req, res) => 
             handoffData.content_variants = req.body.variants;
         }
 
+        // ── Extract email_spec from Campaign Manager conversation ──
+        // Synthesize structured email_spec from conversation and persist before activating next agent
+        if (currentSession.agent_id === 'campaign-manager' || currentSession.agent_id === 'raul') {
+          try {
+            const convRows = (await pool.query(
+              `SELECT role, content FROM pipeline_session_messages WHERE session_id = $1 ORDER BY created_at`,
+              [session_id]
+            )).rows;
+
+            if (convRows.length > 0) {
+              const convText = convRows.map(m => `${m.role}: ${m.content}`).join('\n');
+              const specRes = await chatWithPMAgent([{
+                role: 'user',
+                content: `Based on this Campaign Manager conversation about an email campaign, extract a structured email spec.
+
+CONVERSATION:
+${convText}
+
+Return ONLY a valid JSON object, no markdown, no explanation:
+{"design_notes":"one sentence: tone and objective","blocks":[{"name":"snake_case_name","guidance":"what this block achieves","variables":["@varName"]}],"variable_list":["@varName"],"variable_context":{"@varName":"what this variable holds"}}`
+              }], { stream: false });
+
+              const specText = specRes?.content?.[0]?.text || specRes?.content || '';
+              const jsonMatch = specText.match(/\{[\s\S]*\}/);
+              if (jsonMatch) {
+                const emailSpec = JSON.parse(jsonMatch[0]);
+                if (emailSpec.blocks?.length > 0) {
+                  await pool.query(
+                    `UPDATE projects SET email_spec = email_spec || $1::jsonb WHERE id = $2`,
+                    [JSON.stringify(emailSpec), projectId]
+                  );
+                  console.log(`[Handoff] email_spec persisted for project ${projectId}: ${emailSpec.blocks.length} blocks`);
+                }
+              }
+            }
+          } catch (specErr) {
+            console.warn('[Handoff] email_spec extraction failed (non-blocking):', specErr.message);
+          }
+        }
+
         // ── PHASE B: Atomic DB update (inside transaction) ──
         const client = await pool.connect();
         try {
@@ -6224,6 +6301,109 @@ app.post('/api/projects/:id/pipeline/stages/:order/skip', requireAuth, async (re
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /api/projects/:id/sessions/:sessionId/extract-html — Extract HTML from session messages and save as email_proposal
+app.get('/api/projects/:id/sessions/:sessionId/extract-html', requireAuth, async (req, res) => {
+    try {
+        const projectId = parseInt(req.params.id);
+        const sessionId = parseInt(req.params.sessionId);
+        const msgs = await pool.query(
+            `SELECT content FROM pipeline_session_messages
+             WHERE session_id = $1 AND role = 'assistant' ORDER BY created_at`,
+            [sessionId]
+        );
+        let bestHtml = null;
+        for (const row of msgs.rows) {
+            const match = row.content.match(/<!DOCTYPE[\s\S]*<\/html>|<html[\s\S]*<\/html>/i);
+            if (match && (!bestHtml || match[0].length > bestHtml.length)) {
+                bestHtml = match[0];
+            }
+        }
+        if (!bestHtml) return res.status(404).json({ error: 'No HTML found in session messages' });
+        const result = await pool.query(
+            `INSERT INTO email_proposals (project_id, variant_name, market, language, status, html_content, generated_by)
+             VALUES ($1, 'Recovered from session', 'ALL', 'EN', 'draft', $2, 'html-developer-agent')
+             RETURNING id, variant_name, status, created_at`,
+            [projectId, bestHtml]
+        );
+        res.json({ template: result.rows[0] });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/projects/:id/sessions/:sessionId/downstream — List downstream sessions (higher stage_order)
+app.get('/api/projects/:id/sessions/:sessionId/downstream', requireAuth, async (req, res) => {
+    try {
+        const projectId = parseInt(req.params.id);
+        const sessionId = parseInt(req.params.sessionId);
+        const sessionRes = await pool.query(
+            `SELECT stage_order FROM project_agent_sessions WHERE id = $1 AND project_id = $2`,
+            [sessionId, projectId]
+        );
+        if (!sessionRes.rows.length) return res.status(404).json({ error: 'Session not found' });
+        const downstreamRes = await pool.query(
+            `SELECT pas.id, pas.stage_name, pas.stage_order, pas.status, pas.agent_id
+             FROM project_agent_sessions pas
+             WHERE pas.project_id = $1 AND pas.stage_order > $2
+             ORDER BY pas.stage_order`,
+            [projectId, sessionRes.rows[0].stage_order]
+        );
+        res.json({ downstream: downstreamRes.rows });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/projects/:id/sessions/:sessionId/reopen — Reopen a completed session
+app.post('/api/projects/:id/sessions/:sessionId/reopen', requireAuth, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const projectId = parseInt(req.params.id);
+        const sessionId = parseInt(req.params.sessionId);
+        const { strategy } = req.body; // 'reset' | 'keep'
+        if (!['reset', 'keep'].includes(strategy)) return res.status(400).json({ error: 'strategy must be reset or keep' });
+
+        await client.query('BEGIN');
+
+        const sessionRes = await client.query(
+            `SELECT pas.*, pp.id as pipeline_id FROM project_agent_sessions pas
+             JOIN project_pipeline pp ON pp.project_id = pas.project_id
+             WHERE pas.id = $1 AND pas.project_id = $2 AND pas.status = 'completed'`,
+            [sessionId, projectId]
+        );
+        if (!sessionRes.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Session not found or not completed' });
+        }
+        const session = sessionRes.rows[0];
+
+        if (strategy === 'reset') {
+            await client.query(
+                `UPDATE project_agent_sessions
+                 SET status = 'pending', completed_at = NULL, summary = NULL, deliverables = '{}'
+                 WHERE project_id = $1 AND stage_order > $2 AND status IN ('active', 'awaiting_handoff', 'completed')`,
+                [projectId, session.stage_order]
+            );
+        }
+
+        await client.query(
+            `UPDATE project_agent_sessions
+             SET status = 'active', completed_at = NULL, started_at = NOW()
+             WHERE id = $1`,
+            [sessionId]
+        );
+
+        await client.query(
+            `UPDATE project_pipeline SET status = 'active' WHERE project_id = $1 AND status = 'completed'`,
+            [projectId]
+        );
+
+        await client.query('COMMIT');
+        res.json({ success: true, sessionId, strategy });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
 // GET /api/projects/:id/sessions/:sessionId/messages — Paginated messages
 app.get('/api/projects/:id/sessions/:sessionId/messages', requireAuth, async (req, res) => {
     try {
@@ -6296,12 +6476,28 @@ app.post('/api/projects/:id/sessions/:sessionId/initialize', requireAuth, async 
         );
         const accumulatedContext = buildAccumulatedContext(completedRes.rows, session.stage_order);
 
-        const ragNamespaces = session.stage_namespaces && session.stage_namespaces.length > 0
+        const isHtmlDevInit = session.agent_id === 'html-developer'
+            || (session.agent_role || '').toLowerCase().includes('html developer');
+        const initEmailSpec = project.email_spec;
+        const initBriefBlocks = initEmailSpec?.blocks?.length > 0 ? initEmailSpec.blocks : null;
+
+        let ragNamespaces = session.stage_namespaces && session.stage_namespaces.length > 0
             ? session.stage_namespaces
             : ['campaigns', 'kpis'];
+        // HTML Developer with a brief: search email-blocks namespace using brief block names as semantic query
+        if (isHtmlDevInit && initBriefBlocks) {
+            ragNamespaces = ['email-blocks'];
+        }
+        const initRagQuery = (isHtmlDevInit && initBriefBlocks)
+            ? initBriefBlocks.map(b => `${b.name}: ${b.guidance || ''}`).join('. ')
+            : (project.name + ' ' + (project.problem || ''));
         const ragResult = typeof isKBReady === 'function' && isKBReady()
-            ? await buildRAGContext(pool, project.name + ' ' + (project.problem || ''), { namespaces: ragNamespaces })
-            : { context: '', sources: [] };
+            ? await buildRAGContext(pool, initRagQuery, {
+                namespaces: ragNamespaces,
+                ...(isHtmlDevInit && initBriefBlocks ? { topKOverride: 30, minScore: 0.45, maxResults: initBriefBlocks.length + 2 } : {}),
+            })
+            : { context: '', sources: [], mediaResults: [] };
+        console.log(`[Init:RAG] agent=${session.agent_id} isHtmlDev=${isHtmlDevInit} briefBlocks=${initBriefBlocks?.length || 0} htmlSources=${ragResult.sources?.filter(s => s.htmlSource).length}`);
 
         const agent = {
             id: session.agent_id,
@@ -6364,13 +6560,26 @@ block: cta
         }
 
         // 3. Append initial message instructions
-        systemPrompt += `\n\n## INITIAL MESSAGE
+        const initHtmlSources = ragResult.sources?.filter(s => s.htmlSource) || [];
+        if (isHtmlDevInit && initBriefBlocks && initHtmlSources.length > 0) {
+            const placedTitles = initHtmlSources.map(s => s.title || s.documentTitle).filter(Boolean).join(', ');
+            systemPrompt += `\n\n## INITIAL MESSAGE — BLOCK ASSEMBLY MODE
+⚠️ MANDATORY: The canvas system has automatically placed these blocks from the brief: ${placedTitles}.
+Your INITIAL MESSAGE must be PLAIN TEXT ONLY — absolutely NO HTML code, NO \`\`\`html blocks.
+You MUST:
+1. Briefly introduce yourself (1 sentence)
+2. State which blocks were placed on the canvas: "${placedTitles}"
+3. Ask what adjustments are needed
+Keep it to 2-3 sentences. No HTML.`;
+        } else {
+            systemPrompt += `\n\n## INITIAL MESSAGE
 This is your very first message in this stage session. You MUST:
 1. Briefly introduce yourself (name and role, 1 sentence)
 2. Acknowledge the project and your specific task for this stage
 3. If there is previous work context from other agents, briefly summarize what you received and how it informs your approach
 4. Ask 1-2 focused questions to begin your work effectively
 Keep it concise (3-4 paragraphs max). Be warm but professional.`;
+        }
 
         // 4. Stream response (no user message persisted)
         res.setHeader('Content-Type', 'text/event-stream');
@@ -6380,6 +6589,17 @@ Keep it concise (3-4 paragraphs max). Be warm but professional.`;
             res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources.map(({ htmlSource, ...s }) => s)));
         }
         res.flushHeaders();
+
+        // Emit html_sources for HTML Developer with brief blocks — populates canvas before agent text
+        if (isHtmlDevInit && initHtmlSources.length > 0) {
+            const initSources = initHtmlSources.map(s => ({
+                htmlSource: s.htmlSource,
+                title: s.title || s.documentTitle,
+                filePath: s.filePath,
+            }));
+            res.write(`data: ${JSON.stringify({ html_sources: initSources })}\n\n`);
+            console.log(`[Init:blocks] Emitted ${initSources.length} html_sources for html-developer canvas init`);
+        }
 
         let fullResponse = '';
         const stream = await chatWithPMAgent(
@@ -6427,6 +6647,26 @@ Keep it concise (3-4 paragraphs max). Be warm but professional.`;
     }
 });
 
+// GET /api/projects/:id/email-variables — Return saved variable_values from Lucia's deliverables
+app.get('/api/projects/:id/email-variables', requireAuth, async (req, res) => {
+    try {
+        const projectId = parseInt(req.params.id);
+        const sessionRes = await pool.query(
+            `SELECT pas.deliverables
+             FROM project_agent_sessions pas
+             JOIN agents a ON a.id = pas.agent_id
+             WHERE pas.project_id = $1
+               AND (a.id = 'lucia' OR a.role ILIKE '%content agent%' OR a.role ILIKE '%content strategist%')
+             ORDER BY pas.updated_at DESC LIMIT 1`,
+            [projectId]
+        );
+        const deliverables = sessionRes.rows[0]?.deliverables || {};
+        res.json({ variables: deliverables.variable_values || {} });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // POST /api/projects/:id/sessions/:sessionId/chat — SSE streaming chat in pipeline
 app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, res) => {
     try {
@@ -6469,15 +6709,26 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
         let ragNamespaces = session.stage_namespaces && session.stage_namespaces.length > 0
             ? session.stage_namespaces
             : ['campaigns', 'kpis', 'research', 'emails'];
-        // Ensure email-blocks is included for html-developer agent sessions
-        if (session.agent_id === 'html-developer' && !ragNamespaces.includes('email-blocks')) {
+        // Ensure email-blocks is included for html-developer and campaign-manager (brief flow)
+        if ((session.agent_id === 'html-developer' || session.agent_id === 'campaign-manager' || session.agent_id === 'raul') && !ragNamespaces.includes('email-blocks')) {
             ragNamespaces = ['email-blocks', ...ragNamespaces];
         }
         const blockKeywords = /\b(block|header|footer|preheader|hero|banner|cta|button|product.?card|body.?copy|section.?heading|partner|icon|terms|module)\b/i;
-        const isBlockQuery = session.agent_id === 'html-developer' && blockKeywords.test(message) && ragNamespaces.includes('email-blocks');
-        if (isBlockQuery) ragNamespaces = ['email-blocks'];
+        const isBriefQuery = (session.agent_id === 'campaign-manager' || session.agent_id === 'raul') && /\b(brief|block|structure|email|sections?|template)\b/i.test(message);
+        // "build from brief" — HTML Developer told to create email from the Campaign Manager brief
+        const isHtmlDev = session.agent_id === 'html-developer' || (session.agent_role || '').toLowerCase().includes('html developer');
+        const chatBriefBlocks = project.email_spec?.blocks?.length > 0 ? project.email_spec.blocks : null;
+        const isBuildFromBriefMsg = isHtmlDev && chatBriefBlocks && /\b(brief|create.*email|build.*email|make.*email|crea.*email|construye.*email|email.*brief|based.*brief|segun.*brief|según.*brief|del.*brief)\b/i.test(message);
+        // If build-from-brief, override the RAG query with semantic brief block names
+        let ragQueryOverride = null;
+        if (isBuildFromBriefMsg) {
+            ragQueryOverride = chatBriefBlocks.map(b => `${b.name}: ${b.guidance || ''}`).join('. ');
+        }
+        const isBlockQuery = (isHtmlDev && (blockKeywords.test(message) || isBuildFromBriefMsg) && ragNamespaces.includes('email-blocks')) || isBriefQuery;
+        if (isBlockQuery && !isBriefQuery) ragNamespaces = ['email-blocks'];
+        if (isBriefQuery) ragNamespaces = ['email-blocks', 'campaigns', 'kpis'];
         // "full email" requests want multiple blocks assembled together
-        const isFullEmailQuery = isBlockQuery && /\b(completo|complete|full|entero|todos|all|email|correo)\b/i.test(message);
+        const isFullEmailQuery = isBlockQuery && (/\b(completo|complete|full|entero|todos|all|email|correo)\b/i.test(message) || isBuildFromBriefMsg);
         // "insertion" requests: user wants to add/insert at a specific position — let AI handle via NEW_BLOCK marker
         const isInsertionQuery = isBlockQuery && /\b(add|insert|añade|agrega|inserta|between|after|before|entre|después|despues|antes|encima|debajo)\b/i.test(message);
         const visualKeywords = /\b(show|display|ver|mostrar|look like|see|visualiz|email|imagen|image|picture|inline)\b/i;
@@ -6502,9 +6753,11 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
             if (/\bfooter\b/i.test(message)) requestedBlockCategories.push('footer');
             if (/\bterms\b/i.test(message)) requestedBlockCategories.push('terms');
         }
-        const blockMaxResults = isFullEmailQuery ? 8 : 1;
+        const blockMaxResults = isBuildFromBriefMsg ? (chatBriefBlocks.length + 2) : (isFullEmailQuery ? 8 : 1);
+        const ragQuery = ragQueryOverride || message;
+        if (ragQueryOverride) console.log(`[Pipeline:RAG] brief-override query="${ragQuery.substring(0, 120)}..."`);
         const ragResult = typeof isKBReady === 'function' && isKBReady()
-            ? await buildRAGContext(pool, message, { namespaces: ragNamespaces, visualQuery: isVisualQuery, maxTokens: isVisualQuery ? 4000 : 3000, maxMedia: isBlockQuery ? blockMaxResults : (isVisualQuery ? 4 : 2), minScore: isBlockQuery ? 0.5 : undefined, maxResults: isBlockQuery ? blockMaxResults : undefined, topKOverride: isBlockQuery ? 30 : undefined })
+            ? await buildRAGContext(pool, ragQuery, { namespaces: ragNamespaces, visualQuery: isVisualQuery, maxTokens: isVisualQuery ? 4000 : 3000, maxMedia: isBlockQuery ? blockMaxResults : (isVisualQuery ? 4 : 2), minScore: isBlockQuery ? 0.45 : undefined, maxResults: isBlockQuery ? blockMaxResults : undefined, topKOverride: isBlockQuery ? 30 : undefined })
             : { context: '', sources: [], mediaResults: [] };
         console.log(`[Pipeline:RAG] agent=${session.agent_id} isBlockQuery=${isBlockQuery} isFullEmail=${isFullEmailQuery} isVisual=${isVisualQuery} namespaces=${JSON.stringify(ragNamespaces)} sources=${ragResult.sources?.length} htmlSources=${ragResult.sources?.filter(s=>s.htmlSource).length} mediaHtml=${ragResult.mediaResults?.filter(m=>m.mediaType==='email_html').length}`);
 
@@ -6516,6 +6769,36 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
         };
         const stage = { name: session.stage_name, description: session.stage_description };
         let systemPrompt = buildPipelineSystemPrompt(agent, stage, project, accumulatedContext, ragResult.context);
+        // Inject mandatory email brief protocol for campaign-manager in pipeline sessions
+        if (session.agent_id === 'campaign-manager' || session.agent_id === 'raul') {
+          const emailSpec = project.email_spec;
+          const hasBlocks = emailSpec?.blocks?.length > 0;
+          const emailSpecStatus = hasBlocks
+            ? `DEFINED — blocks: ${emailSpec.blocks.map(b => b.name).join(', ')}`
+            : 'EMPTY — no blocks defined yet';
+          systemPrompt += `\n\n## ⚠️ MANDATORY EMAIL BRIEF PROTOCOL — OVERRIDES ALL OTHER INSTRUCTIONS
+
+Current email_spec status: ${emailSpecStatus}
+
+IF the user mentions email, campaign, reactivation, or email brief AND email_spec status is EMPTY:
+
+Look at the conversation history above and count how many of Q1, Q2, Q3, Q4 you have already asked:
+- Q1 asked = conversation contains "What type of email" or "primary goal"
+- Q2 asked = conversation contains "main sections" or "blocks this email needs"
+- Q3 asked = conversation contains "tone" or "content restrictions"
+- Q4 asked = conversation contains "personalizable variables" or "variables will this email need"
+
+Then output EXACTLY the next question that has NOT been asked yet, and NOTHING else:
+
+If Q1 not asked → output only: "What type of email is this and what is the primary goal?"
+If Q1 done, Q2 not asked → output only: "What are the main sections or blocks this email needs? I have access to the block library — I can suggest blocks that already exist."
+If Q1+Q2 done, Q3 not asked → output only: "What tone should this email have, and are there any content restrictions?"
+If Q1+Q2+Q3 done, Q4 not asked → output only: "What personalizable variables will this email need? For example: @passengerName, @cabinClass, @departureDate."
+If all 4 answered → emit the EMAIL_SPEC_UPDATE tag and markdown summary.
+
+YOUR RESPONSE MUST BE EXACTLY THAT ONE QUESTION. NO INTRODUCTION. NO FOLLOW-UP. NO LISTS. NOTHING ELSE.`;
+        }
+
         // Inject canvas state so the AI knows what's already on the canvas
         if (canvasBlockNames?.length > 0) {
             systemPrompt += `\n\n## Current Canvas State\nThe canvas already has these blocks in order: ${canvasBlockNames.map(n => `"${n}"`).join(', ')}.\nDo NOT generate a full HTML document — only output a new block fragment (no <!DOCTYPE html>).`;
@@ -6620,7 +6903,16 @@ When providing variable content, use [EMAIL_VARIABLES]...[/EMAIL_VARIABLES] form
             }
             console.log(`[Pipeline:insert] keyword="${keyword}" beforeKeyword="${beforeKeyword}" insertAfterName="${insertAfterName}" canvasBlocks=${JSON.stringify(canvasBlockNames)}`);
         }
-        if (filteredPipelineHtml.length > 0) {
+        // Only send html_sources to agents that can visually render them:
+        // email builders (html-developer, lucia) and competitive-intel
+        const isEmailBuilderAgent = session.agent_id === 'html-developer'
+            || session.agent_id === 'lucia'
+            || (session.agent_role || '').toLowerCase().includes('html')
+            || (session.agent_role || '').toLowerCase().includes('email template')
+            || (session.agent_role || '').toLowerCase().includes('email developer')
+            || (session.agent_department || '').toLowerCase().includes('email');
+        const isCompetitiveAgent = session.agent_id === 'competitive-intel';
+        if (filteredPipelineHtml.length > 0 && (isEmailBuilderAgent || isCompetitiveAgent)) {
             const sources = filteredPipelineHtml.map(s => ({
                 htmlSource: s.htmlSource,
                 title: s.title || s.documentTitle,
@@ -6724,13 +7016,15 @@ When providing variable content, use [EMAIL_VARIABLES]...[/EMAIL_VARIABLES] form
                 const currentSpec = (await pool.query('SELECT email_spec FROM projects WHERE id = $1', [projectId])).rows[0]?.email_spec || {};
                 const deliverableUpdate = {};
 
+                // Flatten vars (both formats → flat object)
+                let flatVars = {};
                 if (emailVars) {
+                    flatVars = emailVars;
                     deliverableUpdate.variable_values = emailVars;
                     deliverableUpdate.preview_version = currentSpec.html_version || 0;
                 }
                 if (contentByBlock) {
                     deliverableUpdate.content_by_block = contentByBlock;
-                    const flatVars = {};
                     for (const blockVars of Object.values(contentByBlock)) {
                         Object.assign(flatVars, blockVars);
                     }
@@ -6744,7 +7038,43 @@ When providing variable content, use [EMAIL_VARIABLES]...[/EMAIL_VARIABLES] form
                      WHERE id = $2`,
                     [JSON.stringify(deliverableUpdate), sessionId]
                 );
-                res.write(`data: ${JSON.stringify({ email_variables_saved: true })}\n\n`);
+
+                // Emit each variable individually so frontend can update preview live
+                for (const [varName, varValue] of Object.entries(flatVars)) {
+                    res.write(`data: ${JSON.stringify({ var_update: { name: varName, value: varValue } })}\n\n`);
+                }
+                res.write(`data: ${JSON.stringify({ email_variables_saved: true, count: Object.keys(flatVars).length })}\n\n`);
+            }
+        }
+
+        // Parse EMAIL_SPEC_UPDATE emitted by campaign-manager / raul in pipeline sessions
+        const isEmailSpecAgent = session.agent_id === 'campaign-manager' || session.agent_id === 'raul';
+        if (isEmailSpecAgent) {
+            const emailSpecTagMatch = fullResponse.match(/\[EMAIL_SPEC_UPDATE:(\{[\s\S]*?\})\]/);
+            if (emailSpecTagMatch) {
+                try {
+                    const specUpdate = JSON.parse(emailSpecTagMatch[1]);
+                    await pool.query(
+                        `UPDATE projects
+                         SET email_spec = email_spec
+                           || jsonb_build_object('design_notes', $1::text)
+                           || jsonb_build_object('blocks', $2::jsonb)
+                           || jsonb_build_object('variable_list', $3::jsonb)
+                           || jsonb_build_object('variable_context', $4::jsonb)
+                         WHERE id = $5`,
+                        [
+                            specUpdate.design_notes || '',
+                            JSON.stringify(specUpdate.blocks || []),
+                            JSON.stringify(specUpdate.variable_list || []),
+                            JSON.stringify(specUpdate.variable_context || {}),
+                            projectId,
+                        ]
+                    );
+                    fullResponse = fullResponse.replace(/\[EMAIL_SPEC_UPDATE:\{[\s\S]*?\}\]/, '').trim();
+                    console.log(`[Pipeline] EMAIL_SPEC_UPDATE saved for project ${projectId}: ${specUpdate.blocks?.length} blocks`);
+                } catch (e) {
+                    console.error('[Pipeline] EMAIL_SPEC_UPDATE parse error:', e.message);
+                }
             }
         }
 
