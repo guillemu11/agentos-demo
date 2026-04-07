@@ -241,9 +241,13 @@ export default function ContentStudioPage() {
               <StudioLivePreview
                 liveHtml={liveHtml}
                 baseHtml={baseHtml}
-                markets={availableMarkets}
-                previewMarket={previewMarket}
-                onMarketSelect={setPreviewMarket}
+                variants={variants}
+                previewVariant={`${previewMarket}:${activeTier}`}
+                onVariantSelect={(key) => {
+                  const [m, t] = key.split(':');
+                  setPreviewMarket(m);
+                  setActiveTier(t);
+                }}
                 onShowModal={() => setShowPreviewModal(true)}
               />
             </Panel>

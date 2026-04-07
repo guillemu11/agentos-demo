@@ -1,11 +1,27 @@
 // apps/dashboard/src/components/studio/StudioLivePreview.jsx
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { substituteForPreview } from '../../utils/emailMockSubstitute.js';
 
-export default function StudioLivePreview({ liveHtml, baseHtml, markets, previewMarket, onMarketSelect, onShowModal }) {
+const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
+const TIER_SHORT = { economy: 'Eco', economy_premium: 'Eco+', business: 'Biz', first_class: '1st' };
+
+function variantLabel(key) {
+  const [market, ...tierParts] = key.split(':');
+  const tier = tierParts.join(':');
+  return `${MARKET_FLAGS[market] || market.toUpperCase()} ${TIER_SHORT[tier] || tier}`;
+}
+
+export default function StudioLivePreview({ liveHtml, baseHtml, variants, previewVariant, onVariantSelect, onShowModal }) {
   const [isMobile, setIsMobile] = useState(false);
 
   const srcDoc = liveHtml || (baseHtml ? substituteForPreview(baseHtml) : '');
+
+  // Only show variants that have at least one field with a value
+  const populatedVariants = useMemo(() => {
+    return Object.entries(variants || {}).filter(([, vd]) =>
+      Object.values(vd).some(f => f?.value)
+    ).map(([key]) => key);
+  }, [variants]);
 
   return (
     <div className="studio-live-preview">
@@ -13,13 +29,15 @@ export default function StudioLivePreview({ liveHtml, baseHtml, markets, preview
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div className="studio-panel-title">Preview</div>
           <div className="studio-preview-market-tabs">
-            {markets.map(m => (
+            {populatedVariants.length === 0 ? (
+              <span style={{ fontSize: 10, color: 'var(--studio-text-muted)' }}>No variants yet</span>
+            ) : populatedVariants.map(key => (
               <button
-                key={m}
-                className={`studio-preview-market-tab ${previewMarket === m ? 'active' : ''}`}
-                onClick={() => onMarketSelect(m)}
+                key={key}
+                className={`studio-preview-market-tab ${previewVariant === key ? 'active' : ''}`}
+                onClick={() => onVariantSelect(key)}
               >
-                {m.toUpperCase()}
+                {variantLabel(key)}
               </button>
             ))}
           </div>
