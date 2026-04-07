@@ -3,7 +3,7 @@ import { useLanguage } from '../i18n/LanguageContext.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-export default function HandoffModal({ projectId, session, stages, agents, onClose, onComplete }) {
+export default function HandoffModal({ projectId, session, stages, agents, onClose, onComplete, currentHtml }) {
     const { t } = useLanguage();
     const [summary, setSummary] = useState('');
     const [notes, setNotes] = useState('');
@@ -28,6 +28,26 @@ export default function HandoffModal({ projectId, session, stages, agents, onClo
         setPhase('generating');
 
         try {
+            // Auto-save HTML for html-developer agent before handoff
+            if (session?.agent_id === 'html-developer' && currentHtml) {
+                try {
+                    await fetch(`${API_URL}/projects/${projectId}/emails`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({
+                            html_content: currentHtml,
+                            variant_name: 'Auto-saved before handoff',
+                            market: 'ALL',
+                            language: 'EN',
+                            tier: null,
+                        }),
+                    });
+                } catch (e) {
+                    console.warn('Auto-save HTML failed, continuing with handoff', e);
+                }
+            }
+
             const body = { session_id: session.id };
             if (summary) body.summary_override = summary;
             if (notes) body.notes = notes;

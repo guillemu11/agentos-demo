@@ -9,11 +9,12 @@ import HandoffModal from '../components/HandoffModal.jsx';
 import EmailBlocksPanel from '../components/EmailBlocksPanel.jsx';
 import VariantPreviewModal from '../components/VariantPreviewModal.jsx';
 import { injectIntoSlot, mergeAiHtmlIntoTemplate, fetchEmailTemplate, splitIntoBlocks } from '../utils/emailTemplate.js';
+import { substituteForPreview } from '../utils/emailMockSubstitute.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const AGENT_ID = 'html-developer';
 
-function TemplateCard({ template, contentReady, contentVariants, projectId, deletingId, setDeletingId, onRefresh, t }) {
+function TemplateCard({ template, contentReady, contentVariants, projectId, deletingId, setDeletingId, onRefresh, onEdit, t }) {
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState(template.variant_name || '');
   const [showModal, setShowModal] = useState(false);
@@ -64,7 +65,7 @@ function TemplateCard({ template, contentReady, contentVariants, projectId, dele
       <div className="email-template-thumb">
         <iframe
           sandbox="allow-same-origin"
-          srcDoc={template.html_content || ''}
+          srcDoc={substituteForPreview(template.html_content || '')}
           className="email-template-thumb-iframe"
           scrolling="no"
           tabIndex={-1}
@@ -95,6 +96,12 @@ function TemplateCard({ template, contentReady, contentVariants, projectId, dele
         <span className="email-template-date">{date}</span>
 
         <div className="email-template-actions">
+          <button
+            className="email-template-btn email-template-btn--edit"
+            onClick={() => onEdit(template)}
+          >
+            ✏️ {t('studio.templateEdit')}
+          </button>
           <button
             className="email-template-btn email-template-btn--test"
             onClick={() => setShowModal(true)}
@@ -148,6 +155,7 @@ export default function EmailStudioPage() {
   // Builder state — blocks[] tracks manual blocks; aiHtml holds AI-generated full doc
   const [blocks, setBlocks] = useState([]); // [{id, name, html}]
   const [aiHtml, setAiHtml] = useState('');
+  const [editingTemplate, setEditingTemplate] = useState(null); // {id, name} when editing existing
   const [templateHtml, setTemplateHtml] = useState('');
   const [patchedBlock, setPatchedBlock] = useState(null);
   const [builderStatus, setBuilderStatus] = useState('');
@@ -210,6 +218,21 @@ export default function EmailStudioPage() {
       }
     } catch {}
     setTemplatesLoading(false);
+  }
+
+  function loadTemplateIntoBuilder(template) {
+    const parsed = splitIntoBlocks(template.html_content || '');
+    if (parsed.length > 0) {
+      setBlocks(parsed);
+      setAiHtml('');
+    } else {
+      setAiHtml(template.html_content || '');
+      setBlocks([]);
+    }
+    setEditingTemplate({ id: template.id, name: template.variant_name || '' });
+    setActiveTab('chat');
+    setBuilderStatus(`Cargado: ${template.variant_name || 'template'}`);
+    setTimeout(() => setBuilderStatus(''), 3000);
   }
 
   // Fetch content variants when project changes
@@ -384,6 +407,7 @@ export default function EmailStudioPage() {
             </div>
             <EmailBuilderPreview
               html={blocks.length ? null : builderHtml}
+              saveHtml={builderHtml}
               blocks={blocks.length ? blocks : null}
               templateHtml={templateHtml}
               onReorderBlocks={reorderBlock}
@@ -399,7 +423,8 @@ export default function EmailStudioPage() {
                 setBuilderStatus(t('emailBlocks.added').replace('{name}', block.name));
                 setTimeout(() => setBuilderStatus(''), 3000);
               }}
-              onTemplateSaved={fetchTemplates}
+              editingTemplate={editingTemplate}
+              onTemplateSaved={() => { setEditingTemplate(null); fetchTemplates(); setActiveTab('templates'); }}
             />
           </div>
         )}
@@ -412,6 +437,8 @@ export default function EmailStudioPage() {
               onSelectTicket={pipeline.selectTicket}
               onClearTicket={pipeline.clearTicket}
               agentId={AGENT_ID}
+              completedTickets={pipeline.completedTickets}
+              onReopenComplete={pipeline.onReopenComplete}
             />
           </div>
         )}
@@ -442,6 +469,7 @@ export default function EmailStudioPage() {
                     deletingId={deletingId}
                     setDeletingId={setDeletingId}
                     onRefresh={fetchTemplates}
+                    onEdit={loadTemplateIntoBuilder}
                     t={t}
                   />
                 ))}
@@ -458,7 +486,11 @@ export default function EmailStudioPage() {
           stages={pipeline.stages}
           agents={pipeline.agents}
           onClose={() => pipeline.setHandoffSession(null)}
-          onComplete={pipeline.onHandoffComplete}
+          currentHtml={builderHtml}
+          onComplete={(result) => {
+            pipeline.onHandoffComplete(result);
+            fetchTemplates();
+          }}
         />
       )}
     </div>
