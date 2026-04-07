@@ -15,6 +15,10 @@ function varType(varName) {
     return 'text';
 }
 
+const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
+const MARKET_LABELS = { en: 'EN', es: 'ES', ar: 'AR', ru: 'RU' };
+const TIER_LABELS = { economy: 'Economy', economy_premium: 'Eco Premium', business: 'Business', first_class: 'First' };
+
 export default function AmpscriptSidebar({
     blockVarMap,      // { "Block 2": ["header_logo", ...], "Block 3": [...], ... }
     varValues,        // { "@main_header": "Welcome back...", ... }
@@ -29,10 +33,6 @@ export default function AmpscriptSidebar({
     const { t } = useLanguage();
     const [newMarket, setNewMarket] = useState('');
     const [newTier, setNewTier] = useState('');
-
-    const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
-    const MARKET_LABELS = { en: 'EN', es: 'ES', ar: 'AR', ru: 'RU' };
-    const TIER_LABELS = { economy: 'Economy', economy_premium: 'Eco Premium', business: 'Business', first_class: 'First' };
 
     const allBlocks = Object.entries(blockVarMap || {});
     // Count filled vars (ignore link and footer vars)

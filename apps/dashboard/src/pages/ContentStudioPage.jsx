@@ -112,7 +112,8 @@ export default function ContentStudioPage() {
     let result = base;
     for (const [key, value] of Object.entries(ampVarValues)) {
       const varName = key.startsWith('@') ? key.slice(1) : key;
-      result = result.replace(new RegExp(`%%=v\\(@${varName}\\)=%%`, 'g'), value);
+      const safeVarName = varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      result = result.replace(new RegExp(`%%=v\\(@${safeVarName}\\)=%%`, 'g'), value);
     }
     return result;
   }, [projectEmails, ampVarValues]);
