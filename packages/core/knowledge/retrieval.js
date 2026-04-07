@@ -6,6 +6,12 @@
 
 import { embedText, isGeminiReady } from '../ai-providers/gemini.js';
 import { queryVectors, isPineconeReady, rerankResults } from '../ai-providers/pinecone.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const EMAIL_BLOCKS_DIR = path.resolve(__dirname, '../../../email_blocks');
 
 const DEFAULT_TOP_K = 5;
 const DEFAULT_MIN_SCORE = 0.45;
@@ -80,31 +86,42 @@ export async function searchKnowledge(pool, query, options = {}) {
                 // Check for stored html_source in metadata
                 htmlSource = chunkMetadata?.html_source || null;
 
-                // If not in metadata, try to reconstruct from content across all chunks
+                // If not in metadata, try reading the original file from disk (email-blocks)
+                if (!htmlSource && match.metadata?.file) {
+                    const diskPath = path.join(EMAIL_BLOCKS_DIR, match.metadata.file);
+                    if (fs.existsSync(diskPath)) {
+                        htmlSource = fs.readFileSync(diskPath, 'utf-8');
+                    }
+                }
+
+                // For html_email docs: if this is not chunk 0, fetch chunk 0 which holds html_source
+                if (!htmlSource && mediaType === 'html_email' && row.chunk_index > 0) {
+                    const chunk0 = await pool.query(
+                        `SELECT metadata FROM knowledge_chunks WHERE document_id = $1 AND chunk_index = 0`,
+                        [row.document_id]
+                    );
+                    if (chunk0.rows.length > 0) {
+                        htmlSource = chunk0.rows[0].metadata?.html_source || null;
+                    }
+                }
+
+                // Fallback: reconstruct from chunked content (may have overlap artifacts)
                 if (!htmlSource) {
                     const HTML_MARKER = '\n\n--- HTML SOURCE ---\n';
-                    // Find which chunk has the marker (chunk 0 for email-blocks)
-                    let chunk0Content = row.chunk_index === 0 ? row.content : null;
-                    if (!chunk0Content) {
-                        const c0 = await pool.query(
-                            `SELECT content FROM knowledge_chunks WHERE document_id = $1 AND chunk_index = 0`,
-                            [row.document_id]
-                        );
-                        if (c0.rows.length > 0) chunk0Content = c0.rows[0].content;
-                    }
-                    if (chunk0Content && chunk0Content.includes(HTML_MARKER)) {
-                        // Fetch all chunks to reconstruct full HTML
-                        const allChunks = await pool.query(
-                            `SELECT chunk_index, content FROM knowledge_chunks WHERE document_id = $1 ORDER BY chunk_index`,
-                            [row.document_id]
-                        );
-                        const markerIdx = chunk0Content.indexOf(HTML_MARKER);
-                        // Description is everything before the marker in chunk 0
-                        content = chunk0Content.slice(0, markerIdx).trim();
-                        // HTML starts after the marker in chunk 0, continues in subsequent chunks
-                        const parts = [chunk0Content.slice(markerIdx + HTML_MARKER.length)];
+                    const allChunks = await pool.query(
+                        `SELECT chunk_index, content FROM knowledge_chunks WHERE document_id = $1 ORDER BY chunk_index`,
+                        [row.document_id]
+                    );
+                    const markerChunk = allChunks.rows.find(c => c.content.includes(HTML_MARKER));
+                    if (markerChunk) {
+                        const markerIdx = markerChunk.content.indexOf(HTML_MARKER);
+                        if (markerChunk.chunk_index === 0) {
+                            content = markerChunk.content.slice(0, markerIdx).trim();
+                        }
+                        const CHUNK_OVERLAP = 200;
+                        const parts = [markerChunk.content.slice(markerIdx + HTML_MARKER.length)];
                         for (const c of allChunks.rows) {
-                            if (c.chunk_index > 0) parts.push(c.content);
+                            if (c.chunk_index > markerChunk.chunk_index) parts.push(c.content.slice(CHUNK_OVERLAP));
                         }
                         htmlSource = parts.join('').trim();
                     }
@@ -230,27 +247,46 @@ export async function searchMultiNamespace(pool, query, namespaces, { topK = DEF
 
                 htmlSource = chunkMeta?.html_source || null;
 
+                // Try reading from disk first (email-blocks have file metadata)
+                if (!htmlSource && match.metadata?.file) {
+                    const diskPath = path.join(EMAIL_BLOCKS_DIR, match.metadata.file);
+                    if (fs.existsSync(diskPath)) {
+                        htmlSource = fs.readFileSync(diskPath, 'utf-8');
+                    }
+                }
+
+                // For html_email docs: if this is not chunk 0, fetch chunk 0 which holds html_source
+                if (!htmlSource && mediaType === 'html_email' && row.chunk_index > 0) {
+                    const chunk0 = await pool.query(
+                        `SELECT metadata FROM knowledge_chunks WHERE document_id = $1 AND chunk_index = 0`,
+                        [row.document_id]
+                    );
+                    if (chunk0.rows.length > 0) {
+                        htmlSource = chunk0.rows[0].metadata?.html_source || null;
+                    }
+                }
+
                 // Reconstruct full HTML from all chunks when stored in content
                 if (!htmlSource) {
                     const HTML_MARKER = '\n\n--- HTML SOURCE ---\n';
-                    let chunk0Content = row.chunk_index === 0 ? row.content : null;
-                    if (!chunk0Content) {
-                        const c0 = await pool.query(
-                            `SELECT content FROM knowledge_chunks WHERE document_id = $1 AND chunk_index = 0`,
-                            [row.document_id]
-                        );
-                        if (c0.rows.length > 0) chunk0Content = c0.rows[0].content;
-                    }
-                    if (chunk0Content && chunk0Content.includes(HTML_MARKER)) {
-                        const allChunks = await pool.query(
-                            `SELECT chunk_index, content FROM knowledge_chunks WHERE document_id = $1 ORDER BY chunk_index`,
-                            [row.document_id]
-                        );
-                        const markerIdx = chunk0Content.indexOf(HTML_MARKER);
-                        content = chunk0Content.slice(0, markerIdx).trim();
-                        const parts = [chunk0Content.slice(markerIdx + HTML_MARKER.length)];
+                    const allChunks = await pool.query(
+                        `SELECT chunk_index, content FROM knowledge_chunks WHERE document_id = $1 ORDER BY chunk_index`,
+                        [row.document_id]
+                    );
+                    const markerChunk = allChunks.rows.find(c => c.content.includes(HTML_MARKER));
+                    if (markerChunk) {
+                        const markerIdx = markerChunk.content.indexOf(HTML_MARKER);
+                        if (markerChunk.chunk_index === 0) {
+                            content = markerChunk.content.slice(0, markerIdx).trim();
+                        }
+                        // Collect HTML: from marker in marker-chunk, then subsequent chunks
+                        // Skip 200-char overlap at start of each subsequent chunk (DEFAULT_OVERLAP * 4)
+                        const CHUNK_OVERLAP = 200;
+                        const parts = [markerChunk.content.slice(markerIdx + HTML_MARKER.length)];
                         for (const c of allChunks.rows) {
-                            if (c.chunk_index > 0) parts.push(c.content);
+                            if (c.chunk_index > markerChunk.chunk_index) {
+                                parts.push(c.content.slice(CHUNK_OVERLAP));
+                            }
                         }
                         htmlSource = parts.join('').trim();
                     }
@@ -292,10 +328,11 @@ export async function buildRAGContext(pool, query, options = {}) {
         maxMedia = 4,
         maxResults,        // hard cap on number of results included in context
         minScore: minScoreOverride,
+        topKOverride,      // explicit topK override (e.g. for block queries needing wide coverage)
     } = options;
 
     // When user asks for visual content, cast a wider net and lower threshold
-    const topK = visualQuery ? 20 : 12;
+    const topK = topKOverride || (visualQuery ? 20 : 12);
     const minScore = minScoreOverride !== undefined ? minScoreOverride : (visualQuery ? 0.3 : 0.45);
 
     let results = await searchMultiNamespace(pool, query, namespaces, { topK, filter, minScore });
@@ -365,12 +402,12 @@ export async function buildRAGContext(pool, query, options = {}) {
         } else {
             block = `---\n[${sourceNum}] Source: ${result.documentTitle} (score: ${result.score})\n${result.content}\n`;
             if (result.htmlSource) {
-                const shouldAttachMedia = mediaResults.length < maxMedia && (
-                    visualQuery || (mode !== 'voice' && result.score >= MEDIA_SCORE_THRESHOLD)
-                );
+                // html_email: allow up to maxMedia+2 slots so emails aren't crowded out by other media types
+                const htmlEmailCount = mediaResults.filter(m => m.mediaType === 'email_html').length;
+                const shouldAttachMedia = mode !== 'voice' && htmlEmailCount < Math.min(2, maxMedia + 2);
                 if (shouldAttachMedia) {
-                    block += `[SYSTEM INSTRUCTION: The full HTML of this email/block is being rendered as an iframe directly in the user's chat UI. Respond with ONLY a short acknowledgment like "Here is [title]:" — do NOT describe, analyze, or list the content. The user can already see it.]\n`;
-                    mediaResults.push({ mediaType: 'email_html', htmlSource: result.htmlSource, title: result.documentTitle, score: result.score });
+                    block += `[ATTACHED EMAIL VISUALLY SHOWN TO USER ON SCREEN: "${result.documentTitle}" — The full HTML is rendered as an iframe in the chat UI. Analyze and discuss this email content directly. Do NOT say it was "added to canvas" or describe a canvas — this is the competitive intelligence chat, not the email builder.]\n`;
+                    mediaResults.push({ mediaType: 'email_html', htmlSource: result.htmlSource, title: result.documentTitle, score: result.score, category: result.metadata?.category || '', position: result.metadata?.position || '' });
                 }
             }
         }
@@ -383,6 +420,8 @@ export async function buildRAGContext(pool, query, options = {}) {
             score: result.score,
             namespace: result.metadata?.namespace || '',
             content_type: result.metadata?.content_type || '',
+            category: result.metadata?.category || '',
+            position: result.metadata?.position || '',
             mediaType: result.mediaType,
             filePath: result.filePath,
             htmlSource: result.htmlSource || null,
