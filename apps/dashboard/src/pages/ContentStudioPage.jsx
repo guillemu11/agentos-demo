@@ -9,22 +9,12 @@ import StudioChatPanel from '../components/studio/StudioChatPanel.jsx';
 import StudioVariantsPanel from '../components/studio/StudioVariantsPanel.jsx';
 import StudioLivePreview from '../components/studio/StudioLivePreview.jsx';
 import VariantPreviewModal from '../components/studio/VariantPreviewModal.jsx';
-import { substituteForPreview } from '../utils/emailMockSubstitute.js';
+import { FIELD_TO_VAR, ALL_VARIANT_FIELDS, MIN_APPROVED_FOR_HANDOFF } from '../components/studio/studioConstants.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const AGENT_ID = 'lucia';
 const ALL_MARKETS = ['en', 'es', 'ar', 'ru'];
 const DEFAULT_TIER = 'economy';
-const FIELD_TO_VAR = {
-  subject:      '@subject',
-  preheader:    '@preheader',
-  heroHeadline: '@hero_title',
-  bodyCopy:     '@body_copy',
-  cta:          '@cta_text',
-};
-const ALL_VARIANT_FIELDS = Object.keys(FIELD_TO_VAR);
-// Handoff requires at least one complete variant (all 5 fields approved)
-const MIN_APPROVED_FOR_HANDOFF = 5;
 
 function emptyVariant() {
   return {
@@ -205,7 +195,7 @@ export default function ContentStudioPage() {
         canHandoff={canHandoff}
       />
 
-      <PanelGroup direction="horizontal" style={{ height: '100%' }}>
+      <PanelGroup direction="horizontal" className="studio-panel-group-full">
         {/* LEFT: Chat */}
         <Panel defaultSize={38} minSize={25} maxSize={55}>
           <StudioChatPanel
@@ -223,7 +213,7 @@ export default function ContentStudioPage() {
 
         {/* RIGHT: Variants + Preview */}
         <Panel minSize={35}>
-          <PanelGroup direction="vertical" style={{ height: '100%' }}>
+          <PanelGroup direction="vertical" className="studio-panel-group-full">
             <Panel defaultSize={50} minSize={30}>
               <StudioVariantsPanel
                 markets={availableMarkets}
@@ -266,6 +256,7 @@ export default function ContentStudioPage() {
           ampVarValues={ampVarValues}
           baseHtml={baseHtml}
           progressStats={progressStats}
+          canHandoff={canHandoff}
           onHandoff={handleHandoff}
           onClose={() => setShowPreviewModal(false)}
         />

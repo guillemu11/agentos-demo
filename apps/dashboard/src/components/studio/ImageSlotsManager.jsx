@@ -1,17 +1,15 @@
 // apps/dashboard/src/components/studio/ImageSlotsManager.jsx
 import React, { useState } from 'react';
+import { IMAGE_SLOT_NAMES } from './studioConstants.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
-
-// Known image variable names that map to slots
-const IMAGE_VAR_NAMES = ['hero_image', 'story1_image', 'story2_image', 'story3_image', 'article_image', 'destination_image', 'banner_image'];
 
 export default function ImageSlotsManager({ slots, marketKey, onSlotsChange }) {
   // slots: { slotName: { url, prompt, status } }
   const [promptInputs, setPromptInputs] = useState({});
   const [showPromptFor, setShowPromptFor] = useState(null);
 
-  const slotNames = IMAGE_VAR_NAMES.filter(name => {
+  const slotNames = IMAGE_SLOT_NAMES.filter(name => {
     // Only show slots that have an image OR slots found via blockVarMap
     return slots?.[name] !== undefined || name === 'hero_image';
   });
@@ -31,6 +29,7 @@ export default function ImageSlotsManager({ slots, marketKey, onSlotsChange }) {
         credentials: 'include',
         body: JSON.stringify({ prompt, size: '1200x628' }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       onSlotsChange(prev => ({
         ...prev,

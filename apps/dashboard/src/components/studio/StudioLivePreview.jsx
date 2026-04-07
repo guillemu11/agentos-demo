@@ -64,9 +64,6 @@ export default function StudioLivePreview({ liveHtml, baseHtml, markets, preview
         </div>
 
         <div className="studio-preview-actions">
-          <button className="studio-preview-action sec" onClick={() => setIsMobile(m => !m)}>
-            {isMobile ? '🖥' : '📱'} {isMobile ? 'Desktop' : 'Mobile'}
-          </button>
           <button className="studio-preview-action pri" onClick={onShowModal}>
             ⊞ Todas las variantes
           </button>

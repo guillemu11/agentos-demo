@@ -14,7 +14,7 @@ export default function VariantFieldsGrid({ variantData }) {
     return (
       <div className="studio-fields-grid">
         {FIELDS.map(f => (
-          <div key={f.key} className={`studio-field${f.key === 'bodyCopy' ? ' full-width' : ''}`} style={f.key === 'bodyCopy' ? { gridColumn: '1/-1' } : {}}>
+          <div key={f.key} className={`studio-field${f.key === 'bodyCopy' ? ' studio-field--full' : ''}`}>
             <div className="studio-field-label">
               {f.label}
               <span className="studio-field-status pend">pendiente</span>
@@ -34,8 +34,7 @@ export default function VariantFieldsGrid({ variantData }) {
         return (
           <div
             key={f.key}
-            className={`studio-field ${cls}`}
-            style={f.key === 'bodyCopy' ? { gridColumn: '1/-1' } : {}}
+            className={`studio-field ${cls}${f.key === 'bodyCopy' ? ' studio-field--full' : ''}`}
           >
             <div className="studio-field-label">
               {f.label}

@@ -3,13 +3,12 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send } from 'lucide-react';
 import renderMarkdown from '../../utils/renderMarkdown.js';
 
+import { IMAGE_SLOT_NAMES } from './studioConstants.js';
+
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const BRIEF_UPDATE_RE = /\[BRIEF_UPDATE:(\{[^}]+\})\]/g;
 const IMAGE_REQUEST_RE = /\b(imagen?|image|foto|photo|banner|hero|visual|picture|ilustra|generat|crea(?:r)?|diseña|design|make)\b.{0,80}\b(imagen?|image|foto|photo|banner|hero|avion|plane|aircraft|logo|background|fondo)\b/i;
 const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
-
-// Known image slot names — used for auto-assign detection
-const IMAGE_SLOT_NAMES = ['hero_image', 'story1_image', 'story2_image', 'destination_image', 'banner_image', 'article_image'];
 
 function parseBriefUpdates(chunk) {
   const briefUpdates = [];
@@ -18,6 +17,7 @@ function parseBriefUpdates(chunk) {
   while ((match = BRIEF_UPDATE_RE.exec(chunk)) !== null) {
     try { briefUpdates.push(JSON.parse(match[1])); } catch (_) {}
   }
+  BRIEF_UPDATE_RE.lastIndex = 0;  // reset before replace to avoid stale lastIndex
   return { textChunk: chunk.replace(BRIEF_UPDATE_RE, '').trim(), briefUpdates };
 }
 

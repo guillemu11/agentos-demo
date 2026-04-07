@@ -1,6 +1,7 @@
 // apps/dashboard/src/components/studio/VariantPreviewModal.jsx
 import React, { useState } from 'react';
 import { substituteForPreview } from '../../utils/emailMockSubstitute.js';
+import { FIELD_TO_VAR } from './studioConstants.js';
 
 const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
 
@@ -15,13 +16,6 @@ function buildPreviewHtml(baseHtml, market, tier, variants, imageSlots, ampVarVa
   const merged = { ...(ampVarValues || {}) };
 
   // Override with variant field values
-  const FIELD_TO_VAR = {
-    subject:      '@subject',
-    preheader:    '@preheader',
-    heroHeadline: '@hero_title',
-    bodyCopy:     '@body_copy',
-    cta:          '@cta_text',
-  };
   if (variantData) {
     Object.entries(FIELD_TO_VAR).forEach(([field, varName]) => {
       if (variantData[field]?.value) merged[varName] = variantData[field].value;
@@ -44,7 +38,7 @@ function buildPreviewHtml(baseHtml, market, tier, variants, imageSlots, ampVarVa
   return substituteForPreview(html);
 }
 
-export default function VariantPreviewModal({ ticket, markets, activeTier, variants, imageSlots, ampVarValues, baseHtml, progressStats, onHandoff, onClose }) {
+export default function VariantPreviewModal({ ticket, markets, activeTier, variants, imageSlots, ampVarValues, baseHtml, progressStats, canHandoff, onHandoff, onClose }) {
   const [activeMarket, setActiveMarket] = useState(markets[0] || 'en');
   const { approved = 0, total = 0 } = progressStats || {};
 
@@ -95,8 +89,8 @@ export default function VariantPreviewModal({ ticket, markets, activeTier, varia
           <button
             className="studio-btn studio-btn-primary"
             onClick={onHandoff}
-            disabled={approved === 0}
-            title={approved === 0 ? 'Aprueba al menos un campo antes de hacer handoff' : ''}
+            disabled={!canHandoff}
+            title={!canHandoff ? 'Aprueba al menos una variante completa antes de hacer handoff' : ''}
           >
             → Hacer Handoff a HTML Dev
           </button>

@@ -13461,6 +13461,7 @@ body.sidebar-collapsed > .inbox-drawer {
   color: var(--studio-text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
+.studio-panel-group-full { height: 100%; }
 
 /* react-resizable-panels resize handle */
 .studio-resize-handle {
@@ -13866,6 +13867,7 @@ body.sidebar-collapsed > .inbox-drawer {
 }
 .studio-field.filled    { border-color: rgba(16,185,129,0.2); background: rgba(16,185,129,0.04); }
 .studio-field.generating{ border-color: rgba(245,158,11,0.2); background: rgba(245,158,11,0.03); }
+.studio-field--full { grid-column: 1 / -1; }
 .studio-field-label {
   font-size: 9px;
   font-weight: 700;
