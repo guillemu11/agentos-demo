@@ -17,9 +17,9 @@ export default function VariantFieldsGrid({ variantData }) {
           <div key={f.key} className={`studio-field${f.key === 'bodyCopy' ? ' studio-field--full' : ''}`}>
             <div className="studio-field-label">
               {f.label}
-              <span className="studio-field-status pend">pendiente</span>
+              <span className="studio-field-status pend">pending</span>
             </div>
-            <div className="studio-field-value empty">Esperando generación…</div>
+            <div className="studio-field-value empty">Waiting for generation…</div>
           </div>
         ))}
       </div>
@@ -39,11 +39,11 @@ export default function VariantFieldsGrid({ variantData }) {
             <div className="studio-field-label">
               {f.label}
               {field.status === 'approved' && <span className="studio-field-status ok">✓</span>}
-              {field.status === 'generating' && <span className="studio-field-status gen">generando…</span>}
-              {field.status === 'pending' && <span className="studio-field-status pend">pendiente</span>}
+              {field.status === 'generating' && <span className="studio-field-status gen">generating…</span>}
+              {field.status === 'pending' && <span className="studio-field-status pend">pending</span>}
             </div>
             <div className={`studio-field-value ${!field.value ? 'empty' : ''}`}>
-              {field.value || 'Esperando…'}
+              {field.value || 'Waiting…'}
             </div>
           </div>
         );

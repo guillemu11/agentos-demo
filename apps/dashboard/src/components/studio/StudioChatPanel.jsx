@@ -89,7 +89,7 @@ export default function StudioChatPanel({
           { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } }
         );
         if (cancelled || !initRes.ok) {
-          if (!cancelled) setMessages([{ role: 'assistant', content: `¡Hola! Lista para trabajar en **${ticket.project_name}**.` }]);
+          if (!cancelled) setMessages([{ role: 'assistant', content: `Hi! Ready to work on **${ticket.project_name}**.` }]);
           return;
         }
         const reader = initRes.body.getReader();
@@ -109,7 +109,7 @@ export default function StudioChatPanel({
           }
         }
       } catch (_) {
-        if (!cancelled) setMessages([{ role: 'assistant', content: `¡Hola! Lista para trabajar en **${ticket?.project_name || 'este proyecto'}**.` }]);
+        if (!cancelled) setMessages([{ role: 'assistant', content: `Hi! Ready to work on **${ticket?.project_name || 'this project'}**.` }]);
       } finally {
         if (!cancelled) setStreaming(false);
       }
@@ -216,8 +216,8 @@ export default function StudioChatPanel({
       <div className="studio-panel" style={{ alignItems: 'center', justifyContent: 'center' }}>
         <div className="studio-empty-state">
           <div className="icon">📋</div>
-          <div style={{ fontWeight: 600 }}>Sin ticket activo</div>
-          <div style={{ fontSize: 11, lineHeight: 1.6 }}>Selecciona un ticket para empezar con Lucia</div>
+          <div style={{ fontWeight: 600 }}>No active ticket</div>
+          <div style={{ fontSize: 11, lineHeight: 1.6 }}>Select a ticket to start working with Lucia</div>
         </div>
       </div>
     );
@@ -229,7 +229,7 @@ export default function StudioChatPanel({
         <div className="studio-panel-title">Chat</div>
         <div className="studio-agent-badge">
           <div className="studio-agent-dot" />
-          Lucia · activa
+          Lucia · active
         </div>
       </div>
 
@@ -237,7 +237,7 @@ export default function StudioChatPanel({
         {messages.map((msg, i) => (
           <div key={i} className={`studio-msg ${msg.role}`}>
             {msg.isImageSkeleton ? (
-              <div className="studio-image-skeleton">⟳ Generando imagen…</div>
+              <div className="studio-image-skeleton">⟳ Generating image…</div>
             ) : msg.image_url ? (
               <div>
                 <div className="studio-image-card">
@@ -251,11 +251,11 @@ export default function StudioChatPanel({
                       className="studio-image-slot-btn"
                       onClick={() => onImageAssigned?.(msg.activeMarket || activeMarket, slotName, msg.image_url, msg.image_prompt)}
                     >
-                      Usar como {slotName}
+                      Use as {slotName}
                     </button>
                   ))}
                   <button className="studio-image-slot-btn discard" onClick={() => setMessages(prev => prev.filter((_, j) => j !== i))}>
-                    Descartar
+                    Discard
                   </button>
                 </div>
               </div>
@@ -272,8 +272,8 @@ export default function StudioChatPanel({
                     <div className="studio-brief-card-value">{u.status === 'generating' ? '…' : u.value}</div>
                     {u.status === 'approved' && (
                       <div className="studio-brief-card-actions">
-                        <button className="studio-brief-action approve" onClick={() => onBriefUpdate({ ...u, status: 'approved' })}>✓ Aprobar</button>
-                        <button className="studio-brief-action regen" onClick={() => { setInput(`Regenera el ${u.block} para la variante ${u.variant}`); inputRef.current?.focus(); }}>↺ Regenerar</button>
+                        <button className="studio-brief-action approve" onClick={() => onBriefUpdate({ ...u, status: 'approved' })}>✓ Approve</button>
+                        <button className="studio-brief-action regen" onClick={() => { setInput(`Regenerate ${u.block} for variant ${u.variant}`); inputRef.current?.focus(); }}>↺ Regenerate</button>
                       </div>
                     )}
                   </div>
@@ -297,7 +297,7 @@ export default function StudioChatPanel({
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-          placeholder={streaming ? '…' : 'Pide copies, imágenes, variantes por mercado…'}
+          placeholder={streaming ? '…' : 'Ask for copy, images, variants by market…'}
           disabled={streaming}
           rows={1}
         />

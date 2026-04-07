@@ -32,8 +32,8 @@ export default function StudioVariantsPanel({
     <div className="studio-panel" style={{ borderRight: 'none', borderBottom: '1px solid var(--studio-border)' }}>
       {/* Tabs */}
       <div className="studio-tabs">
-        <button className={`studio-tab ${activeTab === 'content' ? 'active' : ''}`} onClick={() => setActiveTab('content')}>Contenido</button>
-        <button className={`studio-tab ${activeTab === 'images' ? 'active' : ''}`} onClick={() => setActiveTab('images')}>Imágenes</button>
+        <button className={`studio-tab ${activeTab === 'content' ? 'active' : ''}`} onClick={() => setActiveTab('content')}>Content</button>
+        <button className={`studio-tab ${activeTab === 'images' ? 'active' : ''}`} onClick={() => setActiveTab('images')}>Images</button>
         {hasAmpscript && (
           <button className={`studio-tab ${activeTab === 'ampscript' ? 'active' : ''}`} onClick={() => setActiveTab('ampscript')}>AMPscript</button>
         )}

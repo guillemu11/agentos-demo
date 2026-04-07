@@ -20,8 +20,8 @@ function getCurrentStep(approvedCount) {
 const STEPS = ['brief', 'content', 'images', 'preview', 'handoff'];
 const STEP_LABELS = {
   brief:   'Brief',
-  content: 'Contenido',
-  images:  'Imágenes',
+  content: 'Content',
+  images:  'Images',
   preview: 'Preview',
   handoff: 'Handoff',
 };
@@ -44,7 +44,7 @@ export default function StudioTopBar({ ticket, progressStats, onShowPreviewModal
         ) : (
           <div className="studio-ticket-pill" style={{ opacity: 0.5 }}>
             <div className="studio-ticket-dot" />
-            Sin ticket activo
+            No active ticket
           </div>
         )}
       </div>
@@ -65,17 +65,17 @@ export default function StudioTopBar({ ticket, progressStats, onShowPreviewModal
       </div>
 
       <div className="studio-topbar-right">
-        <span className="studio-progress-badge">{approved} / {total} campos aprobados</span>
+        <span className="studio-progress-badge">{approved} / {total} fields approved</span>
         <button className="studio-btn studio-btn-ghost" onClick={onShowPreviewModal} disabled={!ticket}>
-          ⊞ Todas las variantes
+          ⊞ All variants
         </button>
         <button
           className="studio-btn studio-btn-primary"
           onClick={onHandoff}
           disabled={!canHandoff}
-          title={canHandoff ? 'Enviar contenido al HTML Developer' : 'Necesitas aprobar al menos una variante completa'}
+          title={canHandoff ? 'Send content to HTML Developer' : 'Approve at least one complete variant to handoff'}
         >
-          → Enviar a HTML Dev
+          → Send to HTML Dev
         </button>
       </div>
     </div>

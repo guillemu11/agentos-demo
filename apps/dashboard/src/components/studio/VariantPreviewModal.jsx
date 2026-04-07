@@ -77,22 +77,22 @@ export default function VariantPreviewModal({ ticket, markets, activeTier, varia
           ) : (
             <div className="studio-empty-state" style={{ background: 'white', color: '#64748b', borderRadius: 8 }}>
               <div className="icon">📧</div>
-              <div>Sin template disponible</div>
+              <div>No template available</div>
             </div>
           )}
         </div>
 
         <div className="studio-modal-footer">
           <div className="studio-modal-footer-info">
-            {approved} / {total} campos aprobados · {markets.length} markets
+            {approved} / {total} fields approved · {markets.length} markets
           </div>
           <button
             className="studio-btn studio-btn-primary"
             onClick={onHandoff}
             disabled={!canHandoff}
-            title={!canHandoff ? 'Aprueba al menos una variante completa antes de hacer handoff' : ''}
+            title={!canHandoff ? 'Approve at least one complete variant before handoff' : ''}
           >
-            → Hacer Handoff a HTML Dev
+            → Handoff to HTML Dev
           </button>
         </div>
       </div>

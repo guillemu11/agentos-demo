@@ -57,15 +57,15 @@ export default function StudioLivePreview({ liveHtml, baseHtml, markets, preview
           ) : (
             <div className="studio-empty-state" style={{ background: 'white', color: '#64748b' }}>
               <div className="icon">📧</div>
-              <div>Sin template disponible</div>
-              <div style={{ fontSize: 11 }}>El HTML Developer debe guardar un template primero</div>
+              <div>No template available</div>
+              <div style={{ fontSize: 11 }}>The HTML Developer needs to save a template first</div>
             </div>
           )}
         </div>
 
         <div className="studio-preview-actions">
           <button className="studio-preview-action pri" onClick={onShowModal}>
-            ⊞ Todas las variantes
+            ⊞ All variants
           </button>
         </div>
       </div>
