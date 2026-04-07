@@ -6,7 +6,7 @@ import renderMarkdown from '../../utils/renderMarkdown.js';
 import { IMAGE_SLOT_NAMES } from './studioConstants.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
-const BRIEF_UPDATE_RE = /\[BRIEF_UPDATE:(\{[^}]+\})\]/g;
+const BRIEF_UPDATE_RE = /\[BRIEF_UPDATE:(\{[\s\S]*?\})\](?=\s|$|\[|\.|\,)/g;
 const IMAGE_REQUEST_RE = /\b(imagen?|image|foto|photo|banner|hero|visual|picture|ilustra|generat|crea(?:r)?|diseña|design|make)\b.{0,80}\b(imagen?|image|foto|photo|banner|hero|avion|plane|aircraft|logo|background|fondo)\b/i;
 const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
 

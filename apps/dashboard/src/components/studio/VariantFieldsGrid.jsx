@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { varLabel } from './studioConstants.js';
 
 // Fallback fields if no template variables available
-const FALLBACK_FIELDS = ['subject', 'preheader', 'heroHeadline', 'cta', 'bodyCopy'];
+const FALLBACK_FIELDS = ['subject', 'preheader', 'hero_headline', 'cta', 'body_copy'];
 
 export default function VariantFieldsGrid({ variantData, allVarNames, onApprove, onRegenerate }) {
   const fields = allVarNames?.length ? allVarNames : FALLBACK_FIELDS;

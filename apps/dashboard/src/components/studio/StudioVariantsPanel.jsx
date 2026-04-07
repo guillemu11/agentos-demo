@@ -37,7 +37,7 @@ export default function StudioVariantsPanel({
     };
   }, [blockVarMap]);
 
-  const hasAmpscript = allVarsByCategory.personalization.length > 0 || PERSONALIZATION_VARS.length > 0;
+  const hasAmpscript = true; // Always show AMPscript tab — personalization tokens always available
   const marketSlots = imageSlots?.[activeMarket] || {};
 
   // Shared market + tier selector rendered in all tabs

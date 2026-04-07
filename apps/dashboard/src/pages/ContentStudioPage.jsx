@@ -16,15 +16,6 @@ const AGENT_ID = 'lucia';
 const ALL_MARKETS = ['en', 'es', 'ar', 'ru'];
 const DEFAULT_TIER = 'economy';
 
-function emptyVariant() {
-  return {
-    subject:      { status: 'pending', value: null },
-    preheader:    { status: 'pending', value: null },
-    heroHeadline: { status: 'pending', value: null },
-    bodyCopy:     { status: 'pending', value: null },
-    cta:          { status: 'pending', value: null },
-  };
-}
 
 export default function ContentStudioPage() {
   const [searchParams] = useSearchParams();
@@ -156,13 +147,8 @@ export default function ContentStudioPage() {
   const handleBriefUpdate = useCallback(({ variant, block, status, value }) => {
     setVariants(prev => ({
       ...prev,
-      [variant]: { ...(prev[variant] || emptyVariant()), [block]: { status, value } },
+      [variant]: { ...(prev[variant] || {}), [block]: { status, value } },
     }));
-    // If approved, also update ampVarValues for live preview
-    if (status === 'approved' && value != null) {
-      const varName = FIELD_TO_VAR[block];
-      if (varName) setAmpVarValues(prev => ({ ...prev, [varName]: value }));
-    }
   }, []);
 
   const handleImageAssigned = useCallback((market, slotName, url, prompt) => {
