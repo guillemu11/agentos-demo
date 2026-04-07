@@ -6,7 +6,7 @@ import renderMarkdown from '../../utils/renderMarkdown.js';
 import { IMAGE_SLOT_NAMES } from './studioConstants.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
-const BRIEF_UPDATE_RE = /\[BRIEF_UPDATE:(\{[\s\S]*?\})\](?=\s|$|\[|\.|\,)/g;
+const BRIEF_UPDATE_RE = /\[BRIEF_UPDATE:(\{[\s\S]*?\})\]/g;
 const IMAGE_REQUEST_RE = /\b(imagen?|image|foto|photo|banner|hero|visual|picture|ilustra|generat|crea(?:r)?|diseña|design|make)\b.{0,80}\b(imagen?|image|foto|photo|banner|hero|avion|plane|aircraft|logo|background|fondo)\b/i;
 const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
 
@@ -168,13 +168,32 @@ export default function StudioChatPanel({
       const decoder = new TextDecoder();
       let assistantText = '';
       let textAdded = false;
+      let streamDone = false;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         for (const line of decoder.decode(value, { stream: true }).split('\n')) {
           if (!line.startsWith('data: ')) continue;
           const data = line.slice(6).trim();
-          if (data === '[DONE]') break;
+          if (data === '[DONE]') {
+            streamDone = true;
+            // Parse all BRIEF_UPDATE tags from the complete accumulated text at once
+            const { briefUpdates: allUpdates } = parseBriefUpdates(assistantText);
+            allUpdates.forEach(u => onBriefUpdate(u));
+            if (allUpdates.length > 0) {
+              setMessages(prev => {
+                const n = [...prev];
+                for (let i = n.length - 1; i >= 0; i--) {
+                  if (n[i].role === 'assistant' && !n[i].image_url) {
+                    n[i] = { ...n[i], content: assistantText.replace(BRIEF_UPDATE_RE, '').trim(), briefUpdates: allUpdates };
+                    break;
+                  }
+                }
+                return n;
+              });
+            }
+            break;
+          }
           try {
             const parsed = JSON.parse(data);
             if (parsed.image_error) {
@@ -208,18 +227,18 @@ export default function StudioChatPanel({
               }
             }
             if (parsed.text) {
-              const { textChunk, briefUpdates } = parseBriefUpdates(parsed.text);
-              assistantText += textChunk;
-              briefUpdates.forEach(u => onBriefUpdate(u));
+              // Accumulate raw text during stream — parse BRIEF_UPDATE only at end
+              assistantText += parsed.text;
+              const displayText = assistantText.replace(BRIEF_UPDATE_RE, '').trim();
               if (!textAdded) {
                 textAdded = true;
-                setMessages(prev => [...prev, { role: 'assistant', content: assistantText, briefUpdates }]);
+                setMessages(prev => [...prev, { role: 'assistant', content: displayText }]);
               } else {
                 setMessages(prev => {
                   const n = [...prev];
                   for (let i = n.length - 1; i >= 0; i--) {
                     if (n[i].role === 'assistant' && !n[i].image_url) {
-                      n[i] = { ...n[i], content: assistantText, briefUpdates: [...(n[i].briefUpdates || []), ...briefUpdates] };
+                      n[i] = { ...n[i], content: displayText };
                       break;
                     }
                   }
