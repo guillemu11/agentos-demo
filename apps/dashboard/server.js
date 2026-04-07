@@ -352,43 +352,6 @@ function extractAmpscriptVars(html) {
     return [...vars];
 }
 
-// Parse [EMAIL_VARIABLES]...[/EMAIL_VARIABLES] block from Lucía's response
-function parseEmailVariables(text) {
-    const match = text.match(/\[EMAIL_VARIABLES\]([\s\S]*?)\[\/EMAIL_VARIABLES\]/);
-    if (!match) return null;
-    const variables = {};
-    const lines = match[1].trim().split('\n');
-    for (const line of lines) {
-        const colonIdx = line.indexOf(':');
-        if (colonIdx === -1) continue;
-        const key = line.substring(0, colonIdx).trim();
-        const value = line.substring(colonIdx + 1).trim();
-        if (key.startsWith('@') && value) {
-            variables[key] = value;
-        }
-    }
-    return Object.keys(variables).length > 0 ? variables : null;
-}
-
-// Parse [CONTENT_BY_BLOCK]...[/CONTENT_BY_BLOCK] block
-function parseContentByBlock(text) {
-    const match = text.match(/\[CONTENT_BY_BLOCK\]([\s\S]*?)\[\/CONTENT_BY_BLOCK\]/);
-    if (!match) return null;
-    const result = {};
-    const lines = match[1].trim().split('\n');
-    let currentBlock = null;
-    for (const line of lines) {
-        const blockMatch = line.match(/^block:\s*([\w-]+)/);
-        if (blockMatch) { currentBlock = blockMatch[1]; result[currentBlock] = {}; continue; }
-        if (!currentBlock) continue;
-        const colonIdx = line.indexOf(':');
-        if (colonIdx === -1) continue;
-        const key = line.substring(0, colonIdx).trim();
-        const value = line.substring(colonIdx + 1).trim();
-        if (key.startsWith('@') && value) result[currentBlock][key] = value;
-    }
-    return Object.keys(result).length > 0 ? result : null;
-}
 
 // ─── Crypto Helpers (for API key encryption) ────────────────────────────────
 
@@ -6529,33 +6492,33 @@ app.post('/api/projects/:id/sessions/:sessionId/initialize', requireAuth, async 
                 ).join('\n');
                 systemPrompt += `\n\n## Email Template (from HTML Developer)
 The following HTML template has been created. It uses AMPscript variables that you must fill with campaign-appropriate content.
+
 Extracted variables: ${extractedVars.join(', ')}
 ${varGuidance ? `\nVariable guidance:\n${varGuidance}` : ''}
 
-When you are ready to provide content for these variables, output them in this exact format:
-[EMAIL_VARIABLES]
-@variableName: value here
-@otherVariable: value here
-[/EMAIL_VARIABLES]
+When providing content for variables, emit one [BRIEF_UPDATE] tag per variable, inline as you generate:
+[BRIEF_UPDATE:{"variant":"en:economy","block":"story1_header","status":"approved","value":"Dive into Entertainment"}]
 
-If you find variables in the template that aren't listed above, fill them automatically based on the campaign brief.
+Rules for [BRIEF_UPDATE]:
+- "variant" is the active market:tier from the campaign context (e.g. "en:economy", "es:business")
+- "block" is the exact variable name from the template (without @)
+- "status" is always "approved"
+- "value" is the content string — plain text, no HTML tags
+- Emit for ALL text variables (subject, preheader, headers, body copy, CTAs, etc.)
+- Do NOT emit for image variables (hero_image, story1_image, etc.), link aliases (_alias suffix), or footer variables (unsub_text, contactus_text, privacy_text)
+- Emit the tags inline in your response as you generate each variable, not in a separate block at the end
 
 HTML Template (truncated for context):
 ${latestHtml.substring(0, 6000)}${latestHtml.length > 6000 ? '\n...(truncated)' : ''}`;
             } else {
-                // No HTML yet — instruct Lucía to output CONTENT_BY_BLOCK
                 systemPrompt += `\n\n## Email Content Mode
-No HTML template exists yet. Generate content per block from the Email Specification above.
-Output format:
-[CONTENT_BY_BLOCK]
-block: hero
-@headline: value here
-@preheader: value here
-
-block: cta
-@main_cta: value here
-@cta_url: https://placeholder.com
-[/CONTENT_BY_BLOCK]`;
+No HTML template exists yet. Generate content from the Email Specification above.
+Emit each piece of content as a [BRIEF_UPDATE] tag:
+[BRIEF_UPDATE:{"variant":"en:economy","block":"subject","status":"approved","value":"Your subject line here"}]
+[BRIEF_UPDATE:{"variant":"en:economy","block":"preheader","status":"approved","value":"Preview text here"}]
+[BRIEF_UPDATE:{"variant":"en:economy","block":"hero_headline","status":"approved","value":"Main headline here"}]
+[BRIEF_UPDATE:{"variant":"en:economy","block":"body_copy","status":"approved","value":"Body text here"}]
+[BRIEF_UPDATE:{"variant":"en:economy","block":"cta_text","status":"approved","value":"CTA button text"}]`;
             }
         }
 
@@ -6824,7 +6787,7 @@ YOUR RESPONSE MUST BE EXACTLY THAT ONE QUESTION. NO INTRODUCTION. NO FOLLOW-UP. 
                 if (chatVars.length > 0) {
                     systemPrompt += `\n\n## Email Template Variables Available
 Variables to fill: ${chatVars.join(', ')}
-When providing variable content, use [EMAIL_VARIABLES]...[/EMAIL_VARIABLES] format.`;
+When providing variable content, emit inline [BRIEF_UPDATE] tags per variable.`;
                 }
             }
         }
@@ -7002,50 +6965,6 @@ When providing variable content, use [EMAIL_VARIABLES]...[/EMAIL_VARIABLES] form
         if (stageReadyMatch) {
             res.write(`data: ${JSON.stringify({ handoff_suggestion: true, reason: stageReadyMatch[1] })}\n\n`);
             fullResponse = fullResponse.replace(/\[STAGE_READY:\s*.+?\]/, '').trim();
-        }
-
-        // Parse Lucía's [EMAIL_VARIABLES] or [CONTENT_BY_BLOCK] output
-        const isLuciaResponse = session.agent_id === 'lucia'
-            || (session.agent_role || '').toLowerCase().includes('content agent')
-            || (session.agent_role || '').toLowerCase().includes('content strategist')
-            || (session.agent_role || '').toLowerCase().includes('content creator');
-        if (isLuciaResponse) {
-            const emailVars = parseEmailVariables(fullResponse);
-            const contentByBlock = !emailVars ? parseContentByBlock(fullResponse) : null;
-
-            if (emailVars || contentByBlock) {
-                const currentSpec = (await pool.query('SELECT email_spec FROM projects WHERE id = $1', [projectId])).rows[0]?.email_spec || {};
-                const deliverableUpdate = {};
-
-                // Flatten vars (both formats → flat object)
-                let flatVars = {};
-                if (emailVars) {
-                    flatVars = emailVars;
-                    deliverableUpdate.variable_values = emailVars;
-                    deliverableUpdate.preview_version = currentSpec.html_version || 0;
-                }
-                if (contentByBlock) {
-                    deliverableUpdate.content_by_block = contentByBlock;
-                    for (const blockVars of Object.values(contentByBlock)) {
-                        Object.assign(flatVars, blockVars);
-                    }
-                    deliverableUpdate.variable_values = flatVars;
-                    deliverableUpdate.preview_version = currentSpec.html_version || 0;
-                }
-
-                await pool.query(
-                    `UPDATE project_agent_sessions
-                     SET deliverables = COALESCE(deliverables, '{}'::jsonb) || $1::jsonb
-                     WHERE id = $2`,
-                    [JSON.stringify(deliverableUpdate), sessionId]
-                );
-
-                // Emit each variable individually so frontend can update preview live
-                for (const [varName, varValue] of Object.entries(flatVars)) {
-                    res.write(`data: ${JSON.stringify({ var_update: { name: varName, value: varValue } })}\n\n`);
-                }
-                res.write(`data: ${JSON.stringify({ email_variables_saved: true, count: Object.keys(flatVars).length })}\n\n`);
-            }
         }
 
         // Parse EMAIL_SPEC_UPDATE emitted by campaign-manager / raul in pipeline sessions
