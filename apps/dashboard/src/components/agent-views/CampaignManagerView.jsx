@@ -78,8 +78,13 @@ export default function CampaignManagerView({ agent, activeTab: activeTabProp, o
   const [emailSpecByProject, setEmailSpecByProject] = useState({});
   const [localEvents, setLocalEvents] = useState([]);
 
-  const allEvents = [...(agent.recent_events || []), ...localEvents]
-    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  const allEventsRaw = [...(agent.recent_events || []), ...localEvents];
+  const allEvents = allEventsRaw
+    .sort((a, b) => {
+      const diff = new Date(b.timestamp) - new Date(a.timestamp);
+      if (diff !== 0) return diff;
+      return allEventsRaw.indexOf(b) - allEventsRaw.indexOf(a);
+    });
 
   const handleBriefArtifact = useCallback((payload) => {
     const { spec, projectId, timestamp, blocksCount, variablesCount } = payload;
@@ -91,6 +96,12 @@ export default function CampaignManagerView({ agent, activeTab: activeTabProp, o
       content: `${t('campaignManager.brief.updated')} — ${blocksCount} bloques, ${variablesCount} variables`,
     }, ...prev]);
   }, [t]);
+
+  const handleStreamEvent = useCallback((event) => {
+    if (event.type === 'brief_artifact') {
+      handleBriefArtifact(event.payload);
+    }
+  }, [handleBriefArtifact]);
 
   return (
     <>
@@ -271,11 +282,7 @@ export default function CampaignManagerView({ agent, activeTab: activeTabProp, o
             agents={pipeline.agents}
             onClearTicket={pipeline.clearTicket}
             onHandoffRequest={pipeline.setHandoffSession}
-            onStreamEvent={(event) => {
-              if (event.type === 'brief_artifact') {
-                handleBriefArtifact(event.payload);
-              }
-            }}
+            onStreamEvent={handleStreamEvent}
           />
         )}
 
