@@ -40,6 +40,7 @@ export default function BlockStudioPage() {
   const [builderStatus, setBuilderStatus] = useState('');
   const [leftTab, setLeftTab] = useState('blocks'); // 'blocks' | 'chat' — blocks by default
   const [chatInput, setChatInput] = useState('');
+  const [selectedCanvasBlock, setSelectedCanvasBlock] = useState(null); // { id, name, html } | null
 
   // Block Manager state
   const [selectedBlock, setSelectedBlock] = useState(null);
@@ -101,7 +102,13 @@ export default function BlockStudioPage() {
       return a;
     });
   };
-  const removeBlock = (i) => setBuilderBlocks(prev => prev.filter((_, idx) => idx !== i));
+  const removeBlock = (i) => {
+    setBuilderBlocks(prev => {
+      const block = prev[i];
+      if (block && selectedCanvasBlock?.id === block.id) setSelectedCanvasBlock(null);
+      return prev.filter((_, idx) => idx !== i);
+    });
+  };
 
   // Block Manager: "Añadir al canvas"
   const handleAddToCanvas = (block) => {
@@ -222,14 +229,19 @@ export default function BlockStudioPage() {
                   onHandoffRequest={pipeline.setHandoffSession}
                   externalInput={chatInput}
                   onExternalInputConsumed={() => setChatInput('')}
+                  currentHtml={builderHtml}
+                  activeBlock={selectedCanvasBlock?.name || null}
+                  onActiveBlockClear={() => setSelectedCanvasBlock(null)}
                   onHtmlGenerated={(html) => {
                     setAiHtml(mergeAiHtmlIntoTemplate(templateHtml, html));
                     setBuilderBlocks([]);
                     setPatchedBlock(null);
+                    setSelectedCanvasBlock(null);
                     setBuilderStatus('Email generado');
                     setTimeout(() => setBuilderStatus(''), 3000);
                   }}
                   onHtmlPatched={(blockName, html) => {
+                    setBuilderBlocks([]);
                     setAiHtml(html);
                     setPatchedBlock(blockName);
                     setBuilderStatus(`${blockName} actualizado`);
@@ -237,7 +249,11 @@ export default function BlockStudioPage() {
                   }}
                   canvasBlocks={builderBlocks}
                   onHtmlBlock={(block) => {
-                    addBlock(block.title, block.htmlSource);
+                    const id = Date.now() + Math.random();
+                    const newBlock = { id, name: block.title, html: block.htmlSource };
+                    setBuilderBlocks(prev => [...prev, newBlock]);
+                    setAiHtml('');
+                    setSelectedCanvasBlock(newBlock);
                     setBuilderStatus(`${block.title} añadido`);
                     setTimeout(() => setBuilderStatus(''), 3000);
                   }}
@@ -246,8 +262,10 @@ export default function BlockStudioPage() {
             </div>
             <EmailBuilderPreview
               html={builderBlocks.length ? null : builderHtml}
+              saveHtml={builderHtml}
               blocks={builderBlocks.length ? builderBlocks : null}
               templateHtml={templateHtml}
+              projectId={pipeline.selectedTicket?.project_id}
               onReorderBlocks={reorderBlock}
               onRemoveBlock={removeBlock}
               onBlockDrop={(block) => {
@@ -257,7 +275,10 @@ export default function BlockStudioPage() {
               }}
               patchedBlock={patchedBlock}
               statusMessage={builderStatus}
-              onBlockClick={(blockName) => { setChatInput(`[bloque: ${blockName}] `); setLeftTab('chat'); }}
+              onBlockClick={(blockName) => { setLeftTab('chat'); }}
+              onBlockSelect={(block) => { setSelectedCanvasBlock(block); setLeftTab('chat'); }}
+              onBlockDeselect={() => setSelectedCanvasBlock(null)}
+              selectedCanvasBlock={selectedCanvasBlock}
             />
           </div>
         )}
@@ -304,19 +325,19 @@ export default function BlockStudioPage() {
                     className={`block-manager-card ${selectedBlock?.id === block.id ? 'selected' : ''}`}
                     onClick={() => setSelectedBlock(block)}
                   >
-                    {block.html ? (
-                      <iframe
-                        sandbox="allow-same-origin"
-                        srcDoc={block.html}
-                        title={block.name}
-                        className="block-manager-thumb"
-                        tabIndex={-1}
-                      />
-                    ) : (
-                      <div className="block-manager-thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
-                        {block.type}
-                      </div>
-                    )}
+                    <div className="block-manager-thumb-wrapper">
+                      {block.html ? (
+                        <iframe
+                          sandbox="allow-same-origin"
+                          srcDoc={block.html}
+                          title={block.name}
+                          className="block-manager-thumb-iframe"
+                          tabIndex={-1}
+                        />
+                      ) : (
+                        <div className="block-manager-thumb-placeholder">{block.type}</div>
+                      )}
+                    </div>
                     <div className="block-manager-card-name" title={block.name}>{block.name}</div>
                     <div className="block-manager-card-cat">{block.category}</div>
                   </div>
