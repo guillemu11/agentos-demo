@@ -5,6 +5,18 @@ Formato: fecha, contexto, leccion, regla para el futuro.
 
 ---
 
+## 2026-04-03 — RAG ingestion: HTML en content genera chunks semánticamente pobres
+
+**Contexto:** Al ingestar bloques HTML de Emirates en Pinecone, se puso `description + HTML` como `content` en `ingestDocument`. El chunker divide el contenido en fragmentos de 500 tokens, generando 20-40 chunks de HTML crudo sin contexto semántico.
+
+**Lección:** Para documentos donde el texto semántico es pequeño (descripción) pero el payload es grande (HTML), separar ambos: embedear solo la descripción, almacenar el payload en `metadata.html_source` (PostgreSQL JSONB, no Pinecone).
+
+**Regla futura:** Antes de llamar a `ingestDocument` con contenido mixto (descripción + código/HTML), preguntarse: ¿el chunker va a fragmentar el payload en piezas inutilizables? Si sí, separar description (para embedding) del payload (para metadata).
+
+**Tech debt pendiente:** Actualizar el endpoint de ingesta de bloques para poner solo la descripción en `content` y el HTML en `metadata.html_source`. Actualizar el retrieval de email-blocks en server.js para servir `html_source` desde `knowledge_documents.metadata`.
+
+---
+
 ## Template
 
 ```
