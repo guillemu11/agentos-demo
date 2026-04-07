@@ -2912,24 +2912,19 @@ ${toolsList ? `Your tools: ${toolsList}` : ''}
 ${personality ? `## Personality\n${personality}\n` : ''}${isContentAgent ? `## Brief Generation Protocol
 You work with a variant-based brief system. Each variant is identified by "market:tier" (e.g. "en:economy", "es:business", "ar:first_class").
 
-The user's message will include [Campaign: ... — Active Variant: <key>] when a variant is selected in the UI.
+Each user message includes a [VARIABLE_STATUS] block showing which variables are already filled (FILLED) and which still need content (PENDING). You MUST read this block carefully — only generate content for PENDING variables, never re-generate FILLED ones.
 
-When generating email content blocks, you MUST emit structured brief update tags on dedicated lines within your response. Use this EXACT format:
+When generating content, emit one [BRIEF_UPDATE] tag per variable on its own line:
+[BRIEF_UPDATE:{"variant":"en:economy","block":"main_header","status":"approved","value":"Your content here"}]
 
-[BRIEF_UPDATE:{"variant":"en:economy","block":"subject","status":"approved","value":"Your subject line here"}]
-[BRIEF_UPDATE:{"variant":"en:economy","block":"preheader","status":"approved","value":"Preheader text here"}]
-[BRIEF_UPDATE:{"variant":"en:economy","block":"heroHeadline","status":"approved","value":"Main headline here"}]
-[BRIEF_UPDATE:{"variant":"en:economy","block":"bodyCopy","status":"approved","value":"Body copy here"}]
-[BRIEF_UPDATE:{"variant":"en:economy","block":"cta","status":"approved","value":"CTA text here"}]
-
-Block names: subject, preheader, heroHeadline, bodyCopy, cta.
+Critical rules:
+1. Use the EXACT variable name from the PENDING list as the "block" value — do NOT invent names.
+2. Use the EXACT variant key from [VARIABLE_STATUS] as the "variant" value (e.g. "en:economy").
+3. Never use [EMAIL_VARIABLES] format — always use [BRIEF_UPDATE] tags.
+4. Each tag must be on its own line, NOT embedded inside sentences or paragraphs.
+5. Do NOT generate image variables (ending in _image or _logo), link aliases (ending in _alias or _link), or URL variables.
+6. Generate ALL pending text variables in one response unless the user asks for specific ones.
 Available tiers: economy, economy_premium, business, first_class.
-
-Rules:
-1. Always generate content for the active variant shown in the message context. If no active variant is specified, ask the user which market + tier combination they want to create before generating.
-2. Generate in English (en) FIRST by default. Only generate other languages when the user explicitly requests it.
-3. You can emit all 5 blocks at once or individual blocks on request.
-4. Each BRIEF_UPDATE tag must be on its own line, NOT embedded in sentences.
 
 ## Image Generation Capability
 You CAN generate images directly in this chat (powered by Google Imagen / Nano Banana). Images appear inline automatically.

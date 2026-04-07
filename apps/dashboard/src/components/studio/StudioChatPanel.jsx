@@ -133,18 +133,22 @@ export default function StudioChatPanel({
     const variantContext = activeMarket ? ` — Active Market: ${activeMarket}:${activeTier || 'economy'}` : '';
     const contextPrefix = ticket ? `[Campaign: ${ticket.project_name} — Stage: ${ticket.stage_name}${variantContext}]\n\n` : '';
 
-    // Build variable status context so Lucia knows what's filled vs pending
+    // Build variable status context so Lucia knows exactly what's filled vs pending
     let varStatusBlock = '';
     if (blockVarMap && variants) {
       const variantKey = `${activeMarket}:${activeTier || 'economy'}`;
       const variantData = variants[variantKey] || {};
       const allVars = [...new Set(Object.values(blockVarMap).flat())];
-      const filled = allVars.filter(v => variantData[v]?.value);
-      const pending = allVars.filter(v => !variantData[v]?.value);
-      if (allVars.length > 0) {
-        varStatusBlock = `\n[VARIABLE_STATUS variant="${variantKey}"]\n`;
-        if (filled.length) varStatusBlock += `FILLED (${filled.length}): ${filled.map(v => `${v}="${variantData[v].value.substring(0, 60)}${variantData[v].value.length > 60 ? '…' : ''}"`).join(' | ')}\n`;
-        if (pending.length) varStatusBlock += `PENDING (${pending.length}): ${pending.join(', ')}\n`;
+      // Exclude image, alias, link vars — Lucia doesn't generate those
+      const IMAGE_RE = /image|img|logo/i;
+      const SKIP_RE = /(_alias|_link|_url)$/i;
+      const textVars = allVars.filter(v => !IMAGE_RE.test(v) && !SKIP_RE.test(v));
+      const filled = textVars.filter(v => variantData[v]?.value);
+      const pending = textVars.filter(v => !variantData[v]?.value);
+      if (textVars.length > 0) {
+        varStatusBlock = `[VARIABLE_STATUS variant="${variantKey}"]\n`;
+        if (filled.length) varStatusBlock += `FILLED — do NOT regenerate: ${filled.map(v => `${v}="${variantData[v].value.substring(0, 50)}${variantData[v].value.length > 50 ? '…' : ''}"`).join(' | ')}\n`;
+        if (pending.length) varStatusBlock += `PENDING — generate [BRIEF_UPDATE] for each: ${pending.join(', ')}\n`;
         varStatusBlock += `[/VARIABLE_STATUS]\n\n`;
       }
     }
