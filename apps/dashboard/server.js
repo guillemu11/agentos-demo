@@ -6993,6 +6993,38 @@ When providing variable content, emit inline [BRIEF_UPDATE] tags per variable.`;
             }
         }
 
+        // Fallback: for Lucia sessions, parse any "* varname: value" bullet lines that
+        // didn't get a [BRIEF_UPDATE] tag, and emit them as brief_update events now.
+        const isLuciaFallback = session.agent_id === 'lucia'
+            || (session.agent_role || '').toLowerCase().includes('content agent')
+            || (session.agent_role || '').toLowerCase().includes('content strategist')
+            || (session.agent_role || '').toLowerCase().includes('content creator');
+        if (isLuciaFallback) {
+            // Vars already emitted via [BRIEF_UPDATE] in the stream
+            const emittedVars = new Set();
+            for (const m of fullResponse.matchAll(/\[BRIEF_UPDATE:\{"variant":"([^"]+)","block":"([^"]+)"/g)) {
+                emittedVars.add(m[2]);
+            }
+            // Extract variant from VARIABLE_STATUS block in the user message
+            const variantMatch = message.match(/\[VARIABLE_STATUS variant="([^"]+)"\]/);
+            const fallbackVariant = variantMatch?.[1] || 'en:economy';
+            // Parse bullet lines: "* varname: value" or "varname: value" patterns
+            const IMAGE_SKIP = /image|img|logo|_alias|_link|_url/i;
+            const bulletRE = /^\*?\s*([\w]+)\s*:\s*(.+)$/gm;
+            let bMatch;
+            while ((bMatch = bulletRE.exec(fullResponse)) !== null) {
+                const varName = bMatch[1].trim();
+                const value = bMatch[2].replace(/\[BRIEF_UPDATE[^\]]*\]/g, '').trim();
+                if (!varName || !value) continue;
+                if (IMAGE_SKIP.test(varName)) continue;
+                if (emittedVars.has(varName)) continue;
+                if (value.startsWith('{') || value.startsWith('[')) continue; // skip JSON
+                // Emit as brief_update so frontend can pick it up
+                res.write(`data: ${JSON.stringify({ brief_update: { variant: fallbackVariant, block: varName, status: 'approved', value } })}\n\n`);
+                emittedVars.add(varName);
+            }
+        }
+
         await pool.query(
             `INSERT INTO pipeline_session_messages (session_id, role, content, metadata)
              VALUES ($1, 'assistant', $2, $3)`,

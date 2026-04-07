@@ -185,6 +185,9 @@ export default function StudioChatPanel({
                 return [...prev, err];
               });
             }
+            if (parsed.brief_update) {
+              onBriefUpdate(parsed.brief_update);
+            }
             if (parsed.image_url) {
               const detectedSlot = detectSlotFromPrompt(parsed.image_prompt);
               const imageMsg = {
