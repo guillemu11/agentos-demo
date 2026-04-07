@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
+import EmailBriefCard from '../EmailBriefCard';
 import { campaignManagerData } from '../../data/agentViewMocks.js';
 import { useAgentPipelineSession } from '../../hooks/useAgentPipelineSession.js';
 import ActiveTicketIndicator from './shared/ActiveTicketIndicator.jsx';
@@ -74,7 +75,22 @@ export default function CampaignManagerView({ agent, activeTab: activeTabProp, o
     return map[status] || '#94a3b8';
   }
 
-  const recentEvents = agent.recent_events || [];
+  const [emailSpecByProject, setEmailSpecByProject] = useState({});
+  const [localEvents, setLocalEvents] = useState([]);
+
+  const allEvents = [...(agent.recent_events || []), ...localEvents]
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  const handleBriefArtifact = useCallback((payload) => {
+    const { spec, projectId, timestamp, blocksCount, variablesCount } = payload;
+    setEmailSpecByProject(prev => ({ ...prev, [projectId]: { spec, timestamp } }));
+    setLocalEvents(prev => [{
+      id: `brief-${Date.now()}`,
+      timestamp,
+      event_type: 'brief_created',
+      content: `${t('campaignManager.brief.updated')} — ${blocksCount} bloques, ${variablesCount} variables`,
+    }, ...prev]);
+  }, [t]);
 
   return (
     <>
@@ -94,7 +110,12 @@ export default function CampaignManagerView({ agent, activeTab: activeTabProp, o
       <section className="agent-tab-content">
         {activeTab === 'campaigns' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {data.campaigns.map((campaign) => (
+            {data.campaigns.map((campaign) => {
+              const projectId = campaign.projectId || campaign.id;
+              const briefData = emailSpecByProject[projectId];
+              const emailSpec = briefData?.spec || campaign.email_spec;
+
+              return (
               <div key={campaign.id} className="card animate-fade-in" style={{ padding: '20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
                   <div>
@@ -150,8 +171,15 @@ export default function CampaignManagerView({ agent, activeTab: activeTabProp, o
                     </div>
                   </div>
                 )}
+
+                <EmailBriefCard
+                  emailSpec={emailSpec}
+                  briefDate={briefData?.timestamp}
+                  onDefineClick={() => setActiveTab('chat')}
+                />
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -243,6 +271,11 @@ export default function CampaignManagerView({ agent, activeTab: activeTabProp, o
             agents={pipeline.agents}
             onClearTicket={pipeline.clearTicket}
             onHandoffRequest={pipeline.setHandoffSession}
+            onStreamEvent={(event) => {
+              if (event.type === 'brief_artifact') {
+                handleBriefArtifact(event.payload);
+              }
+            }}
           />
         )}
 
@@ -256,8 +289,8 @@ export default function CampaignManagerView({ agent, activeTab: activeTabProp, o
 
         {activeTab === 'activity' && (
           <div className="agent-activity-feed">
-            {recentEvents.length > 0 ? (
-              recentEvents.map((event, i) => (
+            {allEvents.length > 0 ? (
+              allEvents.map((event, i) => (
                 <div key={event.id || i} className="activity-item animate-fade-in">
                   <div className="activity-time">
                     {event.timestamp ? new Date(event.timestamp).toLocaleTimeString(lang === 'en' ? 'en-US' : 'es-ES', { hour: '2-digit', minute: '2-digit' }) : '--:--'}

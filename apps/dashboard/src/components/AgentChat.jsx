@@ -10,7 +10,7 @@ const FILE_URL = (path) => `${import.meta.env.VITE_API_URL || '/api'}/kb-files/$
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-export default function AgentChat({ agentId, agentName, agentAvatar, externalInput, onExternalInputConsumed, onHtmlGenerated, onHtmlPatched, currentHtml }) {
+export default function AgentChat({ agentId, agentName, agentAvatar, externalInput, onExternalInputConsumed, onHtmlGenerated, onHtmlPatched, onHtmlBlock, currentHtml, canvasBlocks, activeBlock, onActiveBlockClear, onStreamEvent }) {
     const { t, lang } = useLanguage();
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
@@ -110,7 +110,11 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'include',
-                body: JSON.stringify({ message: msg }),
+                body: JSON.stringify({
+                    message: msg,
+                    ...(activeBlock && { activeBlock }),
+                    ...(canvasBlocks?.length > 0 && { canvasBlocks: canvasBlocks.map(b => b.name) }),
+                }),
             });
 
             if (!res.ok) {
@@ -162,18 +166,26 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
                                 return updated;
                             });
                         } else if (parsed.html_sources) {
-                            const newMedia = parsed.html_sources
-                                .filter(s => s.htmlSource)
-                                .map(s => ({ mediaType: 'email_html', htmlSource: s.htmlSource, title: s.title }));
-                            if (newMedia.length > 0) {
-                                setMessages(prev => {
-                                    const updated = [...prev];
-                                    const last = updated[updated.length - 1];
-                                    const existing = last.media || [];
-                                    const merged = [...existing, ...newMedia.filter(m => !existing.find(e => e.title === m.title))];
-                                    updated[updated.length - 1] = { ...last, media: merged };
-                                    return updated;
-                                });
+                            if (!onHtmlBlock) {
+                                // Standalone context only: show as inline previews
+                                const newMedia = parsed.html_sources
+                                    .filter(s => s.htmlSource)
+                                    .map(s => ({ mediaType: 'email_html', htmlSource: s.htmlSource, title: s.title }));
+                                if (newMedia.length > 0) {
+                                    setMessages(prev => {
+                                        const updated = [...prev];
+                                        const last = updated[updated.length - 1];
+                                        const existing = last.media || [];
+                                        const merged = [...existing, ...newMedia.filter(m => !existing.find(e => e.title === m.title))];
+                                        updated[updated.length - 1] = { ...last, media: merged };
+                                        return updated;
+                                    });
+                                }
+                            }
+                            // Canvas context: html_sources are KB context for the AI — suppress from both chat and canvas
+                        } else if (parsed.briefArtifact) {
+                            if (onStreamEvent) {
+                                onStreamEvent({ type: 'brief_artifact', payload: parsed.briefArtifact });
                             }
                         } else if (parsed.text) {
                             fullResponse += parsed.text;
@@ -191,6 +203,7 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
 
             // Detect HTML generation or patch
             const patchMatch = fullResponse.match(/<!--PATCH:([^>]+)-->([\s\S]+)/);
+            const newBlockMatch = !patchMatch && fullResponse.match(/<!--NEW_BLOCK:([^>]+)-->\s*(<table[\s\S]+<\/table>)/i);
             if (patchMatch) {
                 const [, blockName, patchHtml] = patchMatch;
                 if (onHtmlPatched) {
@@ -198,6 +211,23 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
                     currentHtmlRef.current = patched;
                     onHtmlPatched(blockName, patched);
                 }
+                // Clear the raw HTML from chat — result is visible in canvas
+                setMessages(prev => {
+                    const updated = [...prev];
+                    updated[updated.length - 1] = { ...updated[updated.length - 1], content: '', media: [] };
+                    return updated;
+                });
+            } else if (newBlockMatch) {
+                const [, blockName, blockHtml] = newBlockMatch;
+                if (onHtmlBlock) {
+                    onHtmlBlock({ title: blockName, htmlSource: blockHtml });
+                }
+                // Clear the raw HTML from chat — block is visible in canvas
+                setMessages(prev => {
+                    const updated = [...prev];
+                    updated[updated.length - 1] = { ...updated[updated.length - 1], content: '', media: [] };
+                    return updated;
+                });
             } else if (fullResponse.includes('<!DOCTYPE') || fullResponse.includes('<html')) {
                 if (onHtmlGenerated) {
                     currentHtmlRef.current = fullResponse;
@@ -357,6 +387,16 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
                             </span>
                         ))}
                     </div>
+                </div>
+            )}
+
+            {/* Active block indicator */}
+            {activeBlock && (
+                <div className="chat-active-block-indicator">
+                    <span className="chat-active-block-label">✏️ {activeBlock}</span>
+                    {onActiveBlockClear && (
+                        <button className="chat-active-block-clear" onClick={onActiveBlockClear} title="Deseleccionar bloque">×</button>
+                    )}
                 </div>
             )}
 
