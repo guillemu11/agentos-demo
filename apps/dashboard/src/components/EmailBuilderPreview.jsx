@@ -2,10 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { Monitor, Smartphone, Mail, Maximize2, Save, ChevronDown, FlaskConical, X } from 'lucide-react';
 import { substituteVariants, countApproved, FIELDS_PER_VARIANT } from '../utils/emailVariants.js';
+import { substituteForPreview } from '../utils/emailMockSubstitute.js';
 import VariantPreviewModal from './VariantPreviewModal.jsx';
 
 // Auto-sizing iframe for a single block
-function BlockIframe({ html, templateHead }) {
+function BlockIframe({ html, blockName, templateHead }) {
   const ref = useRef(null);
   const [height, setHeight] = useState(120);
   useEffect(() => {
@@ -24,14 +25,14 @@ function BlockIframe({ html, templateHead }) {
     <iframe
       ref={ref}
       sandbox="allow-same-origin"
-      srcDoc={`<!DOCTYPE html><html><head>${head}</head><body style="margin:0;padding:0;">${html}</body></html>`}
+      srcDoc={`<!DOCTYPE html><html><head>${head}</head><body style="margin:0;padding:0;">${substituteForPreview(html, blockName)}</body></html>`}
       style={{ width: '100%', height, border: 'none', display: 'block', pointerEvents: 'none' }}
       scrolling="no"
     />
   );
 }
 
-export default function EmailBuilderPreview({ html, saveHtml, blocks, templateHtml, onReorderBlocks, onRemoveBlock, patchedBlock, statusMessage, onBlockClick, onBlockDrop, projectId, contentVariants, contentReady, onTemplateSaved, editingTemplate }) {
+export default function EmailBuilderPreview({ html, saveHtml, blocks, templateHtml, onReorderBlocks, onRemoveBlock, patchedBlock, statusMessage, onBlockClick, onBlockDrop, projectId, contentVariants, contentReady, onTemplateSaved, editingTemplate, onBlockSelect, onBlockDeselect, selectedCanvasBlock }) {
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState('preview');
   const [viewMode, setViewMode] = useState('desktop'); // 'desktop' | 'mobile'
@@ -87,9 +88,11 @@ export default function EmailBuilderPreview({ html, saveHtml, blocks, templateHt
     : '';
 
   const variantKeys = Object.keys(contentVariants || {});
-  const previewHtml = (activeVariant && contentVariants?.[activeVariant])
-    ? substituteVariants(html, contentVariants[activeVariant])
-    : html;
+  const previewHtml = substituteForPreview(
+    (activeVariant && contentVariants?.[activeVariant])
+      ? substituteVariants(html, contentVariants[activeVariant])
+      : html
+  );
   const totalApproved = variantKeys.reduce((sum, k) =>
     sum + countApproved(contentVariants[k]), 0);
   const totalFields = variantKeys.length * FIELDS_PER_VARIANT;
@@ -193,11 +196,16 @@ export default function EmailBuilderPreview({ html, saveHtml, blocks, templateHt
         <div className="email-preview-drop-overlay">{t('emailBlocks.dropHere')}</div>
       )}
       <div className={`email-preview-iframe-wrapper ${viewMode}`}>
-      <div className="email-blocks-canvas">
+      <div
+        className="email-blocks-canvas"
+        onClick={(e) => {
+          if (e.target === e.currentTarget && onBlockDeselect) onBlockDeselect();
+        }}
+      >
         {blocks.map((block, i) => (
           <div
             key={block.id}
-            className={`email-block-canvas-row${canvasDragOver === i ? ' canvas-drag-over' : ''}${canvasDragIndex === i ? ' canvas-dragging' : ''}`}
+            className={`email-block-canvas-row${canvasDragOver === i ? ' canvas-drag-over' : ''}${canvasDragIndex === i ? ' canvas-dragging' : ''}${selectedCanvasBlock?.id === block.id ? ' selected' : ''}`}
             draggable
             onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setCanvasDragIndex(i); }}
             onDragOver={e => { e.preventDefault(); e.stopPropagation(); setCanvasDragOver(i); }}
@@ -208,12 +216,24 @@ export default function EmailBuilderPreview({ html, saveHtml, blocks, templateHt
               setCanvasDragIndex(null); setCanvasDragOver(null);
             }}
             onDragEnd={() => { setCanvasDragIndex(null); setCanvasDragOver(null); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onBlockSelect) onBlockSelect(block);
+              if (onBlockClick) onBlockClick(block.name);
+            }}
           >
-            <BlockIframe html={block.html} templateHead={templateHead} />
-            <div className="email-block-canvas-overlay">
+            <BlockIframe html={block.html} blockName={block.name || ''} templateHead={templateHead} />
+            <div
+              className="email-block-canvas-overlay"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onBlockSelect) onBlockSelect(block);
+                if (onBlockClick) onBlockClick(block.name);
+              }}
+            >
               <span className="email-block-canvas-drag-hint">⠿ {block.name}</span>
               {onRemoveBlock && (
-                <button className="email-block-canvas-remove" onClick={() => onRemoveBlock(i)} title="Eliminar bloque">×</button>
+                <button className="email-block-canvas-remove" onClick={(e) => { e.stopPropagation(); onRemoveBlock(i); }} title="Eliminar bloque">×</button>
               )}
             </div>
           </div>

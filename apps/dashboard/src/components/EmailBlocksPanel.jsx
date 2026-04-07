@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
+import { substituteForPreview } from '../utils/emailMockSubstitute.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -32,15 +33,6 @@ const BADGE_COLORS = {
   footer:  { bg: '#f3f4f6', color: '#374151' },
 };
 
-const THUMB_STYLES = {
-  header:  { background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)' },
-  hero:    { background: 'linear-gradient(135deg, #c60c30 0%, #9b0000 100%)' },
-  story:   { background: '#e0f2fe' },
-  offer:   { background: '#f9fafb', border: '1px solid #e5e7eb' },
-  cta:     { background: '#f9fafb', border: '1px solid #e5e7eb' },
-  content: { background: '#f3f4f6' },
-  footer:  { background: '#1a1a2e' },
-};
 
 export default function EmailBlocksPanel() {
   const { t } = useLanguage();
@@ -111,7 +103,6 @@ export default function EmailBlocksPanel() {
 
         {!loading && filtered.map(block => {
           const badge = BADGE_COLORS[block.group] || BADGE_COLORS.content;
-          const thumb = THUMB_STYLES[block.group] || THUMB_STYLES.content;
           return (
             <div
               key={block.id}
@@ -121,12 +112,23 @@ export default function EmailBlocksPanel() {
                 setDraggingId(block.id);
                 e.dataTransfer.effectAllowed = 'copy';
                 e.dataTransfer.setData('text/html', block.html);
-                e.dataTransfer.setData('text/plain', block.title);
+                e.dataTransfer.setData('text/plain', block.filename || block.title);
               }}
               onDragEnd={() => setDraggingId(null)}
               title={block.description || block.title}
             >
-              <div className="email-block-row-thumb" style={thumb} />
+              <div className="email-block-row-thumb">
+                {block.html
+                  ? <iframe
+                      sandbox="allow-same-origin"
+                      srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>*{box-sizing:border-box}body{margin:0;padding:0;overflow:hidden;}</style></head><body>${substituteForPreview(block.html, block.filename || block.title)}</body></html>`}
+                      className="email-block-row-thumb-iframe"
+                      tabIndex={-1}
+                      scrolling="no"
+                    />
+                  : <div style={{ width: '100%', height: '100%', background: 'var(--bg-secondary)' }} />
+                }
+              </div>
               <div className="email-block-row-info">
                 <div className="email-block-row-name">{block.title}</div>
                 {block.description && (
