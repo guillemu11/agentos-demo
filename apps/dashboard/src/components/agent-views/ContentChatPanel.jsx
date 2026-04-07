@@ -30,11 +30,19 @@ const MARKET_FLAGS_INLINE = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru
 // Mirror of the backend regex — used only to show skeleton immediately
 const IMAGE_REQUEST_RE = /\b(imagen?|image|foto|photo|banner|hero|visual|picture|ilustra|generat|crea(?:r)?|diseña|design|make)\b.{0,80}\b(imagen?|image|foto|photo|banner|hero|avion|plane|aircraft|logo|background|fondo)\b/i;
 
-export default function ContentChatPanel({ agent, ticket, completedSessions, activeVariant, onBriefUpdate, onImageGenerated }) {
+export default function ContentChatPanel({ agent, ticket, completedSessions, activeVariant, onBriefUpdate, onImageGenerated, onVarUpdate, externalInput, onExternalInputConsumed }) {
   const { t, lang } = useLanguage();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
+
+  // Pre-load chat input from parent (e.g. block click in template panel)
+  useEffect(() => {
+    if (!externalInput) return;
+    setInput(externalInput);
+    onExternalInputConsumed?.();
+    inputRef.current?.focus();
+  }, [externalInput, onExternalInputConsumed]);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -207,6 +215,9 @@ export default function ContentChatPanel({ agent, ticket, completedSessions, act
                 return [...prev, imageMsg];
               });
               onImageGenerated?.({ url: parsed.image_url, prompt: parsed.image_prompt });
+            }
+            if (parsed.var_update) {
+              onVarUpdate?.(parsed.var_update.name, parsed.var_update.value);
             }
             if (parsed.text) {
               const { textChunk, briefUpdates } = parseBriefUpdates(parsed.text);
