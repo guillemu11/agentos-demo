@@ -203,6 +203,7 @@ export default function ContentStudioPage() {
             ticket={pipeline.selectedTicket}
             activeMarket={activeMarket}
             onBriefUpdate={handleBriefUpdate}
+            onVarUpdate={handleVarChange}
             onImageAssigned={handleImageAssigned}
             externalInput={chatPreload}
             onExternalInputConsumed={() => setChatPreload('')}
