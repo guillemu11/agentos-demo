@@ -7008,13 +7008,14 @@ When providing variable content, emit inline [BRIEF_UPDATE] tags per variable.`;
             // Extract variant from VARIABLE_STATUS block in the user message
             const variantMatch = message.match(/\[VARIABLE_STATUS variant="([^"]+)"\]/);
             const fallbackVariant = variantMatch?.[1] || 'en:economy';
-            // Parse bullet lines: "* varname: value" or "varname: value" patterns
+            // Parse bullet lines: "* varname: value" or "* var\_name: value" (markdown escapes)
             const IMAGE_SKIP = /image|img|logo|_alias|_link|_url/i;
-            const bulletRE = /^\*?\s*([\w]+)\s*:\s*(.+)$/gm;
+            const bulletRE = /^\*?\s*([\w\\]+)\s*:\s*(.+)$/gm;
             let bMatch;
             while ((bMatch = bulletRE.exec(fullResponse)) !== null) {
-                const varName = bMatch[1].trim();
-                const value = bMatch[2].replace(/\[BRIEF_UPDATE[^\]]*\]/g, '').trim();
+                // Normalize markdown escapes: var\_name → var_name
+                const varName = bMatch[1].trim().replace(/\\/g, '');
+                const value = bMatch[2].replace(/\[BRIEF_UPDATE[^\]]*\]/g, '').replace(/\\/g, '').trim();
                 if (!varName || !value) continue;
                 if (IMAGE_SKIP.test(varName)) continue;
                 if (emittedVars.has(varName)) continue;
