@@ -6650,7 +6650,8 @@ Keep it concise (3-4 paragraphs max). Be warm but professional.`;
 // GET /api/projects/:id/email-variables — Return saved variable_values from Lucia's deliverables
 app.get('/api/projects/:id/email-variables', requireAuth, async (req, res) => {
     try {
-        const projectId = parseInt(req.params.id);
+        const projectId = parseInt(req.params.id, 10);
+        if (isNaN(projectId)) return res.status(400).json({ error: 'Invalid project ID' });
         const sessionRes = await pool.query(
             `SELECT pas.deliverables
              FROM project_agent_sessions pas
