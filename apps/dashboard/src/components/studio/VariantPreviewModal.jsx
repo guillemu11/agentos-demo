@@ -1,7 +1,6 @@
 // apps/dashboard/src/components/studio/VariantPreviewModal.jsx
 import React, { useState } from 'react';
 import { substituteForPreview } from '../../utils/emailMockSubstitute.js';
-import { FIELD_TO_VAR } from './studioConstants.js';
 
 const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
 
@@ -17,8 +16,8 @@ function buildPreviewHtml(baseHtml, market, tier, variants, imageSlots, ampVarVa
 
   // Override with variant field values
   if (variantData) {
-    Object.entries(FIELD_TO_VAR).forEach(([field, varName]) => {
-      if (variantData[field]?.value) merged[varName] = variantData[field].value;
+    Object.entries(variantData || {}).forEach(([field, fieldData]) => {
+      if (fieldData?.value) merged[`@${field}`] = fieldData.value;
     });
   }
 

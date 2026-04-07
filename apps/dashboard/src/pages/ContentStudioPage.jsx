@@ -9,7 +9,7 @@ import StudioChatPanel from '../components/studio/StudioChatPanel.jsx';
 import StudioVariantsPanel from '../components/studio/StudioVariantsPanel.jsx';
 import StudioLivePreview from '../components/studio/StudioLivePreview.jsx';
 import VariantPreviewModal from '../components/studio/VariantPreviewModal.jsx';
-import { FIELD_TO_VAR, ALL_VARIANT_FIELDS, MIN_APPROVED_FOR_HANDOFF } from '../components/studio/studioConstants.js';
+import { MIN_APPROVED_FOR_HANDOFF, categorizeVar } from '../components/studio/studioConstants.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const AGENT_ID = 'lucia';
@@ -108,12 +108,12 @@ export default function ContentStudioPage() {
   const liveHtml = useMemo(() => {
     if (!baseHtml) return '';
     const merged = { ...ampVarValues };
-    // Inject active preview market's variants
+    // Inject ALL approved fields from active variant (dynamic — not just 5 hardcoded)
     const variantKey = `${previewMarket}:${activeTier}`;
     const variantData = variants[variantKey];
     if (variantData) {
-      Object.entries(FIELD_TO_VAR).forEach(([field, varName]) => {
-        if (variantData[field]?.value) merged[varName] = variantData[field].value;
+      Object.entries(variantData).forEach(([field, fieldData]) => {
+        if (fieldData?.value) merged[`@${field}`] = fieldData.value;
       });
     }
     // Inject image slots for preview market
@@ -132,18 +132,23 @@ export default function ContentStudioPage() {
 
   // Computed: progress stats
   const progressStats = useMemo(() => {
+    // Count content vars from blockVarMap (dynamic) or fallback to 5
+    const allContentVars = Object.values(blockVarMap || {}).flat()
+      .filter((v, i, arr) => arr.indexOf(v) === i && categorizeVar(v) === 'content');
+    const contentFields = allContentVars.length ? allContentVars : ['subject', 'preheader', 'heroHeadline', 'cta', 'bodyCopy'];
+
     let approved = 0;
     let total = 0;
     availableMarkets.forEach(market => {
       const key = `${market}:${activeTier}`;
       const vd = variants[key];
-      ALL_VARIANT_FIELDS.forEach(field => {
+      contentFields.forEach(field => {
         total++;
         if (vd?.[field]?.status === 'approved') approved++;
       });
     });
     return { approved, total };
-  }, [variants, availableMarkets, activeTier]);
+  }, [variants, availableMarkets, activeTier, blockVarMap]);
 
   const canHandoff = progressStats.approved >= MIN_APPROVED_FOR_HANDOFF;
 
@@ -169,9 +174,19 @@ export default function ContentStudioPage() {
     setAmpVarValues(prev => ({ ...prev, [`@${slotName}`]: url }));
   }, []);
 
-  const handleVarChange = useCallback((varName, value) => {
-    setAmpVarValues(prev => ({ ...prev, [varName]: value }));
-  }, []);
+  const handleApprove = useCallback((block, value) => {
+    setVariants(prev => {
+      const key = `${activeMarket}:${activeTier}`;
+      return {
+        ...prev,
+        [key]: { ...(prev[key] || {}), [block]: { status: 'approved', value } },
+      };
+    });
+  }, [activeMarket, activeTier]);
+
+  const handleRegenerate = useCallback((block) => {
+    setChatPreload(`Regenerate ${block} for variant ${activeMarket}:${activeTier}`);
+  }, [activeMarket, activeTier]);
 
   const handleHandoff = useCallback(() => {
     pipeline.setHandoffSession({
@@ -203,7 +218,6 @@ export default function ContentStudioPage() {
             ticket={pipeline.selectedTicket}
             activeMarket={activeMarket}
             onBriefUpdate={handleBriefUpdate}
-            onVarUpdate={handleVarChange}
             onImageAssigned={handleImageAssigned}
             externalInput={chatPreload}
             onExternalInputConsumed={() => setChatPreload('')}
@@ -226,8 +240,8 @@ export default function ContentStudioPage() {
                 imageSlots={imageSlots}
                 onSlotsChange={setImageSlots}
                 blockVarMap={blockVarMap}
-                ampVarValues={ampVarValues}
-                onVarChange={handleVarChange}
+                onApprove={handleApprove}
+                onRegenerate={handleRegenerate}
               />
             </Panel>
 
