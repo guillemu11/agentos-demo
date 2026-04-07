@@ -1,53 +1,61 @@
+// apps/dashboard/src/pages/ContentStudioPage.jsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useLanguage } from '../i18n/LanguageContext.jsx';
+import { useSearchParams } from 'react-router-dom';
+import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
 import { useAgentPipelineSession } from '../hooks/useAgentPipelineSession.js';
-import ContentChatPanel from '../components/agent-views/ContentChatPanel.jsx';
-import ContentBriefSidebar from '../components/agent-views/ContentBriefSidebar.jsx';
-import AgentTicketsPanel from '../components/agent-views/shared/AgentTicketsPanel.jsx';
 import HandoffModal from '../components/HandoffModal.jsx';
+import StudioTopBar from '../components/studio/StudioTopBar.jsx';
+import StudioChatPanel from '../components/studio/StudioChatPanel.jsx';
+import StudioVariantsPanel from '../components/studio/StudioVariantsPanel.jsx';
+import StudioLivePreview from '../components/studio/StudioLivePreview.jsx';
+import VariantPreviewModal from '../components/studio/VariantPreviewModal.jsx';
 import { substituteForPreview } from '../utils/emailMockSubstitute.js';
-import AmpscriptSidebar from '../components/agent-views/AmpscriptSidebar.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const AGENT_ID = 'lucia';
 const ALL_MARKETS = ['en', 'es', 'ar', 'ru'];
-const AVAILABLE_TIERS = ['economy', 'economy_premium', 'business', 'first_class'];
+const DEFAULT_TIER = 'economy';
+const FIELD_TO_VAR = {
+  subject:      '@subject',
+  preheader:    '@preheader',
+  heroHeadline: '@hero_title',
+  bodyCopy:     '@body_copy',
+  cta:          '@cta_text',
+};
+const ALL_VARIANT_FIELDS = Object.keys(FIELD_TO_VAR);
+// Handoff requires at least one complete variant (all 5 fields approved)
+const MIN_APPROVED_FOR_HANDOFF = 5;
 
-const emptyVariant = () => ({
-  subject:      { status: 'pending', value: null },
-  preheader:    { status: 'pending', value: null },
-  heroHeadline: { status: 'pending', value: null },
-  bodyCopy:     { status: 'pending', value: null },
-  cta:          { status: 'pending', value: null },
-});
+function emptyVariant() {
+  return {
+    subject:      { status: 'pending', value: null },
+    preheader:    { status: 'pending', value: null },
+    heroHeadline: { status: 'pending', value: null },
+    bodyCopy:     { status: 'pending', value: null },
+    cta:          { status: 'pending', value: null },
+  };
+}
 
 export default function ContentStudioPage() {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { t } = useLanguage();
   const ticketId = searchParams.get('ticketId');
 
   const [agent, setAgent] = useState(null);
-  const [activeTab, setActiveTab] = useState('chat');
-
-  // Email template state (from HTML Developer)
   const [projectEmails, setProjectEmails] = useState([]);
-  const [emailsLoading, setEmailsLoading] = useState(false);
-
-  // Variants state (same logic as ContentAgentView)
   const [variants, setVariants] = useState({});
-  const [activeVariant, setActiveVariant] = useState(null);
-  const [availableMarkets, setAvailableMarkets] = useState(ALL_MARKETS);
-  const [chatImages, setChatImages] = useState([]);
+  const [imageSlots, setImageSlots] = useState({});
   const [ampVarValues, setAmpVarValues] = useState({});
   const [blockVarMap, setBlockVarMap] = useState({});
+  const [availableMarkets, setAvailableMarkets] = useState(ALL_MARKETS);
+  const [activeMarket, setActiveMarket] = useState('en');
+  const [activeTier, setActiveTier] = useState(DEFAULT_TIER);
+  const [previewMarket, setPreviewMarket] = useState('en');
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [chatPreload, setChatPreload] = useState('');
-  const [selectedVariant, setSelectedVariant] = useState(null);
 
   const pipeline = useAgentPipelineSession(AGENT_ID);
 
-  // Load agent data on mount
+  // Load agent
   useEffect(() => {
     fetch(`${API_URL}/agents/${AGENT_ID}`, { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
@@ -55,351 +63,211 @@ export default function ContentStudioPage() {
       .catch(() => {});
   }, []);
 
-  // Pre-select ticket from URL param once tickets are loaded
+  // Auto-select ticket from URL
   useEffect(() => {
     if (!ticketId || !pipeline.tickets.length || pipeline.selectedTicket) return;
-    const ticket = pipeline.tickets.find(t => String(t.id) === ticketId);
-    if (ticket) pipeline.selectTicket(ticket);
+    const t = pipeline.tickets.find(t => String(t.id) === ticketId);
+    if (t) pipeline.selectTicket(t);
   }, [ticketId, pipeline.tickets, pipeline.selectedTicket]);
 
-  // Load project emails + saved variables when ticket is selected
+  // Load emails + variables when ticket changes
   useEffect(() => {
     const projectId = pipeline.selectedTicket?.project_id;
     if (!projectId) { setProjectEmails([]); setBlockVarMap({}); setAmpVarValues({}); return; }
-    setEmailsLoading(true);
 
     Promise.all([
-      fetch(`${API_URL}/projects/${projectId}/emails`, { credentials: 'include' })
-        .then(r => r.ok ? r.json() : []),
-      fetch(`${API_URL}/projects/${projectId}/email-variables`, { credentials: 'include' })
-        .then(r => r.ok ? r.json() : { variables: {} }),
+      fetch(`${API_URL}/projects/${projectId}/emails`, { credentials: 'include' }).then(r => r.ok ? r.json() : []),
+      fetch(`${API_URL}/projects/${projectId}/email-variables`, { credentials: 'include' }).then(r => r.ok ? r.json() : { variables: {} }),
     ]).then(([emailsData, varsData]) => {
       const emails = Array.isArray(emailsData) ? emailsData : [];
       setProjectEmails(emails);
-
-      // Parse block→var map from HTML
       const html = (emails.find(e => e.status === 'approved') || emails[0])?.html_content || '';
       if (html) {
         const map = {};
-        const parts = html.split(/(?=data-block-name=")/);
-        parts.slice(1).forEach(part => {
-          const nameMatch = part.match(/data-block-name="([^"]+)"/);
-          if (!nameMatch) return;
-          const blockName = nameMatch[1];
-          const chunk = part.substring(0, 3000);
-          const vars = [...chunk.matchAll(/%%=v\(@(\w+)\)=%%/g)].map(m => m[1]);
-          if (vars.length) map[blockName] = [...new Set(vars)];
+        html.split(/(?=data-block-name="/)/).slice(1).forEach(part => {
+          const nm = part.match(/data-block-name="([^"]+)"/);
+          if (!nm) return;
+          const vars = [...part.substring(0, 3000).matchAll(/%%=v\(@(\w+)\)=%%/g)].map(m => m[1]);
+          if (vars.length) map[nm[1]] = [...new Set(vars)];
         });
         setBlockVarMap(map);
       }
-
       setAmpVarValues(varsData.variables || {});
-      if (emails.length > 0) setActiveTab('template');
-    }).catch(() => {}).finally(() => setEmailsLoading(false));
+    }).catch(() => {});
   }, [pipeline.selectedTicket?.project_id]);
 
-  // Parse block names from HTML (data-block-name attributes)
-  const emailBlocks = useMemo(() => {
+  // Reset state on ticket change
+  useEffect(() => {
+    const raw = pipeline.selectedTicket?.project_markets || pipeline.selectedTicket?.metadata?.markets || ALL_MARKETS;
+    const resolved = Array.isArray(raw) && raw.every(m => ALL_MARKETS.includes(m)) ? raw : ALL_MARKETS;
+    setAvailableMarkets(resolved);
+    setActiveMarket(resolved[0] || 'en');
+    setPreviewMarket(resolved[0] || 'en');
+    setVariants({});
+    setImageSlots({});
+  }, [pipeline.selectedTicket?.id]);
+
+  // Computed: live HTML for preview
+  const baseHtml = useMemo(() => {
     const email = projectEmails.find(e => e.status === 'approved') || projectEmails[0];
-    if (!email?.html_content) return [];
-    const matches = [...email.html_content.matchAll(/data-block-name="([^"]+)"/g)];
-    return [...new Set(matches.map(m => m[1]))];
+    return email?.html_content || '';
   }, [projectEmails]);
 
   const liveHtml = useMemo(() => {
-    const base = (projectEmails.find(e => e.status === 'approved') || projectEmails[0])?.html_content || '';
-    if (!base || Object.keys(ampVarValues).length === 0) return base;
-    let result = base;
-    for (const [key, value] of Object.entries(ampVarValues)) {
-      const varName = key.startsWith('@') ? key.slice(1) : key;
-      const safeVarName = varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      result = result.replace(new RegExp(`%%=v\\(@${safeVarName}\\)=%%`, 'g'), value);
+    if (!baseHtml) return '';
+    const merged = { ...ampVarValues };
+    // Inject active preview market's variants
+    const variantKey = `${previewMarket}:${activeTier}`;
+    const variantData = variants[variantKey];
+    if (variantData) {
+      Object.entries(FIELD_TO_VAR).forEach(([field, varName]) => {
+        if (variantData[field]?.value) merged[varName] = variantData[field].value;
+      });
     }
-    return result;
-  }, [projectEmails, ampVarValues]);
+    // Inject image slots for preview market
+    const slots = imageSlots[previewMarket] || {};
+    Object.entries(slots).forEach(([slotName, slot]) => {
+      if (slot?.url) merged[`@${slotName}`] = slot.url;
+    });
+    let html = baseHtml;
+    for (const [key, value] of Object.entries(merged)) {
+      const varName = key.startsWith('@') ? key.slice(1) : key;
+      const safe = varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      html = html.replace(new RegExp(`%%=v\\(@${safe}\\)=%%`, 'g'), value);
+    }
+    return html;
+  }, [baseHtml, ampVarValues, variants, imageSlots, previewMarket, activeTier]);
 
-  // Reset variants when ticket changes
-  useEffect(() => {
-    const raw = pipeline.selectedTicket?.project_markets
-      || pipeline.selectedTicket?.metadata?.markets
-      || ALL_MARKETS;
-    const arr = Array.isArray(raw) ? raw : ALL_MARKETS;
-    const validCodes = new Set(ALL_MARKETS);
-    const resolved = arr.every(m => validCodes.has(m)) ? arr : ALL_MARKETS;
-    setAvailableMarkets(resolved);
-    setVariants({});
-    setActiveVariant(null);
-  }, [pipeline.selectedTicket?.id]);
+  // Computed: progress stats
+  const progressStats = useMemo(() => {
+    let approved = 0;
+    let total = 0;
+    availableMarkets.forEach(market => {
+      const key = `${market}:${activeTier}`;
+      const vd = variants[key];
+      ALL_VARIANT_FIELDS.forEach(field => {
+        total++;
+        if (vd?.[field]?.status === 'approved') approved++;
+      });
+    });
+    return { approved, total };
+  }, [variants, availableMarkets, activeTier]);
 
+  const canHandoff = progressStats.approved >= MIN_APPROVED_FOR_HANDOFF;
+
+  // Handlers
   const handleBriefUpdate = useCallback(({ variant, block, status, value }) => {
     setVariants(prev => ({
       ...prev,
-      [variant]: {
-        ...(prev[variant] || emptyVariant()),
-        [block]: { status, value },
-      },
+      [variant]: { ...(prev[variant] || emptyVariant()), [block]: { status, value } },
     }));
+    // If approved, also update ampVarValues for live preview
+    if (status === 'approved' && value != null) {
+      const varName = FIELD_TO_VAR[block];
+      if (varName) setAmpVarValues(prev => ({ ...prev, [varName]: value }));
+    }
   }, []);
 
-  const addVariant = useCallback((market, tier) => {
-    const key = `${market}:${tier}`;
-    setVariants(prev => prev[key] ? prev : { ...prev, [key]: emptyVariant() });
-    setActiveVariant(key);
+  const handleImageAssigned = useCallback((market, slotName, url, prompt) => {
+    setImageSlots(prev => ({
+      ...prev,
+      [market]: { ...(prev[market] || {}), [slotName]: { url, prompt, status: 'ready' } },
+    }));
+    // Also update ampVarValues so live preview shows the image
+    setAmpVarValues(prev => ({ ...prev, [`@${slotName}`]: url }));
   }, []);
 
-  const handleContentHandoff = useCallback(() => {
+  const handleVarChange = useCallback((varName, value) => {
+    setAmpVarValues(prev => ({ ...prev, [varName]: value }));
+  }, []);
+
+  const handleHandoff = useCallback(() => {
     pipeline.setHandoffSession({
       id: pipeline.selectedTicket?.id || 'content-brief',
       stage_order: pipeline.currentSession?.stage_order,
       variants,
-      activeVariant,
+      activeVariant: `${activeMarket}:${activeTier}`,
     });
-  }, [pipeline, variants, activeVariant]);
+    setShowPreviewModal(false);
+  }, [pipeline, variants, activeMarket, activeTier]);
 
-  const handleVarUpdate = useCallback((varName, varValue) => {
-    setAmpVarValues(prev => ({ ...prev, [varName]: varValue }));
-  }, []);
-
-  const handleBlockClick = useCallback((blockName, vars) => {
-    if (blockName === '__fill_all__') {
-      const marketLabel = { en: 'English', es: 'Spanish', ar: 'Arabic', ru: 'Russian' }[vars.market] || vars.market;
-      const tierLabel = { economy: 'Economy', economy_premium: 'Premium Economy', business: 'Business', first_class: 'First Class' }[vars.tier] || vars.tier;
-      setChatPreload(`Fill all email variables for the ${tierLabel} ${marketLabel} variant. Use the campaign context from previous agents and the "welcome back" reactivation tone.`);
-      setSelectedVariant(`${vars.market}:${vars.tier}`);
-    } else {
-      const varList = Array.isArray(vars) ? vars : [];
-      const SKIP = ['hero_image_link_alias','body_link_alias','story1_alias','story2_alias','story3_alias','article_link_alias','unsub_link_alias','contactus_link_alias','privacy_link_alias','logo_link_alias','header_logo_alias','join_skw_alias'];
-      const fillable = varList.filter(v => !SKIP.includes(v));
-      if (!fillable.length) return;
-      setChatPreload(`Generate content for ${blockName}: ${fillable.map(v => '@' + v).join(', ')}`);
-    }
-    setActiveTab('chat');
-  }, []);
-
-  const handleChatImage = useCallback(({ url, prompt }) => {
-    const newImage = {
-      id: `chat-img-${Date.now()}`,
-      url, prompt,
-      size: '1200x628',
-      status: 'review',
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
-      campaign: pipeline.selectedTicket?.project_name || 'Chat Generation',
-      source: 'chat',
-    };
-    setChatImages(prev => [...prev, newImage]);
-  }, [pipeline.selectedTicket?.project_name]);
-
-  const emailForPreview = projectEmails.find(e => e.status === 'approved') || projectEmails[0];
-
-  const tabs = [
-    { id: 'chat',     label: t('studio.chat') },
-    { id: 'template', label: t('studio.emailTemplate') || 'Email Template', count: projectEmails.length || null, highlight: projectEmails.length > 0 },
-    { id: 'tickets',  label: t('tickets.tab'), count: pipeline.tickets.length, urgent: pipeline.hasUrgentTickets },
-  ];
-
-  if (!agent) return <div className="studio-page studio-loading">Loading...</div>;
+  if (!agent) return <div style={{ color: 'var(--studio-text)', padding: 32 }}>Cargando…</div>;
 
   return (
-    <div className="studio-page">
-      {/* Top bar */}
-      <div className="studio-topbar">
-        <button className="studio-back-btn" onClick={() => navigate('/app/workspace/agent/lucia')}>
-          {t('studio.backToAgent')}
-        </button>
-        {pipeline.selectedTicket && (
-          <span className="studio-campaign-badge">{pipeline.selectedTicket.project_name}</span>
-        )}
-        <span className="studio-status-chip studio-status-working">● {t('studio.working')}</span>
-        <div className="studio-topbar-actions">
-          <button className="studio-action-primary" onClick={handleContentHandoff}>
-            {t('studio.sendToHtmlDev')}
-          </button>
-        </div>
-      </div>
+    <div className="content-studio-page">
+      <StudioTopBar
+        ticket={pipeline.selectedTicket}
+        progressStats={progressStats}
+        onShowPreviewModal={() => setShowPreviewModal(true)}
+        onHandoff={handleHandoff}
+        canHandoff={canHandoff}
+      />
 
-      {/* Tab strip */}
-      <div className="studio-tabs-bar">
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            className={`studio-tab ${activeTab === tab.id ? 'active' : ''}${tab.highlight ? ' studio-tab--highlight' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-            {tab.count != null && (
-              <span className={`studio-tab-count${tab.urgent ? ' urgent' : ''}`}>{tab.count}</span>
-            )}
-            {tab.highlight && activeTab !== tab.id && (
-              <span className="studio-tab-ready-dot" title={t('studio.templateReady') || 'Template listo'} />
-            )}
-          </button>
-        ))}
-      </div>
+      <PanelGroup direction="horizontal" style={{ height: '100%' }}>
+        {/* LEFT: Chat */}
+        <Panel defaultSize={38} minSize={25} maxSize={55}>
+          <StudioChatPanel
+            agent={agent}
+            ticket={pipeline.selectedTicket}
+            activeMarket={activeMarket}
+            onBriefUpdate={handleBriefUpdate}
+            onImageAssigned={handleImageAssigned}
+            externalInput={chatPreload}
+            onExternalInputConsumed={() => setChatPreload('')}
+          />
+        </Panel>
 
-      {/* Body */}
-      <div className="studio-body">
-        {activeTab === 'chat' && (
-          <div className="content-studio-split">
-            <ContentChatPanel
-              agent={agent}
-              ticket={pipeline.selectedTicket}
-              completedSessions={pipeline.completedSessions}
-              activeVariant={activeVariant}
-              onBriefUpdate={handleBriefUpdate}
-              onImageGenerated={handleChatImage}
-              onVarUpdate={handleVarUpdate}
-              externalInput={chatPreload}
-              onExternalInputConsumed={() => setChatPreload('')}
-            />
-            {Object.keys(blockVarMap).length > 0 ? (
-              <AmpscriptSidebar
-                blockVarMap={blockVarMap}
-                varValues={ampVarValues}
-                onBlockClick={handleBlockClick}
-                onHandoff={handleContentHandoff}
-                canHandoff={Object.keys(ampVarValues).length > 0}
-                selectedVariant={selectedVariant}
-                onVariantChange={(m, tier) => setSelectedVariant(`${m}:${tier}`)}
-                availableMarkets={availableMarkets}
-                availableTiers={AVAILABLE_TIERS}
-              />
-            ) : (
-              <ContentBriefSidebar
+        <PanelResizeHandle className="studio-resize-handle" />
+
+        {/* RIGHT: Variants + Preview */}
+        <Panel minSize={35}>
+          <PanelGroup direction="vertical" style={{ height: '100%' }}>
+            <Panel defaultSize={50} minSize={30}>
+              <StudioVariantsPanel
+                markets={availableMarkets}
                 variants={variants}
-                activeVariant={activeVariant}
-                availableMarkets={availableMarkets}
-                availableTiers={AVAILABLE_TIERS}
-                onAddVariant={addVariant}
-                onSelectVariant={setActiveVariant}
-                onBriefUpdate={handleBriefUpdate}
-                onHandoff={handleContentHandoff}
-                chatImages={chatImages}
+                activeMarket={activeMarket}
+                activeTier={activeTier}
+                onMarketSelect={setActiveMarket}
+                onTierSelect={setActiveTier}
+                imageSlots={imageSlots}
+                onSlotsChange={setImageSlots}
+                blockVarMap={blockVarMap}
+                ampVarValues={ampVarValues}
+                onVarChange={handleVarChange}
               />
-            )}
-          </div>
-        )}
-        {activeTab === 'template' && (
-          <div className="studio-full-panel content-template-panel">
-            {emailsLoading && (
-              <div className="empty-state">{t('emailBuilder.loading')}</div>
-            )}
-            {!emailsLoading && projectEmails.length === 0 && (
-              <div className="empty-state" style={{ padding: 48, textAlign: 'center' }}>
-                <div style={{ fontSize: '2rem', marginBottom: 12 }}>📭</div>
-                <div style={{ fontWeight: 700, marginBottom: 8 }}>{t('studio.noTemplateYet') || 'No hay template todavía'}</div>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: 320 }}>
-                  {t('studio.noTemplateHint') || 'El HTML Developer no ha guardado ningún template para este proyecto aún.'}
-                </div>
-              </div>
-            )}
-            {!emailsLoading && emailForPreview && (
-              <div className="content-template-split">
-                {/* Left: iframe preview */}
-                <div className="content-template-preview">
-                  <div className="content-template-preview-header">
-                    <span className="content-template-label">
-                      {t('studio.templatePreview') || 'Template listo para rellenar'}
-                    </span>
-                    <span className={`email-status-badge ${emailForPreview.status}`}>
-                      ● {emailForPreview.status}
-                    </span>
-                  </div>
-                  <div className="content-template-iframe-wrap">
-                    <iframe
-                      sandbox="allow-same-origin"
-                      srcDoc={liveHtml || substituteForPreview(emailForPreview.html_content || '')}
-                      title="Email template"
-                      className="content-template-iframe"
-                    />
-                  </div>
-                </div>
+            </Panel>
 
-                {/* Right: blocks checklist */}
-                <div className="content-template-checklist">
-                  <div className="content-template-checklist-header">
-                    <div className="content-template-checklist-title">
-                      {t('studio.blocksToFill') || 'Bloques a rellenar'}
-                    </div>
-                    <div className="content-template-checklist-subtitle">
-                      {emailBlocks.length > 0
-                        ? (t('studio.blocksCount') || '{n} bloques identificados').replace('{n}', emailBlocks.length)
-                        : (t('studio.noBlocksFound') || 'No se detectaron bloques con nombre')}
-                    </div>
-                  </div>
+            <PanelResizeHandle className="studio-resize-handle-vertical" />
 
-                  {emailBlocks.length > 0 ? (
-                    <div className="content-template-block-list">
-                      {emailBlocks.map((blockName, i) => {
-                        // Detect if block likely needs an image or text
-                        const needsImage = /hero|banner|image|img|foto|photo/i.test(blockName);
-                        const needsText = !needsImage || /copy|text|body|headline|subject|cta|title/i.test(blockName);
-                        return (
-                          <div
-                            key={i}
-                            className="content-template-block-item"
-                            style={{ cursor: 'pointer' }}
-                            onClick={() => handleBlockClick(blockName, blockVarMap[blockName] || [])}
-                          >
-                            <div className="content-template-block-name">
-                              <span className="content-template-block-index">{i + 1}</span>
-                              {blockName}
-                            </div>
-                            <div className="content-template-block-needs">
-                              {needsImage && (
-                                <span className="content-template-need-badge image">🖼️ {t('studio.needsImage') || 'Imagen'}</span>
-                              )}
-                              {needsText && (
-                                <span className="content-template-need-badge text">✍️ {t('studio.needsText') || 'Texto'}</span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="content-template-block-list">
-                      {/* Fallback: show generic content requirements */}
-                      {['Subject Line', 'Preheader', 'Hero Headline', 'Body Copy', 'CTA Text'].map((name, i) => (
-                        <div key={i} className="content-template-block-item">
-                          <div className="content-template-block-name">
-                            <span className="content-template-block-index">{i + 1}</span>
-                            {name}
-                          </div>
-                          <div className="content-template-block-needs">
-                            <span className="content-template-need-badge text">✍️ {t('studio.needsText') || 'Texto'}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+            <Panel minSize={25}>
+              <StudioLivePreview
+                liveHtml={liveHtml}
+                baseHtml={baseHtml}
+                markets={availableMarkets}
+                previewMarket={previewMarket}
+                onMarketSelect={setPreviewMarket}
+                onShowModal={() => setShowPreviewModal(true)}
+              />
+            </Panel>
+          </PanelGroup>
+        </Panel>
+      </PanelGroup>
 
-                  <div className="content-template-checklist-footer">
-                    <button
-                      className="studio-action-primary"
-                      style={{ width: '100%' }}
-                      onClick={() => setActiveTab('chat')}
-                    >
-                      {t('studio.goToChat') || 'Empezar a rellenar →'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'tickets' && (
-          <div className="studio-full-panel">
-            <AgentTicketsPanel
-              tickets={pipeline.tickets}
-              selectedTicket={pipeline.selectedTicket}
-              onSelectTicket={pipeline.selectTicket}
-              onClearTicket={pipeline.clearTicket}
-              agentId={AGENT_ID}
-            />
-          </div>
-        )}
-      </div>
+      {showPreviewModal && (
+        <VariantPreviewModal
+          ticket={pipeline.selectedTicket}
+          markets={availableMarkets}
+          activeTier={activeTier}
+          variants={variants}
+          imageSlots={imageSlots}
+          ampVarValues={ampVarValues}
+          baseHtml={baseHtml}
+          progressStats={progressStats}
+          onHandoff={handleHandoff}
+          onClose={() => setShowPreviewModal(false)}
+        />
+      )}
 
       {pipeline.handoffSession && (
         <HandoffModal
