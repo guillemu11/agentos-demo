@@ -13891,6 +13891,31 @@ body.sidebar-collapsed > .inbox-drawer {
 .studio-field-status.pend { color: var(--studio-text-subtle); }
 .studio-field-value { font-size: 11.5px; color: var(--text-main); line-height: 1.45; }
 .studio-field-value.empty { color: var(--studio-text-subtle); font-style: italic; font-size: 11px; }
+.studio-field-textarea {
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--studio-border);
+  color: var(--studio-text);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+  line-height: 1.5;
+}
+.studio-field-textarea.empty {
+  color: var(--studio-text-muted);
+}
+.studio-field-textarea:focus {
+  border-color: var(--studio-indigo);
+}
+.studio-field-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
 
 /* Image slots */
 .studio-image-slots { display: flex; flex-direction: column; gap: 8px; }

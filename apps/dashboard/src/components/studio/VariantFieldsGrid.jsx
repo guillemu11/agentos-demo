@@ -1,50 +1,61 @@
 // apps/dashboard/src/components/studio/VariantFieldsGrid.jsx
-import React from 'react';
+import React, { useState } from 'react';
+import { varLabel } from './studioConstants.js';
 
-const FIELDS = [
-  { key: 'subject',      label: 'Subject' },
-  { key: 'preheader',    label: 'Preheader' },
-  { key: 'heroHeadline', label: 'Hero Headline' },
-  { key: 'cta',          label: 'CTA' },
-  { key: 'bodyCopy',     label: 'Body Copy' },
-];
+// Fallback fields if no template variables available
+const FALLBACK_FIELDS = ['subject', 'preheader', 'heroHeadline', 'cta', 'bodyCopy'];
 
-export default function VariantFieldsGrid({ variantData }) {
-  if (!variantData) {
-    return (
-      <div className="studio-fields-grid">
-        {FIELDS.map(f => (
-          <div key={f.key} className={`studio-field${f.key === 'bodyCopy' ? ' studio-field--full' : ''}`}>
-            <div className="studio-field-label">
-              {f.label}
-              <span className="studio-field-status pend">pending</span>
-            </div>
-            <div className="studio-field-value empty">Waiting for generation…</div>
-          </div>
-        ))}
-      </div>
-    );
-  }
+export default function VariantFieldsGrid({ variantData, allVarNames, onApprove, onRegenerate }) {
+  const fields = allVarNames?.length ? allVarNames : FALLBACK_FIELDS;
+  const [editValues, setEditValues] = useState({});
 
   return (
     <div className="studio-fields-grid">
-      {FIELDS.map(f => {
-        const field = variantData[f.key] || { status: 'pending', value: null };
+      {fields.map(varName => {
+        const field = variantData?.[varName] || { status: 'pending', value: null };
+        const editVal = editValues[varName] ?? field.value ?? '';
+        const isDirty = editValues[varName] !== undefined && editValues[varName] !== field.value;
         const cls = field.status === 'approved' ? 'filled' : field.status === 'generating' ? 'generating' : '';
+        const isFullWidth = varName.includes('body') || varName.includes('copy') || varName.includes('block_body');
+
         return (
           <div
-            key={f.key}
-            className={`studio-field ${cls}${f.key === 'bodyCopy' ? ' studio-field--full' : ''}`}
+            key={varName}
+            className={`studio-field ${cls}${isFullWidth ? ' studio-field--full' : ''}`}
           >
             <div className="studio-field-label">
-              {f.label}
+              {varLabel(varName)}
               {field.status === 'approved' && <span className="studio-field-status ok">✓</span>}
               {field.status === 'generating' && <span className="studio-field-status gen">generating…</span>}
               {field.status === 'pending' && <span className="studio-field-status pend">pending</span>}
             </div>
-            <div className={`studio-field-value ${!field.value ? 'empty' : ''}`}>
-              {field.value || 'Waiting…'}
-            </div>
+            <textarea
+              className={`studio-field-textarea${!editVal ? ' empty' : ''}`}
+              value={editVal}
+              onChange={e => setEditValues(prev => ({ ...prev, [varName]: e.target.value }))}
+              placeholder="Waiting for generation…"
+              rows={isFullWidth ? 3 : 2}
+            />
+            {(field.value || isDirty) && (
+              <div className="studio-field-actions">
+                <button
+                  className="studio-brief-action approve"
+                  onClick={() => {
+                    const val = editValues[varName] ?? field.value;
+                    onApprove?.(varName, val);
+                    setEditValues(prev => { const n = { ...prev }; delete n[varName]; return n; });
+                  }}
+                >
+                  ✓ Approve
+                </button>
+                <button
+                  className="studio-brief-action regen"
+                  onClick={() => onRegenerate?.(varName)}
+                >
+                  ↺ Regenerate
+                </button>
+              </div>
+            )}
           </div>
         );
       })}
