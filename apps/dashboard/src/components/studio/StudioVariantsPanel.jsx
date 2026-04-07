@@ -98,6 +98,7 @@ export default function StudioVariantsPanel({
               slots={marketSlots}
               marketKey={activeMarket}
               onSlotsChange={onSlotsChange}
+              imageVarNames={allVarsByCategory.image}
             />
           </>
         )}

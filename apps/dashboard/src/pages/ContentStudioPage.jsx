@@ -70,7 +70,7 @@ export default function ContentStudioPage() {
         html.split(BLOCK_SPLIT).slice(1).forEach(part => {
           const nm = part.match(BLOCK_NAME);
           if (!nm) return;
-          const vars = [...part.substring(0, 3000).matchAll(/%%=v\(@(\w+)\)=%%/g)].map(m => m[1]);
+          const vars = [...part.matchAll(/%%=v\(@(\w+)\)=%%/g)].map(m => m[1]);
           if (vars.length) map[nm[1]] = [...new Set(vars)];
         });
         setBlockVarMap(map);

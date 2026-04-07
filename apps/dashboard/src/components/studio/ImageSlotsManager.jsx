@@ -4,15 +4,13 @@ import { IMAGE_SLOT_NAMES } from './studioConstants.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-export default function ImageSlotsManager({ slots, marketKey, onSlotsChange }) {
+export default function ImageSlotsManager({ slots, marketKey, onSlotsChange, imageVarNames }) {
   // slots: { slotName: { url, prompt, status } }
   const [promptInputs, setPromptInputs] = useState({});
   const [showPromptFor, setShowPromptFor] = useState(null);
 
-  const slotNames = IMAGE_SLOT_NAMES.filter(name => {
-    // Only show slots that have an image OR slots found via blockVarMap
-    return slots?.[name] !== undefined || name === 'hero_image';
-  });
+  // Use template-derived image vars if available, fallback to hardcoded list
+  const slotNames = imageVarNames?.length ? imageVarNames : IMAGE_SLOT_NAMES;
 
   async function generateImage(slotName, prompt) {
     if (!prompt?.trim()) return;
