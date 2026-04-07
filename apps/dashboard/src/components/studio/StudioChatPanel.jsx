@@ -31,6 +31,9 @@ export default function StudioChatPanel({
   agent,
   ticket,
   activeMarket,
+  activeTier,
+  variants,
+  blockVarMap,
   onBriefUpdate,
   onImageAssigned,
   externalInput,
@@ -127,8 +130,25 @@ export default function StudioChatPanel({
       ? [...prev, { role: 'user', content: text }, { role: 'assistant', isImageSkeleton: true }]
       : [...prev, { role: 'user', content: text }]
     );
-    const variantContext = activeMarket ? ` — Active Market: ${activeMarket}` : '';
+    const variantContext = activeMarket ? ` — Active Market: ${activeMarket}:${activeTier || 'economy'}` : '';
     const contextPrefix = ticket ? `[Campaign: ${ticket.project_name} — Stage: ${ticket.stage_name}${variantContext}]\n\n` : '';
+
+    // Build variable status context so Lucia knows what's filled vs pending
+    let varStatusBlock = '';
+    if (blockVarMap && variants) {
+      const variantKey = `${activeMarket}:${activeTier || 'economy'}`;
+      const variantData = variants[variantKey] || {};
+      const allVars = [...new Set(Object.values(blockVarMap).flat())];
+      const filled = allVars.filter(v => variantData[v]?.value);
+      const pending = allVars.filter(v => !variantData[v]?.value);
+      if (allVars.length > 0) {
+        varStatusBlock = `\n[VARIABLE_STATUS variant="${variantKey}"]\n`;
+        if (filled.length) varStatusBlock += `FILLED (${filled.length}): ${filled.map(v => `${v}="${variantData[v].value.substring(0, 60)}${variantData[v].value.length > 60 ? '…' : ''}"`).join(' | ')}\n`;
+        if (pending.length) varStatusBlock += `PENDING (${pending.length}): ${pending.join(', ')}\n`;
+        varStatusBlock += `[/VARIABLE_STATUS]\n\n`;
+      }
+    }
+
     try {
       const endpoint = ticket
         ? `${API_URL}/projects/${ticket.project_id}/sessions/${ticket.id}/chat`
@@ -137,7 +157,7 @@ export default function StudioChatPanel({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ message: ticket ? text : contextPrefix + text }),
+        body: JSON.stringify({ message: ticket ? varStatusBlock + text : contextPrefix + text }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const reader = res.body.getReader();

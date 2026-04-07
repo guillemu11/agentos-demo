@@ -207,6 +207,9 @@ export default function ContentStudioPage() {
             agent={agent}
             ticket={pipeline.selectedTicket}
             activeMarket={activeMarket}
+            activeTier={activeTier}
+            variants={variants}
+            blockVarMap={blockVarMap}
             onBriefUpdate={handleBriefUpdate}
             onImageAssigned={handleImageAssigned}
             externalInput={chatPreload}
