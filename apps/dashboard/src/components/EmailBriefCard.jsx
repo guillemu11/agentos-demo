@@ -37,7 +37,7 @@ export default function EmailBriefCard({ emailSpec, onDefineClick, briefDate }) 
       >
         <span className="email-brief-card__title">
           <FileText size={14} />
-          Email Brief
+          {t('campaignManager.brief.title')}
         </span>
         <span className="email-brief-card__meta">
           {t('campaignManager.brief.definedBy')}

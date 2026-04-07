@@ -695,6 +695,7 @@ export const translations = {
       weeklyMetrics: 'Metricas Semanales de Campañas',
       campaignPerformance: 'Rendimiento de Campañas',
       brief: {
+        title: 'Email Brief',
         pending: 'Brief pendiente',
         definedBy: 'Definido por Raul',
         defineWithRaul: 'Definir con Raul',
@@ -2263,6 +2264,7 @@ export const translations = {
       weeklyMetrics: 'Weekly Campaign Metrics',
       campaignPerformance: 'Campaign Performance',
       brief: {
+        title: 'Email Brief',
         pending: 'Brief pending',
         definedBy: 'Defined by Raul',
         defineWithRaul: 'Define with Raul',
