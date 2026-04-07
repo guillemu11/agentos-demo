@@ -6616,7 +6616,7 @@ app.get('/api/projects/:id/email-variables', requireAuth, async (req, res) => {
              JOIN agents a ON a.id = pas.agent_id
              WHERE pas.project_id = $1
                AND (a.id = 'lucia' OR a.role ILIKE '%content agent%' OR a.role ILIKE '%content strategist%')
-             ORDER BY pas.updated_at DESC LIMIT 1`,
+             ORDER BY pas.created_at DESC LIMIT 1`,
             [projectId]
         );
         const deliverables = sessionRes.rows[0]?.deliverables || {};
