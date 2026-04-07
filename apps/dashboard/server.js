@@ -6897,19 +6897,24 @@ When providing variable content, emit inline [BRIEF_UPDATE] tags per variable.`;
             res.write(`data: ${JSON.stringify({ generating_image: true })}\n\n`);
             try {
                 // Use message directly — strip conversational prefix, pass as-is to Imagen
-                const imgPrompt = message.replace(/^(me puedes?|puedes?|crea|genera|dame|haz|make|give me|can you|genera|genéra)\s+/i, '').slice(0, 200).trim();
-                console.log(`[Chat:image-generate] prompt="${imgPrompt}"`);
+                // Strip VARIABLE_STATUS block before using as image prompt
+                const cleanMessage = message.replace(/\[VARIABLE_STATUS[\s\S]*?\[\/VARIABLE_STATUS\]\s*/g, '').trim();
+                const imgPrompt = cleanMessage.replace(/^(me puedes?|puedes?|crea|genera|dame|haz|make|give me|can you|genera|genéra)\s+/i, '').slice(0, 200).trim();
+                // Detect which image slot this prompt targets
+                const IMAGE_SLOT_LIST = ['hero_image','story1_image','story2_image','story3_image','article_image','destination_image','banner_image','header_logo','logo_image'];
+                const lowerPrompt = imgPrompt.toLowerCase();
+                const detectedSlot = IMAGE_SLOT_LIST.find(s => lowerPrompt.includes(s.replace(/_/g, ' ')) || lowerPrompt.includes(s)) || null;
+                console.log(`[Chat:image-generate] prompt="${imgPrompt}" slot="${detectedSlot}"`);
                 const imageUrls = await generateImage(imgPrompt, { aspectRatio: '16:9', numberOfImages: 1 });
                 if (imageUrls?.[0]) {
-                    // Save base64 to temp file — base64 is too large for a single SSE JSON chunk
                     const b64 = imageUrls[0].replace(/^data:image\/\w+;base64,/, '');
                     const tmpDir = path.join(__dirname, 'public', 'temp-images');
                     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
                     const fname = `img-${Date.now()}.png`;
                     fs.writeFileSync(path.join(tmpDir, fname), Buffer.from(b64, 'base64'));
                     const imageServUrl = `/temp-images/${fname}`;
-                    console.log(`[Chat:image-saved] ${imageServUrl}`);
-                    res.write(`data: ${JSON.stringify({ image_url: imageServUrl, image_prompt: imgPrompt })}\n\n`);
+                    console.log(`[Chat:image-saved] ${imageServUrl} slot=${detectedSlot}`);
+                    res.write(`data: ${JSON.stringify({ image_url: imageServUrl, image_prompt: imgPrompt, detected_slot: detectedSlot })}\n\n`);
                 }
             } catch (imgErr) {
                 console.warn('[Chat] Inline image generation failed:', imgErr.message);

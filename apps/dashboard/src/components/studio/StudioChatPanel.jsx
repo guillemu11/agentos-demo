@@ -208,7 +208,8 @@ export default function StudioChatPanel({
               onBriefUpdate(parsed.brief_update);
             }
             if (parsed.image_url) {
-              const detectedSlot = detectSlotFromPrompt(parsed.image_prompt);
+              // Use server-detected slot (has access to clean prompt without VARIABLE_STATUS block)
+              const detectedSlot = parsed.detected_slot || detectSlotFromPrompt(parsed.image_prompt);
               const imageMsg = {
                 role: 'assistant', content: '',
                 image_url: parsed.image_url,
