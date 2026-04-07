@@ -341,14 +341,14 @@ function requireOwnerOrAdmin(req, res, next) {
 
 // ─── Email Template Helpers ──────────────────────────────────────────────────
 
-// Extract AMPscript %%=v(@varName)=%% variables from HTML
+// Extract AMPscript %%=v(@varName)=%% and %%=TreatAsContent(@varName)=%% variables from HTML
 function extractAmpscriptVars(html) {
-    const pattern = /%%=v\(@(\w+)\)=%%/g;
     const vars = new Set();
     let match;
-    while ((match = pattern.exec(html)) !== null) {
-        vars.add(`@${match[1]}`);
-    }
+    const p1 = /%%=v\(@(\w+)\)=%%/g;
+    while ((match = p1.exec(html)) !== null) vars.add(`@${match[1]}`);
+    const p2 = /%%=TreatAsContent\(@(\w+)\)=%%/g;
+    while ((match = p2.exec(html)) !== null) vars.add(`@${match[1]}`);
     return [...vars];
 }
 

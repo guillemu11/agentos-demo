@@ -18,7 +18,8 @@ export const PERSONALIZATION_VARS = [
 ];
 
 const LINK_VAR_PATTERN = /(_alias|_link|_url)$/i;
-const FOOTER_VAR_PATTERN = /^(unsub|contactus|privacy|vawp|join_skw)/i;
+// Only hide the link aliases for footer — the text vars are editable content
+const FOOTER_VAR_PATTERN = /^(unsub_link|contactus_link|privacy_link|vawp|join_skw)/i;
 
 /**
  * Categorize an AMPscript variable name (without @) into:

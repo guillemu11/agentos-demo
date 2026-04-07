@@ -70,7 +70,10 @@ export default function ContentStudioPage() {
         html.split(BLOCK_SPLIT).slice(1).forEach(part => {
           const nm = part.match(BLOCK_NAME);
           if (!nm) return;
-          const vars = [...part.matchAll(/%%=v\(@(\w+)\)=%%/g)].map(m => m[1]);
+          const vars = [
+            ...[...part.matchAll(/%%=v\(@(\w+)\)=%%/g)].map(m => m[1]),
+            ...[...part.matchAll(/%%=TreatAsContent\(@(\w+)\)=%%/g)].map(m => m[1]),
+          ];
           if (vars.length) map[nm[1]] = [...new Set(vars)];
         });
         setBlockVarMap(map);
@@ -117,6 +120,7 @@ export default function ContentStudioPage() {
       const varName = key.startsWith('@') ? key.slice(1) : key;
       const safe = varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       html = html.replace(new RegExp(`%%=v\\(@${safe}\\)=%%`, 'g'), value);
+      html = html.replace(new RegExp(`%%=TreatAsContent\\(@${safe}\\)=%%`, 'g'), value);
     }
     return html;
   }, [baseHtml, ampVarValues, variants, imageSlots, previewMarket, activeTier]);
