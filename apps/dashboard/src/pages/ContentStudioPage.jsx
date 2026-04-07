@@ -84,8 +84,10 @@ export default function ContentStudioPage() {
       const html = (emails.find(e => e.status === 'approved') || emails[0])?.html_content || '';
       if (html) {
         const map = {};
-        html.split(/(?=data-block-name="/)/).slice(1).forEach(part => {
-          const nm = part.match(/data-block-name="([^"]+)"/);
+        const BLOCK_SPLIT = new RegExp('(?=data-block-name=)');
+        const BLOCK_NAME = new RegExp('data-block-name="([^"]+)"');
+        html.split(BLOCK_SPLIT).slice(1).forEach(part => {
+          const nm = part.match(BLOCK_NAME);
           if (!nm) return;
           const vars = [...part.substring(0, 3000).matchAll(/%%=v\(@(\w+)\)=%%/g)].map(m => m[1]);
           if (vars.length) map[nm[1]] = [...new Set(vars)];
