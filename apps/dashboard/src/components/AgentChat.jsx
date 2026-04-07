@@ -10,7 +10,7 @@ const FILE_URL = (path) => `${import.meta.env.VITE_API_URL || '/api'}/kb-files/$
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-export default function AgentChat({ agentId, agentName, agentAvatar, externalInput, onExternalInputConsumed, onHtmlGenerated, onHtmlPatched, onHtmlBlock, currentHtml, canvasBlocks, activeBlock, onActiveBlockClear, onStreamEvent }) {
+export default function AgentChat({ agentId, agentName, agentAvatar, externalInput, onExternalInputConsumed, onHtmlGenerated, onHtmlPatched, onHtmlBlock, currentHtml, canvasBlocks, activeBlock, onActiveBlockClear, onStreamEvent, projectId }) {
     const { t, lang } = useLanguage();
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
@@ -114,6 +114,7 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
                     message: msg,
                     ...(activeBlock && { activeBlock }),
                     ...(canvasBlocks?.length > 0 && { canvasBlocks: canvasBlocks.map(b => b.name) }),
+                    projectId: projectId || null,
                 }),
             });
 

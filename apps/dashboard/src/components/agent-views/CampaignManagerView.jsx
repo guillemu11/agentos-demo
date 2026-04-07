@@ -283,6 +283,7 @@ export default function CampaignManagerView({ agent, activeTab: activeTabProp, o
             onClearTicket={pipeline.clearTicket}
             onHandoffRequest={pipeline.setHandoffSession}
             onStreamEvent={handleStreamEvent}
+            projectId={pipeline.selectedTicket?.project_id || null}
           />
         )}
 
