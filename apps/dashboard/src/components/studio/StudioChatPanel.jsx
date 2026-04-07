@@ -32,7 +32,6 @@ export default function StudioChatPanel({
   ticket,
   activeMarket,
   onBriefUpdate,
-  onVarUpdate,
   onImageAssigned,
   externalInput,
   onExternalInputConsumed,
@@ -161,9 +160,6 @@ export default function StudioChatPanel({
                 if (idx !== -1) { const n = [...prev]; n[idx] = err; return n; }
                 return [...prev, err];
               });
-            }
-            if (parsed.var_update) {
-              onVarUpdate?.(`@${parsed.var_update.name}`, parsed.var_update.value);
             }
             if (parsed.image_url) {
               const detectedSlot = detectSlotFromPrompt(parsed.image_prompt);
