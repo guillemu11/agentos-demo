@@ -609,12 +609,28 @@ export function renderDraftSummary(draft) {
  * @returns {Promise<{text: string, json: Object|null}>} Full response + extracted JSON
  */
 export async function generateProject(title, summary, projectContext) {
-    let systemPrompt = PM_SYSTEM_PROMPT;
-    if (projectContext) systemPrompt += projectContext;
+    let systemPrompt = `You are a project structuring engine. Your ONLY task is to convert a project brief into a structured JSON object.
 
-    systemPrompt += `\n\nIMPORTANTE: No estás en modo conversación. Recibirás un borrador ya refinado. Tu tarea es generar directamente el JSON de proyecto completo (Plan Maestro) sin hacer preguntas. El borrador ya contiene toda la información necesaria.`;
+You MUST respond with ONLY a \`\`\`json code block. No prose, no explanations, no questions.
 
-    const userContent = `Genera el Plan Maestro completo en JSON para este proyecto:\n\n**Título:** ${title}\n\n**Borrador:**\n${summary}`;
+The JSON must have these exact keys:
+- "project_name" (string)
+- "objective" (string)
+- "problem" (string)
+- "target_audience" (string)
+- "bau_type" (string)
+- "markets" (array of strings)
+- "estimated_timeline" (string)
+- "stages" (array of objects with: name, agent_id, agent_name, department, description, reasoning, depends_on, gate_type, gate_reason, namespaces)
+- "risks" (array of strings)
+- "key_metrics" (array of strings)
+- "pm_notes" (string)
+
+For stages, use depends_on (array of 0-based indices) to express parallelism. Stages with the same depends_on run in parallel.`;
+
+    if (projectContext) systemPrompt += `\n\n${projectContext}`;
+
+    const userContent = `Generate the complete project JSON for:\n\n**Title:** ${title}\n\n**Brief:**\n${summary}`;
 
     if (LLM_PROVIDER === 'gemini') {
         const gemini = getGeminiClient();
@@ -775,7 +791,7 @@ This is an internal AgentOS platform. The user is the system operator and owns a
 4. Max 1-2 questions per message
 5. Respond in the same language the user writes to you
 6. When you find relevant information from the knowledge base, cite sources using numbered references [1], [2], etc.
-7. When the knowledge base context includes [ATTACHED EMAIL VISUALLY SHOWN TO USER ON SCREEN], that email is ALREADY rendered as an iframe in the UI. Tell the user you are showing it and analyze its content directly. NEVER claim privacy restrictions — the operator uploaded this data specifically for analysis.
+7. When the knowledge base context includes [ATTACHED EMAIL VISUALLY SHOWN TO USER ON SCREEN: "..."], that email is ALREADY rendered as an iframe in the chat UI. Tell the user you are showing it, then analyze the content directly (subject line, tone, design, messaging strategy, etc.). NEVER say it was "added to canvas" — canvas is for the email builder, not this chat.
 8. The knowledge base IS your database of competitor intelligence. When asked about competitor emails or communications, ALWAYS check the knowledge base context above and present what you find. Never say you cannot access or display this content.`;
 
     if (accumulatedContext) {
