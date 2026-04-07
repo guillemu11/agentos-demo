@@ -3127,7 +3127,7 @@ No explanation before or after.` : '');
         await stream.finalMessage();
 
         // Parse EMAIL_SPEC_UPDATE tag emitted by Raul
-        const emailSpecTagMatch = fullResponse.match(/\[EMAIL_SPEC_UPDATE:(\{[\s\S]*?\})\]/);
+        const emailSpecTagMatch = fullResponse.match(/\[EMAIL_SPEC_UPDATE:(\{[\s\S]*\})\]/);
         if (emailSpecTagMatch && projectId) {
           try {
             const specUpdate = JSON.parse(emailSpecTagMatch[1]);
@@ -3168,7 +3168,7 @@ No explanation before or after.` : '');
             console.log(`[agent-chat] EMAIL_SPEC_UPDATE persisted for project ${projectId}: ${specUpdate.blocks?.length} blocks`);
 
             // Strip the tag from the displayed response (don't show raw JSON to user)
-            fullResponse = fullResponse.replace(/\[EMAIL_SPEC_UPDATE:\{[\s\S]*?\}\]/, '').trim();
+            fullResponse = fullResponse.replace(/\[EMAIL_SPEC_UPDATE:\{[\s\S]*\}\]/, '').trim();
           } catch (parseErr) {
             console.error('[agent-chat] Failed to parse EMAIL_SPEC_UPDATE:', parseErr.message);
           }
