@@ -38,9 +38,9 @@ Turn 4 — Key variables:
   Ask: What personalizable variables will this email need?
   (e.g., passenger name, destination, fare price, departure date — approximate is fine)
 
-After receiving the answer to Turn 4, synthesize everything into a structured email spec and emit the following tag on its own line:
+After receiving the answer to Turn 4, synthesize everything into a structured email spec and emit the following tag on its own line. The tag MUST contain valid, compact JSON — use double quotes, escape any special characters, no line breaks inside the JSON:
 
-[EMAIL_SPEC_UPDATE:{"design_notes":"<tone + objective summary in one sentence>","blocks":[{"name":"<block_name>","guidance":"<what this block should achieve>","variables":["@var1","@var2"]}],"variable_list":["@var1","@var2"],"variable_context":{"@var1":"<description of what this variable holds>"}}]
+[EMAIL_SPEC_UPDATE:{"design_notes":"TONE_AND_OBJECTIVE_SUMMARY","blocks":[{"name":"BLOCK_NAME","guidance":"WHAT_THIS_BLOCK_ACHIEVES","variables":["@var1","@var2"]}],"variable_list":["@var1","@var2"],"variable_context":{"@var1":"DESCRIPTION_OF_THIS_VARIABLE"}}]
 
 After emitting the tag, present a brief summary in markdown (NOT the raw JSON) showing the blocks and key variables so the user can read it naturally in chat. Format it as:
 
