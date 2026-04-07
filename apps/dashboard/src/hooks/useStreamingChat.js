@@ -28,7 +28,7 @@ export function useStreamingChat({ endpoint, buildBody, onResponseHeaders, loadC
         }
     }, [loadConversation]);
 
-    const sendMessage = useCallback(async (msg) => {
+    const sendMessage = useCallback(async (msg, canvasBlockNames) => {
         if (!msg.trim() || streaming) return;
 
         setMessages(prev => [...prev, { role: 'user', content: msg }]);
@@ -36,6 +36,7 @@ export function useStreamingChat({ endpoint, buildBody, onResponseHeaders, loadC
 
         const url = typeof endpoint === 'function' ? endpoint() : `${API_URL}${endpoint}`;
         const body = buildBody ? buildBody(msg) : { message: msg };
+        if (canvasBlockNames?.length > 0) body.canvasBlocks = canvasBlockNames;
 
         try {
             const res = await fetch(url, {
@@ -115,6 +116,10 @@ export function useStreamingChat({ endpoint, buildBody, onResponseHeaders, loadC
                                 updated[updated.length - 1] = { ...updated[updated.length - 1], content: fullResponse };
                                 return updated;
                             });
+                        } else if (parsed.briefArtifact) {
+                            if (onStreamEvent) {
+                                onStreamEvent({ type: 'brief_artifact', payload: parsed.briefArtifact });
+                            }
                         }
                         if (parsed.handoff_suggestion && onStreamEvent) {
                             onStreamEvent(parsed);
