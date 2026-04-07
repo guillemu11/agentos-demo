@@ -180,10 +180,18 @@ export default function ProjectAgentChat({ projectId, session, completedSessions
                             ? <div className="md-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content || '') }} />
                             : <div className="chat-bubble-content">{msg.content}</div>}
                         {msg.role === 'assistant' && msg.media?.filter(m => m.mediaType === 'email_html').length > 0 && (
-                            <div style={{ marginTop: 6, fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <span>🧱</span>
-                                <span>{msg.media.filter(m => m.mediaType === 'email_html').length} {msg.media.filter(m => m.mediaType === 'email_html').length === 1 ? 'bloque añadido' : 'bloques añadidos'} al canvas</span>
-                            </div>
+                            !onHtmlBlock
+                                ? msg.media.filter(m => m.mediaType === 'email_html').map((m, j) => (
+                                    <div key={j} style={{ width: '100%', marginTop: 8 }}>
+                                        <EmailPreview html={m.htmlSource} title={m.title} />
+                                    </div>
+                                ))
+                                : (
+                                    <div style={{ marginTop: 6, fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <span>🧱</span>
+                                        <span>{msg.media.filter(m => m.mediaType === 'email_html').length} {msg.media.filter(m => m.mediaType === 'email_html').length === 1 ? 'bloque añadido' : 'bloques añadidos'} al canvas</span>
+                                    </div>
+                                )
                         )}
                     </div>
                 ))}
