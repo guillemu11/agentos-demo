@@ -694,6 +694,16 @@ export const translations = {
       barChart: 'Barras',
       weeklyMetrics: 'Metricas Semanales de Campañas',
       campaignPerformance: 'Rendimiento de Campañas',
+      brief: {
+        pending: 'Brief pendiente',
+        definedBy: 'Definido por Raul',
+        defineWithRaul: 'Definir con Raul',
+        objective: 'Objetivo',
+        blocks: 'Bloques',
+        variables: 'Variables',
+        tone: 'Tono',
+        updated: 'Raul ha definido el email brief',
+      },
     },
 
     // CRM Agent View
@@ -2252,6 +2262,16 @@ export const translations = {
       barChart: 'Bar Chart',
       weeklyMetrics: 'Weekly Campaign Metrics',
       campaignPerformance: 'Campaign Performance',
+      brief: {
+        pending: 'Brief pending',
+        definedBy: 'Defined by Raul',
+        defineWithRaul: 'Define with Raul',
+        objective: 'Objective',
+        blocks: 'Blocks',
+        variables: 'Variables',
+        tone: 'Tone',
+        updated: 'Raul has defined the email brief',
+      },
     },
 
     crmAgent: {
