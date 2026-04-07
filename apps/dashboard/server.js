@@ -2905,7 +2905,7 @@ app.post('/api/agents/generate-image', async (req, res) => {
 app.post('/api/chat/agent/:agentId', async (req, res) => {
     try {
         const { agentId } = req.params;
-        const { message } = req.body;
+        const { message, messages: historyMessages, activeBlock, canvasBlockNames, projectId } = req.body;
         if (!message) return res.status(400).json({ error: 'Message is required' });
 
         // Fetch agent profile
@@ -3002,11 +3002,19 @@ If there are no relevant blocks in the knowledge base context, THEN output compl
 
 **New Block Mode — when asked to INSERT or ADD a new block not in the library:**
 Output ONLY: <!--NEW_BLOCK:BlockName-->[complete block HTML, starting with <table...>]
-No explanation before or after. The block will be added to the canvas automatically.
+No explanation before or after. The block will be added to the canvas automatically.` : '')
+            + (isEmailBuilder && req.body.activeBlock ? `
 
-**Patch protocol — when asked to MODIFY an existing block (message contains [bloque: X] or [block: X]):**
-Output ONLY the updated block prefixed with the patch marker:
-<!--PATCH:block-name-->[complete updated block HTML]` : '');
+## Active Block: "${req.body.activeBlock}"
+The user is working on this specific block. PATCH it according to their request:
+<!--PATCH:${req.body.activeBlock}-->[complete updated block HTML with data-block-name="${req.body.activeBlock}"]
+Output ONLY the PATCH marker + HTML. No explanation, no other blocks.` : '')
+            + (isEmailBuilder && !req.body.activeBlock ? `
+
+## No active block selected
+If the user asks to create or add a new block, output ONLY:
+<!--NEW_BLOCK:BlockName-->[complete block HTML starting with <table...>]
+No explanation before or after.` : '');
 
         // Load or create conversation row
         let convRes = await pool.query(
@@ -3044,6 +3052,26 @@ Output ONLY the updated block prefixed with the patch marker:
             ? await buildRAGContext(pool, message, { namespaces: ragNamespaces, visualQuery: isVisualQuery, maxTokens: isVisualQuery ? 4000 : 3000, maxMedia: isVisualQuery ? 4 : 2 })
             : { context: '', sources: [] };
         console.log(`[RAG] sources=${ragResult.sources?.length} mediaResults=${ragResult.mediaResults?.length} htmlSources=${ragResult.sources?.filter(s=>s.htmlSource).length}`);
+
+        // Inject email_spec context for campaign-aware agents (e.g. raul)
+        if (projectId) {
+          try {
+            const projRes = await pool.query('SELECT email_spec FROM projects WHERE id = $1', [projectId]);
+            const emailSpec = projRes.rows[0]?.email_spec;
+            if (emailSpec) {
+              const hasBlocks = emailSpec.blocks?.length > 0;
+              systemPrompt += `\n\n## Current Project Email Spec\n`;
+              systemPrompt += `blocks_defined: ${hasBlocks}\n`;
+              if (hasBlocks) {
+                systemPrompt += `blocks: ${emailSpec.blocks.map(b => b.name).join(', ')}\n`;
+                systemPrompt += `design_notes: ${emailSpec.design_notes || 'none'}\n`;
+                systemPrompt += `variable_list: ${(emailSpec.variable_list || []).join(', ')}\n`;
+              }
+            }
+          } catch (e) {
+            console.warn('[agent-chat] Could not load email_spec for project', projectId, e.message);
+          }
+        }
 
         const finalSystemPrompt = ragResult.context
             ? systemPrompt + '\n\n' + ragResult.context
@@ -3097,6 +3125,54 @@ Output ONLY the updated block prefixed with the patch marker:
         });
 
         await stream.finalMessage();
+
+        // Parse EMAIL_SPEC_UPDATE tag emitted by Raul
+        const emailSpecTagMatch = fullResponse.match(/\[EMAIL_SPEC_UPDATE:(\{[\s\S]*?\})\]/);
+        if (emailSpecTagMatch && projectId) {
+          try {
+            const specUpdate = JSON.parse(emailSpecTagMatch[1]);
+
+            // Non-destructive merge into projects.email_spec
+            await pool.query(
+              `UPDATE projects
+               SET email_spec = email_spec || $1::jsonb
+               WHERE id = $2`,
+              [JSON.stringify(specUpdate), projectId]
+            );
+
+            // Record event in pipeline_events if table exists
+            try {
+              await pool.query(
+                `INSERT INTO pipeline_events (project_id, event_type, content, created_by)
+                 VALUES ($1, 'brief_created', $2::jsonb, $3)`,
+                [projectId, JSON.stringify({ spec: specUpdate, agent: agentId }), agentId]
+              );
+            } catch (evErr) {
+              // pipeline_events table may not exist — log and continue
+              console.warn('[agent-chat] Could not insert pipeline_event:', evErr.message);
+            }
+
+            // Emit BRIEF_ARTIFACT SSE event to frontend (must happen before [DONE])
+            const artifactPayload = {
+              briefArtifact: {
+                spec: specUpdate,
+                timestamp: new Date().toISOString(),
+                agentId,
+                projectId,
+                blocksCount: specUpdate.blocks?.length || 0,
+                variablesCount: specUpdate.variable_list?.length || 0,
+              }
+            };
+            res.write(`data: ${JSON.stringify(artifactPayload)}\n\n`);
+
+            console.log(`[agent-chat] EMAIL_SPEC_UPDATE persisted for project ${projectId}: ${specUpdate.blocks?.length} blocks`);
+
+            // Strip the tag from the displayed response (don't show raw JSON to user)
+            fullResponse = fullResponse.replace(/\[EMAIL_SPEC_UPDATE:\{[\s\S]*?\}\]/, '').trim();
+          } catch (parseErr) {
+            console.error('[agent-chat] Failed to parse EMAIL_SPEC_UPDATE:', parseErr.message);
+          }
+        }
 
         // Persist conversation
         messages.push({ role: 'assistant', content: fullResponse });
@@ -4625,6 +4701,7 @@ app.get('/api/knowledge/email-blocks', requireAuth, async (req, res) => {
             return {
                 id: row.metadata?.block_id || String(row.id),
                 title: row.title,
+                filename: row.metadata?.file || '',
                 category: row.metadata?.category || 'content',
                 description: row.metadata?.description || '',
                 html,
