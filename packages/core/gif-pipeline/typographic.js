@@ -191,7 +191,6 @@ async function planWithClaude(prompt) {
     };
   }
 
-  const client = new Anthropic({ apiKey });
   const catalog = getPresetCatalog();
 
   const systemPrompt =
@@ -206,17 +205,33 @@ async function planWithClaude(prompt) {
     `- omit optional params if defaults are fine\n` +
     `- JSON ONLY. No code fences.`;
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 512,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  const text = response.content
-    .filter((c) => c.type === 'text')
-    .map((c) => c.text)
-    .join('');
+  // Wrap the entire Anthropic call in try/catch so any API failure
+  // (auth, rate limit, network, 5xx) falls back to bounce_headline
+  // instead of bubbling up and killing the pipeline.
+  let text;
+  try {
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 512,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    text = response.content
+      .filter((c) => c.type === 'text')
+      .map((c) => c.text)
+      .join('');
+  } catch (apiErr) {
+    const reason = apiErr?.status
+      ? `Anthropic ${apiErr.status} ${apiErr.error?.error?.message || apiErr.message}`
+      : apiErr.message;
+    console.warn('[typographic] Anthropic API call failed, using fallback:', reason);
+    return {
+      preset: 'bounce_headline',
+      params: { text: prompt.slice(0, 40) },
+      rationale: `Fallback: ${reason}`,
+    };
+  }
 
   // Strip possible code fences just in case
   const cleaned = text.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
