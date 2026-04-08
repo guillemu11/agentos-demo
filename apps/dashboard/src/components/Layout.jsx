@@ -20,6 +20,7 @@ export default function Layout({ user, onLogout }) {
                 { to: '/app/projects', icon: icons.dashboard, label: t('layout.dashboard') },
                 { to: '/app/workspace', icon: icons.workspace, label: t('layout.workspace') },
                 { to: '/app/campaigns', icon: icons.campaigns, label: t('layout.campaigns') },
+                { to: '/app/image-studio', icon: icons.imageStudio, label: t('layout.imageStudio') },
             ],
         },
         {

@@ -718,3 +718,22 @@ WHERE p.department = 'General'
 -- Email Builder: link email_proposals to projects
 ALTER TABLE email_proposals ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_ep_project ON email_proposals(project_id);
+
+-- ─── GIF Pipeline: generated GIFs catalog ─────────────────────────────────
+CREATE TABLE IF NOT EXISTS generated_gifs (
+  id              SERIAL PRIMARY KEY,
+  mode            TEXT NOT NULL CHECK (mode IN ('slideshow', 'typographic', 'veo', 'image')),
+  prompt          TEXT NOT NULL,
+  plan            JSONB,
+  file_path       TEXT NOT NULL,
+  thumbnail_path  TEXT,
+  width           INT,
+  height          INT,
+  duration_ms     INT,
+  frame_count     INT,
+  file_size_bytes INT,
+  user_id         INT REFERENCES workspace_users(id) ON DELETE SET NULL,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_generated_gifs_user_created
+  ON generated_gifs(user_id, created_at DESC);

@@ -625,3 +625,74 @@ Confirmed decisions:
 - Phase order: C → A → Content Studio integration → B
 - Content Studio: suggest-don't-execute pattern with `GifIntentSuggestion` inline panel
 - Single route with internal tabs, chat history preserved per tab
+
+---
+
+## Operational Notes (added during Phase 0 + Phase 1 implementation)
+
+### Dependency installation: must be at repo root, not just apps/dashboard
+
+`packages/core/gif-pipeline/*.js` imports `@napi-rs/canvas`, `gifenc`, and `@anthropic-ai/sdk`. Node ESM resolves `node_modules` starting from the importing file's directory, walking upward. From `packages/core/gif-pipeline/`, the walk reaches the **repo-root `node_modules`** — it never enters `apps/dashboard/node_modules`.
+
+Therefore these packages MUST be listed in the **root `package.json`**, not only in `apps/dashboard/package.json`. The Phase 0 Task 0.1 installed them only in `apps/dashboard`; Task 1.2 discovered and fixed this by also installing them at the root. Both locations end up with the same versions.
+
+When adding new deps used by `packages/core/**`, always install at the root.
+
+### gifenc is a CommonJS package — default import + destructure
+
+`gifenc@^1.0.3` is CJS. Node ESM cannot extract named exports from it. Use:
+
+```js
+import gifenc from 'gifenc';
+const { GIFEncoder, quantize, applyPalette } = gifenc;
+```
+
+The initial encoder.js (Task 0.4) had this wrong and was fixed in Task 1.2 when the first runtime verification exposed the issue.
+
+### Inter font: shipped as variable font
+
+The plan specified `Inter-Bold.ttf`, but the upstream URL in the plan (`github.com/rsms/inter/raw/master/docs/font-files/Inter-Bold.ttf`) returns 404. Instead we ship `Inter-Variable.ttf` from `github.com/google/fonts/tree/main/ofl/inter`. This is an 876KB variable font with `opsz + wght` axes covering Thin → Black in a single file. Skia (the backend used by `@napi-rs/canvas`) selects the correct weight at render time from `ctx.font = 'bold ... Inter'`. Verified end-to-end: `ctx.measureText('50% OFF')` returns 390px width at 88px bold, and the rendered PNG shows crisp Inter Bold glyphs.
+
+If additional weights are ever needed (regular, light, black), keep using the variable font and just change `ctx.font` — Skia handles the interpolation.
+
+### Thumbnails: render from frame at 70% progress, not frame 0
+
+The plan originally said "thumbnail = first frame as PNG". But presets like `bounce_headline` start with the subject **offscreen** at frame 0 (the text is at `y = -headlineHeight` and bounces in). A first-frame thumbnail is blank and useless for the gallery grid.
+
+Task 1.8 changed the thumbnail to render at frame index `Math.floor(totalFrames * 0.7)` — past the entrance animation, into the hold phase where the subject is fully visible. All presets should be designed so that the 70% frame is representative.
+
+### Disk path coupling between packages/core and apps/dashboard
+
+`packages/core/gif-pipeline/typographic.js` writes GIF files to `apps/dashboard/public/generated-gifs/` via a relative path computed from `__dirname` (three `..` up). If the repo layout ever changes (e.g. packages/core is moved, apps/dashboard is renamed), update the `REPO_ROOT` / `OUTPUT_DIR` constants in `typographic.js`.
+
+The public URL path `/generated-gifs/` is served by Express from `apps/dashboard/public/generated-gifs/` — these two paths must stay in sync.
+
+### Docker Postgres connection values
+
+The project uses `postgres:16-alpine` via docker-compose with these non-default credentials (verified against `docker-compose.yml`):
+
+- Container name: `agentos-postgres-1`
+- User: **`agentos`** (the plan initially said `postgres` — wrong)
+- Password: `changeme`
+- Database: `agentos`
+- Host port: **5434** (container port: 5432)
+
+The `typographic.test.js` end-to-end test hardcodes these as defaults but allows override via `PG_HOST` / `PG_PORT` / `PG_USER` / `PG_PASSWORD` / `PG_DB` environment variables.
+
+### Test runner
+
+Tests in `packages/core/gif-pipeline/**/*.test.js` are plain Node scripts (no framework) and are run directly with `node path/to/test.js` **from the repo root**. Running them from another CWD may fail because Node resolves `node_modules` from the file's location, not the CWD, but the default path still walks up to the root.
+
+The `typographic.test.js` end-to-end test requires `npm run db:up` first.
+
+### Phase 0 + Phase 1 delivered
+
+- `generated_gifs` table with CHECK constraint on mode + FK to workspace_users ON DELETE SET NULL
+- `POST /api/gif-pipeline/generate` SSE endpoint (dispatches on `mode`)
+- `GET /api/gif-pipeline/gallery` (per-user list)
+- `DELETE /api/gif-pipeline/gif/:id` (file + DB row)
+- `/app/image-studio` React page, three-column layout with per-tab chat history
+- Mode C (Typographic) with `bounce_headline` preset + Claude planning + graceful fallbacks
+- `gifenc` encoder with global/per-frame palette modes
+- `@napi-rs/canvas` + Inter Variable font rendering
+- Three test suites passing: encoder (4 tests), bounce_headline smoke test (3 tests), typographic end-to-end (event sequence + file + DB + cleanup)

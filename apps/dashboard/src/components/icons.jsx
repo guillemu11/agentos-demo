@@ -18,6 +18,7 @@ import {
   FolderOpen, Siren, Repeat, Scale, Cloud, Gem, Medal,
   Handshake, Plane, Tag, Trophy, Sprout, Moon, HelpCircle,
   Database, Calculator, Share2, Cpu, SlidersHorizontal, Ticket,
+  Film,
 } from 'lucide-react';
 
 // Default icon size for inline usage
@@ -36,6 +37,7 @@ export const NavIcons = {
   agent: <User size={20} />,
   reports: <BarChart3 size={20} />,
   settings: <Settings size={20} />,
+  imageStudio: <Film size={20} />,
   panelLeft: <PanelLeft size={20} />,
   logout: <LogOut size={16} />,
   menu: <Menu size={20} />,

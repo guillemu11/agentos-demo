@@ -26,6 +26,7 @@ import ToolDetail from './pages/ToolDetail.jsx'
 import KnowledgeBase from './pages/KnowledgeBase.jsx'
 import AutoResearch from './pages/AutoResearch.jsx'
 import ContentStudioPage from './pages/ContentStudioPage.jsx';
+import ImageStudioPage from './pages/ImageStudioPage.jsx';
 import EmailStudioPage from './pages/EmailStudioPage.jsx';
 import BlockStudioPage from './pages/BlockStudioPage.jsx';
 
@@ -119,6 +120,7 @@ createRoot(document.getElementById('root')).render(
                       <Route path="/knowledge" element={<KnowledgeBase />} />
                       <Route path="/research" element={<AutoResearch />} />
                       <Route path="/research/:sessionId" element={<AutoResearch />} />
+                      <Route path="/image-studio" element={<ImageStudioPage />} />
                       <Route path="/settings" element={<SettingsPage />} />
                     </Route>
                     {/* Studio routes — full-screen, no sidebar */}

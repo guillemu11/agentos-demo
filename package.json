@@ -25,8 +25,10 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
     "@google/genai": "^1.47.0",
+    "@napi-rs/canvas": "^0.1.97",
     "@pinecone-database/pinecone": "^4.0.0",
     "dotenv": "^17.3.1",
+    "gifenc": "^1.0.3",
     "pdf-lib": "^1.17.1",
     "pg": "^8.20.0",
     "ws": "^8.18.0"
