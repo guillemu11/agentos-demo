@@ -722,7 +722,7 @@ CREATE INDEX IF NOT EXISTS idx_ep_project ON email_proposals(project_id);
 -- ─── GIF Pipeline: generated GIFs catalog ─────────────────────────────────
 CREATE TABLE IF NOT EXISTS generated_gifs (
   id              SERIAL PRIMARY KEY,
-  mode            TEXT NOT NULL CHECK (mode IN ('slideshow', 'typographic', 'veo')),
+  mode            TEXT NOT NULL CHECK (mode IN ('slideshow', 'typographic', 'veo', 'image')),
   prompt          TEXT NOT NULL,
   plan            JSONB,
   file_path       TEXT NOT NULL,
