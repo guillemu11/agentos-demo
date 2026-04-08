@@ -30,14 +30,31 @@ export const metadata = {
  * @param {object} params - Merged params (user + defaults)
  * @param {object} size - { width, height }
  */
+/**
+ * Find the largest font size for `text` such that it fits within `maxWidth`.
+ * Starts at startSize and shrinks by 2px until it fits or hits minSize.
+ */
+function fitFontSize(ctx, text, maxWidth, startSize, minSize = 14) {
+  let size = startSize;
+  ctx.font = `bold ${size}px Inter`;
+  while (ctx.measureText(text).width > maxWidth && size > minSize) {
+    size -= 2;
+    ctx.font = `bold ${size}px Inter`;
+  }
+  return size;
+}
+
 export function render(ctx, frameIndex, totalFrames, params, size) {
   const { width, height } = size;
   const t = frameIndex / Math.max(1, totalFrames - 1); // 0..1
 
   fillBackground(ctx, params.bg_color, width, height);
 
-  // Headline position: bounces in from y = -headline height to y = center.
-  const headlineFontSize = Math.round(height * 0.28);
+  // Auto-fit headline font size to fit within 90% of canvas width.
+  // Long prompts (especially from the no-Claude fallback path) get scaled
+  // down rather than overflowing the canvas edges.
+  const maxTextWidth = width * 0.9;
+  const headlineFontSize = fitFontSize(ctx, params.text, maxTextWidth, Math.round(height * 0.28), 18);
   ctx.font = `bold ${headlineFontSize}px Inter`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -57,9 +74,9 @@ export function render(ctx, frameIndex, totalFrames, params, size) {
 
   ctx.fillText(params.text, width / 2, headlineY);
 
-  // Subtitle fades in during hold phase
+  // Subtitle fades in during hold phase — also auto-fits.
   if (params.subtitle) {
-    const subtitleFontSize = Math.round(height * 0.1);
+    const subtitleFontSize = fitFontSize(ctx, params.subtitle, maxTextWidth, Math.round(height * 0.1), 10);
     ctx.font = `bold ${subtitleFontSize}px Inter`;
     ctx.fillStyle = params.subtitle_color;
 
