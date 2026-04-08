@@ -37,7 +37,17 @@ export default function ProjectAgentChat({ projectId, session, completedSessions
                 htmlSourcesReceivedRef.current = true;
                 // Store insertAfter from first source (set by server for insertion queries)
                 lastInsertAfterRef.current = event.html_sources[0]?.insertAfter || null;
-                event.html_sources.forEach(block => onHtmlBlock(block));
+                // Guard: if the user already has canvas content (e.g. imported an email),
+                // do NOT auto-push RAG-sourced blocks on top. These events fire when the
+                // backend's RAG returns email-blocks as "visual context" for any query
+                // mentioning "email" — perfect for building from scratch, catastrophic
+                // when the user is asking the agent to analyze an existing email.
+                // Explicit additions still work via the <!--NEW_BLOCK:--> marker, which
+                // is handled in onStreamComplete below (not here).
+                const canvasHasContent = !!currentHtmlRef.current;
+                if (!canvasHasContent) {
+                    event.html_sources.forEach(block => onHtmlBlock(block));
+                }
             }
         },
         onStreamComplete: (fullResponse) => {
