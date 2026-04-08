@@ -104,7 +104,46 @@ export function splitIntoBlocks(html) {
 
     if (!content) return [];
 
-    // 2. Depth-tracking to find top-level <table> elements
+    // 2. Find top-level <table> elements, recursively descending into single-wrapper
+    //    structures so real-world emails with a .email-container <div> or outer
+    //    "stylingblock-content-wrapper" table still decompose into meaningful blocks.
+    let blocks = findTopLevelTables(content);
+
+    // Fallback: if we got zero or just one giant wrapper block, try to descend one
+    // level to find the real content blocks inside it. Real-world Emirates emails
+    // wrap everything in <div class="email-container"> or a single outer table —
+    // our slot-based parser was built for SFMC Content Builder templates and
+    // doesn't see those wrappers.
+    let descendGuard = 0;
+    while (blocks.length < 2 && descendGuard < 3) {
+        descendGuard++;
+        const inner = blocks.length === 1
+            ? extractInnerHtml(blocks[0].html)
+            : extractFirstContainerInner(content);
+        if (!inner) break;
+        const deeper = findTopLevelTables(inner);
+        if (deeper.length >= 2) {
+            blocks = deeper;
+            break;
+        }
+        if (deeper.length === 1 && deeper[0].html.length < (blocks[0]?.html.length || Infinity)) {
+            // We descended but still only found 1 — keep descending with the smaller wrapper
+            blocks = deeper;
+            continue;
+        }
+        break;
+    }
+
+    return blocks;
+}
+
+/**
+ * Finds top-level <table> elements in a string, ignoring <table> tags that
+ * appear inside HTML comments (MSO conditionals like <!--[if mso]><table>...<![endif]-->).
+ * MSO-conditional tables are "phantom" tables only visible to Outlook and
+ * would desync the depth counter if treated as real.
+ */
+function findTopLevelTables(content) {
     const blocks = [];
     let depth = 0;
     let blockStart = -1;
@@ -112,6 +151,15 @@ export function splitIntoBlocks(html) {
     const lower = content.toLowerCase();
 
     while (i < content.length) {
+        // Skip HTML comments entirely — tables inside MSO conditionals
+        // (<!--[if mso]><table>...<![endif]-->) must NOT affect depth.
+        if (lower.slice(i, i + 4) === '<!--') {
+            const commentEnd = content.indexOf('-->', i + 4);
+            if (commentEnd === -1) { i += 4; continue; }
+            i = commentEnd + 3;
+            continue;
+        }
+
         const nextChar = lower[i + 6];
         if (
             lower.slice(i, i + 6) === '<table' &&
@@ -157,6 +205,42 @@ export function splitIntoBlocks(html) {
     }
 
     return blocks;
+}
+
+/**
+ * Extracts the inner HTML of a single wrapper — either by opening the first
+ * <table> and returning its <td> contents, or by unwrapping a top-level <div>.
+ * Used by splitIntoBlocks() to descend into wrapper structures that contain
+ * the real content blocks.
+ */
+function extractInnerHtml(wrapperHtml) {
+    if (!wrapperHtml) return '';
+    // Strip the data-block-name attribute we injected so we re-parse clean
+    const clean = wrapperHtml.replace(/\s+data-block-name="[^"]*"/, '');
+    // Try to find a <td> inside the first <table> — that's usually where the
+    // real blocks live in nested wrapper tables.
+    const tdMatch = clean.match(/<td\b[^>]*>([\s\S]*)<\/td>/i);
+    if (tdMatch) return tdMatch[1];
+    // Fallback: strip outer <table>...</table>
+    const tableMatch = clean.match(/<table\b[^>]*>([\s\S]*)<\/table>/i);
+    if (tableMatch) return tableMatch[1];
+    return '';
+}
+
+/**
+ * When the body has no clear top-level tables (e.g. everything is wrapped in
+ * a <div class="email-container">), find the first div and return its contents
+ * so we can look for tables one level deeper.
+ */
+function extractFirstContainerInner(bodyContent) {
+    if (!bodyContent) return '';
+    // Look for a div that likely contains the email content
+    const divMatch = bodyContent.match(/<div\b[^>]*(?:email-container|container)[^>]*>([\s\S]*)<\/div>/i);
+    if (divMatch) return divMatch[1];
+    // Any top-level div
+    const anyDiv = bodyContent.match(/<div\b[^>]*>([\s\S]*)<\/div>/i);
+    if (anyDiv) return anyDiv[1];
+    return '';
 }
 
 /**
