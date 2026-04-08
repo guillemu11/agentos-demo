@@ -9,6 +9,7 @@ const STEP_KEYS_BY_MODE = {
   typographic: ['planning', 'planReady', 'rendering', 'encoding', 'persisting', 'done'],
   slideshow: ['planning', 'planReady', 'rendering', 'encoding', 'persisting', 'done'],
   veo: ['planning', 'planReady', 'rendering', 'encoding', 'persisting', 'done'],
+  image: ['planning', 'planReady', 'generating', 'persisting', 'done'],
 };
 
 export default function PipelineStepsTimeline({ mode, completedSteps, activeStep, failedStep }) {
@@ -17,7 +18,7 @@ export default function PipelineStepsTimeline({ mode, completedSteps, activeStep
 
   return (
     <div className="pipeline-timeline">
-      {steps.map((stepKey) => {
+      {steps.map((stepKey, i) => {
         let status = 'pending';
         if (failedStep === stepKey) status = 'failed';
         else if (completedSteps.includes(stepKey)) status = 'done';
@@ -26,7 +27,8 @@ export default function PipelineStepsTimeline({ mode, completedSteps, activeStep
         const marker =
           status === 'done' ? '✓' :
           status === 'failed' ? '✗' :
-          status === 'active' ? '●' : '○';
+          status === 'active' ? '' :
+          i + 1;
 
         return (
           <div key={stepKey} className={`pipeline-step pipeline-step-${status}`}>
