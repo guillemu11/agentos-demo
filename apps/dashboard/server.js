@@ -20,6 +20,7 @@ import { saveProject } from '../../packages/core/db/save_project.js';
 import { buildProjectContext } from '../../packages/core/pm-agent/context-builder.js';
 import Anthropic from '@anthropic-ai/sdk';
 import { initGemini, isGeminiReady, getGeminiClient, generateImage, EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from '../../packages/core/ai-providers/gemini.js';
+import { runPipeline as runGifPipeline } from '../../packages/core/gif-pipeline/index.js';
 import { initPinecone, isPineconeReady, describeIndex } from '../../packages/core/ai-providers/pinecone.js';
 import multer from 'multer';
 import { generateEodReport } from '../../packages/core/workspace-skills/eod-generator.js';
@@ -7161,6 +7162,99 @@ app.get('/api/agents/:agentId/pipeline-work', requireAuth, async (req, res) => {
 const tempImagesDir = path.join(__dirname, 'public', 'temp-images');
 if (!fs.existsSync(tempImagesDir)) fs.mkdirSync(tempImagesDir, { recursive: true });
 app.use('/temp-images', express.static(tempImagesDir));
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GIF PIPELINE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const generatedGifsDir = path.join(__dirname, 'public', 'generated-gifs');
+if (!fs.existsSync(generatedGifsDir)) fs.mkdirSync(generatedGifsDir, { recursive: true });
+app.use('/generated-gifs', express.static(generatedGifsDir));
+
+// POST /api/gif-pipeline/generate — SSE stream that drives a GIF pipeline.
+// Body: { mode: 'slideshow'|'typographic'|'veo', prompt: string, options?: object }
+app.post('/api/gif-pipeline/generate', requireAuth, async (req, res) => {
+  const { mode, prompt, options = {} } = req.body || {};
+
+  if (!mode || !prompt) {
+    return res.status(400).json({ error: 'mode and prompt are required' });
+  }
+  if (!['slideshow', 'typographic', 'veo'].includes(mode)) {
+    return res.status(400).json({ error: `Invalid mode: ${mode}` });
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+
+  const emit = (event) => {
+    if (res.writableEnded) return;
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+
+  try {
+    emit({ step: 'planning', text: 'Analyzing prompt...' });
+    await runGifPipeline(mode, prompt, options, emit, {
+      userId: req.session.userId,
+      pool,
+    });
+    res.write('data: [DONE]\n\n');
+  } catch (err) {
+    console.error('[gif-pipeline] Error:', err);
+    emit({ step: 'error', stage: 'pipeline', error: err.message });
+    res.write('data: [DONE]\n\n');
+  } finally {
+    if (!res.writableEnded) res.end();
+  }
+});
+
+// GET /api/gif-pipeline/gallery — list the current user's generated GIFs
+app.get('/api/gif-pipeline/gallery', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, mode, prompt, file_path, thumbnail_path, width, height,
+              duration_ms, frame_count, file_size_bytes, created_at
+         FROM generated_gifs
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+        LIMIT 100`,
+      [req.session.userId]
+    );
+    res.json({ gifs: rows });
+  } catch (err) {
+    console.error('[gif-pipeline:gallery] Error:', err);
+    res.status(500).json({ error: 'Failed to load gallery' });
+  }
+});
+
+// DELETE /api/gif-pipeline/gif/:id — delete a GIF (file + DB row)
+app.delete('/api/gif-pipeline/gif/:id', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT file_path, thumbnail_path FROM generated_gifs
+        WHERE id = $1 AND user_id = $2`,
+      [req.params.id, req.session.userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
+
+    const { file_path, thumbnail_path } = rows[0];
+    const gifFsPath = path.join(__dirname, 'public', file_path.replace(/^\//, ''));
+    const thumbFsPath = thumbnail_path
+      ? path.join(__dirname, 'public', thumbnail_path.replace(/^\//, ''))
+      : null;
+
+    try { if (fs.existsSync(gifFsPath)) fs.unlinkSync(gifFsPath); } catch (_) {}
+    try { if (thumbFsPath && fs.existsSync(thumbFsPath)) fs.unlinkSync(thumbFsPath); } catch (_) {}
+
+    await pool.query(`DELETE FROM generated_gifs WHERE id = $1`, [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[gif-pipeline:delete] Error:', err);
+    res.status(500).json({ error: 'Failed to delete' });
+  }
+});
 
 // ─── Static Files (production) — MUST be after all API routes ───────────────
 if (process.env.NODE_ENV === 'production') {
