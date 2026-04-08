@@ -1635,6 +1635,21 @@ export const translations = {
       statusCollecting: '⏳ Recogiendo datos',
       statusQueued: '– En cola',
     },
+
+    emailBlocks: {
+      tabChat: 'Chat',
+      tabBlocks: 'Blocks',
+      loading: 'Cargando bloques...',
+      empty: 'No hay bloques en esta categoría',
+      dropHere: 'Suelta aquí para añadir',
+      catAll: 'Todos',
+      catHeader: 'Header',
+      catHero: 'Hero',
+      catContent: 'Contenido',
+      catCTA: 'CTA',
+      catFooter: 'Footer',
+      added: '{name} añadido',
+    },
   },
 
   en: {
@@ -3238,6 +3253,21 @@ export const translations = {
       statusRunning: '● Running',
       statusCollecting: '⏳ Collecting',
       statusQueued: '– Queued',
+    },
+
+    emailBlocks: {
+      tabChat: 'Chat',
+      tabBlocks: 'Blocks',
+      loading: 'Loading blocks...',
+      empty: 'No blocks in this category',
+      dropHere: 'Drop here to add',
+      catAll: 'All',
+      catHeader: 'Header',
+      catHero: 'Hero',
+      catContent: 'Content',
+      catCTA: 'CTA',
+      catFooter: 'Footer',
+      added: '{name} added',
     },
   },
 };

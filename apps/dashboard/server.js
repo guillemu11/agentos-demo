@@ -619,6 +619,42 @@ app.get('/api/projects/:id/content-preview-html', requireAuth, async (req, res) 
     }
 });
 
+// POST /api/emails/send-test — Send HTML email to a test address
+app.post('/api/emails/send-test', requireAuth, async (req, res) => {
+    try {
+        const { to, html, subject = 'Test Email Preview', variantLabel } = req.body;
+        if (!to || !html) return res.status(400).json({ error: 'Missing to or html' });
+
+        const smtpHost = process.env.SMTP_HOST;
+        if (!smtpHost) {
+            // No SMTP configured — log and return success for dev
+            console.log(`[send-test] SMTP not configured. Would send to: ${to}`);
+            return res.json({ sent: true, to, note: 'SMTP not configured, email not actually sent' });
+        }
+
+        const transporter = nodemailer.createTransport({
+            host: smtpHost,
+            port: parseInt(process.env.SMTP_PORT || '587'),
+            secure: process.env.SMTP_SECURE === 'true',
+            auth: {
+                user: process.env.SMTP_USER,
+                pass: process.env.SMTP_PASS,
+            },
+        });
+
+        await transporter.sendMail({
+            from: process.env.SMTP_FROM || process.env.SMTP_USER,
+            to,
+            subject: variantLabel ? `[TEST] ${subject} — ${variantLabel}` : `[TEST] ${subject}`,
+            html,
+        });
+
+        res.json({ sent: true, to });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // POST /api/projects/:id/emails — save a new email version
 app.post('/api/projects/:id/emails', requireAuth, async (req, res) => {
   const { id } = req.params;
