@@ -7227,7 +7227,7 @@ app.post('/api/gif-pipeline/generate', requireAuth, async (req, res) => {
   if (!mode || !prompt) {
     return res.status(400).json({ error: 'mode and prompt are required' });
   }
-  if (!['slideshow', 'typographic', 'veo'].includes(mode)) {
+  if (!['slideshow', 'typographic', 'veo', 'image'].includes(mode)) {
     return res.status(400).json({ error: `Invalid mode: ${mode}` });
   }
 

@@ -10,7 +10,7 @@
  */
 
 /**
- * @typedef {('slideshow'|'typographic'|'veo')} PipelineMode
+ * @typedef {('slideshow'|'typographic'|'veo'|'image')} PipelineMode
  */
 
 /**
@@ -26,6 +26,10 @@ export async function runPipeline(mode, prompt, options, emit, ctx) {
   if (mode === 'typographic') {
     const { runTypographicPipeline } = await import('./typographic.js');
     return runTypographicPipeline(prompt, options, emit, ctx);
+  }
+  if (mode === 'image') {
+    const { runImagePipeline } = await import('./image.js');
+    return runImagePipeline(prompt, options, emit, ctx);
   }
   if (mode === 'slideshow') {
     throw new Error('Mode "slideshow" not implemented yet (see Phase 2)');
