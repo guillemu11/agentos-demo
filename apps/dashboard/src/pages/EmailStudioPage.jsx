@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { useAgentPipelineSession } from '../hooks/useAgentPipelineSession.js';
@@ -167,6 +167,7 @@ export default function EmailStudioPage() {
   const [deletingId, setDeletingId] = useState(null);
 
   const pipeline = useAgentPipelineSession(AGENT_ID);
+  const importFileRef = useRef(null);
 
   // Load agent data on mount
   useEffect(() => {
@@ -264,6 +265,54 @@ export default function EmailStudioPage() {
     if (ticket) pipeline.selectTicket(ticket);
   }, [ticketId, pipeline.tickets, pipeline.selectedTicket]);
 
+  const handleImportHtml = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = ''; // reset so the same file can be re-picked
+    if (!file) return;
+
+    setBuilderStatus(t('studio.importHtmlHint'));
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch(`${API_URL}/parse-html`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setBuilderStatus(err.error || t('studio.importHtmlError'));
+        setTimeout(() => setBuilderStatus(''), 4000);
+        return;
+      }
+
+      const { html } = await res.json();
+      const parsed = splitIntoBlocks(html);
+
+      if (parsed.length > 0) {
+        setBlocks(parsed);
+        setAiHtml('');
+        nameBlocksAsync(parsed);
+        setBuilderStatus(t('studio.importHtmlSuccess').replace('{count}', parsed.length));
+      } else {
+        // No top-level <table> blocks found — show as monolithic HTML
+        setAiHtml(html);
+        setBlocks([]);
+        setBuilderStatus(t('studio.importHtmlSuccess').replace('{count}', '0'));
+      }
+      setPatchedBlock(null);
+      setEditingTemplate(null);
+      setActiveTab('chat');
+      setTimeout(() => setBuilderStatus(''), 3000);
+    } catch (err) {
+      console.error('[importHtml] error:', err);
+      setBuilderStatus(t('studio.importHtmlError'));
+      setTimeout(() => setBuilderStatus(''), 4000);
+    }
+  };
+
   const handleExportHtml = () => {
     if (!builderHtml) return;
     const blob = new Blob([builderHtml], { type: 'text/html' });
@@ -318,6 +367,20 @@ export default function EmailStudioPage() {
         )}
         <span className="studio-status-chip studio-status-building">● {t('studio.building')}</span>
         <div className="studio-topbar-actions">
+          <input
+            ref={importFileRef}
+            type="file"
+            accept=".html,text/html"
+            style={{ display: 'none' }}
+            onChange={handleImportHtml}
+          />
+          <button
+            className="studio-action-secondary"
+            onClick={() => importFileRef.current?.click()}
+            title={t('studio.importHtmlHint')}
+          >
+            {t('studio.importHtml')}
+          </button>
           <button className="studio-action-primary" onClick={handleExportHtml} disabled={!builderHtml}>
             {t('studio.exportHtml')}
           </button>
