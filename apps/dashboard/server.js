@@ -41,7 +41,10 @@ app.use(cors({
     origin: process.env.CORS_ORIGIN || (process.env.NODE_ENV === 'production' ? true : 'http://localhost:5173'),
     credentials: true,
 }));
-app.use(express.json());
+// 2MB limit: email HTML can reach several hundred KB (Emirates templates with
+// MSO conditionals + inline CSS + base64 images), and chat endpoints now accept
+// full canvas HTML as context. Default 100kb was too small.
+app.use(express.json({ limit: '2mb' }));
 
 const pool = process.env.DATABASE_URL
     ? new Pool({ connectionString: process.env.DATABASE_URL })
