@@ -4750,6 +4750,34 @@ app.post('/api/ai/name-email-blocks', requireAuth, async (req, res) => {
     }
 });
 
+// POST /api/parse-html — Upload an HTML email file and return its raw content for client-side decomposition
+app.post('/api/parse-html', requireAuth, kbUpload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+        // Read the uploaded file content
+        const html = fs.readFileSync(req.file.path, 'utf8');
+
+        // Cleanup temp file (best-effort)
+        fs.unlink(req.file.path, () => {});
+
+        if (!html || html.trim().length === 0) {
+            return res.status(400).json({ error: 'Empty HTML file' });
+        }
+
+        // Sanity check: must look like HTML
+        if (!html.toLowerCase().includes('<table') && !html.toLowerCase().includes('<body')) {
+            return res.status(400).json({ error: 'File does not contain a valid email HTML structure' });
+        }
+
+        res.json({ html, filename: req.file.originalname });
+    } catch (err) {
+        console.error('[parse-html] Error:', err.message);
+        if (req.file?.path) fs.unlink(req.file.path, () => {});
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // POST /api/knowledge/upload — Upload and ingest a file (image or PDF)
 app.post('/api/knowledge/upload', requireAuth, kbUpload.single('file'), async (req, res) => {
     try {
