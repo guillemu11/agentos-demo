@@ -18,6 +18,7 @@ export default function StudioVariantsPanel({
   imageSlots,
   onSlotsChange,
   blockVarMap,
+  srcImageVars,
   onApprove,
   onRegenerate,
 }) {
@@ -26,16 +27,20 @@ export default function StudioVariantsPanel({
   const variantKey = `${activeMarket}:${activeTier}`;
   const variantData = variants[variantKey] || null;
 
-  // Derive all unique var names from blockVarMap, categorized
+  // Derive content vars: all block vars minus the true src= image vars
   const allVarsByCategory = useMemo(() => {
     const all = Object.values(blockVarMap || {}).flat();
     const unique = [...new Set(all)];
+    const imageSet = new Set(srcImageVars || []);
+    // Content = everything that's not a src image, not a link alias, not personalization
+    const LINK_SKIP = /(_alias|_link|_url)$/i;
+    const content = unique.filter(v => !imageSet.has(v) && !LINK_SKIP.test(v) && categorizeVar(v) !== 'personalization');
     return {
-      content: unique.filter(v => categorizeVar(v) === 'content'),
-      image: unique.filter(v => categorizeVar(v) === 'image'),
+      content,
+      image: srcImageVars?.length ? srcImageVars : unique.filter(v => categorizeVar(v) === 'image'),
       personalization: unique.filter(v => categorizeVar(v) === 'personalization'),
     };
-  }, [blockVarMap]);
+  }, [blockVarMap, srcImageVars]);
 
   const hasAmpscript = true; // Always show AMPscript tab — personalization tokens always available
   const marketSlots = imageSlots?.[activeMarket] || {};

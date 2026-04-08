@@ -27,6 +27,7 @@ export default function ContentStudioPage() {
   const [imageSlots, setImageSlots] = useState({});
   const [ampVarValues, setAmpVarValues] = useState({});
   const [blockVarMap, setBlockVarMap] = useState({});
+  const [srcImageVars, setSrcImageVars] = useState([]);
   const [availableMarkets, setAvailableMarkets] = useState(ALL_MARKETS);
   const [activeMarket, setActiveMarket] = useState('en');
   const [activeTier, setActiveTier] = useState(DEFAULT_TIER);
@@ -64,6 +65,10 @@ export default function ContentStudioPage() {
       setProjectEmails(emails);
       const html = (emails.find(e => e.status === 'approved') || emails[0])?.html_content || '';
       if (html) {
+        // Extract variables used as src= — these are true image vars
+        const srcVars = [...new Set([...html.matchAll(/src="%%=v\(@(\w+)\)=%%"/g)].map(m => m[1]))];
+        setSrcImageVars(srcVars);
+
         const map = {};
         const BLOCK_SPLIT = new RegExp('(?=data-block-name=)');
         const BLOCK_NAME = new RegExp('data-block-name="([^"]+)"');
@@ -233,6 +238,7 @@ export default function ContentStudioPage() {
                 imageSlots={imageSlots}
                 onSlotsChange={setImageSlots}
                 blockVarMap={blockVarMap}
+                srcImageVars={srcImageVars}
                 onApprove={handleApprove}
                 onRegenerate={handleRegenerate}
               />
