@@ -2,7 +2,10 @@
 // Thin wrapper around gifenc. Takes an array of RGBA Uint8ClampedArray frames
 // (one per animation frame) and returns a GIF buffer.
 
-import { GIFEncoder, quantize, applyPalette } from 'gifenc';
+// gifenc is a CJS package — use default import + destructure to get its
+// exports in a Node ESM environment.
+import gifenc from 'gifenc';
+const { GIFEncoder, quantize, applyPalette } = gifenc;
 
 /**
  * Encode an array of RGBA frames to a GIF buffer.
