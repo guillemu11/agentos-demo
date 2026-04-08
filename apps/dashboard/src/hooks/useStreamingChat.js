@@ -28,7 +28,7 @@ export function useStreamingChat({ endpoint, buildBody, onResponseHeaders, loadC
         }
     }, [loadConversation]);
 
-    const sendMessage = useCallback(async (msg, canvasBlockNames) => {
+    const sendMessage = useCallback(async (msg, canvasBlockNames, extras) => {
         if (!msg.trim() || streaming) return;
 
         setMessages(prev => [...prev, { role: 'user', content: msg }]);
@@ -37,6 +37,7 @@ export function useStreamingChat({ endpoint, buildBody, onResponseHeaders, loadC
         const url = typeof endpoint === 'function' ? endpoint() : `${API_URL}${endpoint}`;
         const body = buildBody ? buildBody(msg) : { message: msg };
         if (canvasBlockNames?.length > 0) body.canvasBlocks = canvasBlockNames;
+        if (extras && typeof extras === 'object') Object.assign(body, extras);
 
         try {
             const res = await fetch(url, {

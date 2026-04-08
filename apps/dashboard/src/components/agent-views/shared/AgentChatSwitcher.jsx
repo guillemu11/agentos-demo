@@ -41,6 +41,7 @@ export default function AgentChatSwitcher({ agent, selectedTicket, pipelineData,
                         onHtmlPatched={onHtmlPatched}
                         currentHtml={currentHtml}
                         canvasBlocks={canvasBlocks}
+                        activeBlock={activeBlock}
                     />
                 </div>
             );
