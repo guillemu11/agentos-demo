@@ -28,3 +28,6 @@ Usersgmunoz02.claudeplansadaptive-scribbling-otter-agent-abe0ba4420cfa68e7.md
 # GIF pipeline generated output (keep the directory via .gitkeep, ignore files)
 apps/dashboard/public/generated-gifs/*.gif
 apps/dashboard/public/generated-gifs/*.png
+
+# Smoke-test output from bounce_headline tests
+packages/core/gif-pipeline/**/_smoke_output.gif
