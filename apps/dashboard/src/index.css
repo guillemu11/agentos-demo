@@ -14157,3 +14157,221 @@ body.sidebar-collapsed > .inbox-drawer {
   text-align: center;
 }
 .studio-empty-state .icon { font-size: 2rem; }
+
+/* ─── Image Studio ──────────────────────────────────────────────────────── */
+.image-studio-page {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  height: 100%;
+  overflow: hidden;
+}
+
+.image-studio-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.image-studio-header h1 {
+  margin: 0 0 0.25rem 0;
+}
+
+.image-studio-subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.image-studio-tabs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.image-studio-tab {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.image-studio-tab.active {
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  border-color: var(--accent);
+}
+
+.image-studio-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr 0.8fr;
+  gap: 1rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.image-studio-chat,
+.image-studio-preview,
+.image-studio-timeline {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.image-studio-chat-log {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.image-studio-chat-empty {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  text-align: center;
+  padding: 2rem 1rem;
+}
+
+.chat-msg {
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.chat-msg-user {
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  align-self: flex-end;
+  max-width: 85%;
+}
+
+.chat-msg-event {
+  background: var(--bg);
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+}
+
+.chat-msg-error {
+  background: #fee;
+  color: #c00;
+  border: 1px solid #fcc;
+}
+
+.image-studio-chat-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.image-studio-chat-form input {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.image-studio-chat-form button {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.image-studio-chat-form button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gif-preview {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.gif-preview-empty-text {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.gif-preview-image {
+  max-width: 100%;
+  max-height: 60%;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.gif-preview-meta {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.gif-preview-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.gif-preview-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.pipeline-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pipeline-step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+}
+
+.pipeline-step-marker {
+  font-weight: bold;
+  width: 1.25rem;
+  text-align: center;
+}
+
+.pipeline-step-pending { color: var(--text-muted); }
+.pipeline-step-active  { color: var(--accent); animation: pulse 1.5s ease-in-out infinite; }
+.pipeline-step-done    { color: var(--success, #0a0); }
+.pipeline-step-failed  { color: var(--danger, #c00); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
