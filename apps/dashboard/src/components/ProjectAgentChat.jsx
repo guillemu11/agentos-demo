@@ -7,7 +7,7 @@ import { applyPatch } from '../utils/emailTemplate.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
-export default function ProjectAgentChat({ projectId, session, completedSessions, stages, agents, pipelineStatus, onHandoffRequest, onViewCompletedStage, onHtmlBlock, onHtmlGenerated, onHtmlPatched, currentHtml, canvasBlocks }) {
+export default function ProjectAgentChat({ projectId, session, completedSessions, stages, agents, pipelineStatus, onHandoffRequest, onViewCompletedStage, onHtmlBlock, onHtmlGenerated, onHtmlPatched, currentHtml, canvasBlocks, activeBlock }) {
     const { t } = useLanguage();
     const [input, setInput] = useState('');
     const [handoffSuggestion, setHandoffSuggestion] = useState(null);
@@ -105,7 +105,20 @@ export default function ProjectAgentChat({ projectId, session, completedSessions
 
     const handleSend = () => {
         if (!input.trim() || streaming) return;
-        sendMessage(input, canvasBlocks?.length > 0 ? canvasBlocks.map(b => b.name) : null);
+        // Canvas context for html-developer pipeline chat:
+        // - If a block is selected → send only that block's HTML (surgical patch)
+        // - If no block selected → send the full canvas HTML (global rebrand)
+        // This lets the agent see the actual HTML it's editing instead of guessing.
+        const canvasBlockNames = canvasBlocks?.length > 0 ? canvasBlocks.map(b => b.name) : null;
+        const activeBlockData = activeBlock
+            ? (canvasBlocks || []).find(b => b.name === activeBlock)
+            : null;
+        const extras = {
+            ...(activeBlock && { activeBlock }),
+            ...(activeBlockData?.html && { activeBlockHtml: activeBlockData.html }),
+            ...(!activeBlock && currentHtmlRef.current && { currentCanvasHtml: currentHtmlRef.current }),
+        };
+        sendMessage(input, canvasBlockNames, extras);
         setInput('');
     };
 

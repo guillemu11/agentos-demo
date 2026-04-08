@@ -6658,7 +6658,7 @@ app.get('/api/projects/:id/email-variables', requireAuth, async (req, res) => {
 // POST /api/projects/:id/sessions/:sessionId/chat — SSE streaming chat in pipeline
 app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, res) => {
     try {
-        const { message, canvasBlocks: canvasBlockNames } = req.body;
+        const { message, canvasBlocks: canvasBlockNames, activeBlock, activeBlockHtml, currentCanvasHtml } = req.body;
         const sessionId = parseInt(req.params.sessionId);
         const projectId = parseInt(req.params.id);
         if (!message) return res.status(400).json({ error: 'Message is required' });
@@ -6700,6 +6700,16 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
         // Ensure email-blocks is included for html-developer and campaign-manager (brief flow)
         if ((session.agent_id === 'html-developer' || session.agent_id === 'campaign-manager' || session.agent_id === 'raul') && !ragNamespaces.includes('email-blocks')) {
             ragNamespaces = ['email-blocks', ...ragNamespaces];
+        }
+        // When the html-developer has canvas HTML in the body, the user is editing a real email
+        // on screen. Remove the `emails` namespace so the RAG does NOT auto-inject competitor
+        // emails (e.g. Qatar Airways research) with the [ATTACHED EMAIL VISUALLY SHOWN] marker —
+        // that marker confuses the agent into describing the wrong email. The canvas HTML we
+        // inject in the system prompt (below) is the single source of truth.
+        const hasCanvasContext = (session.agent_id === 'html-developer' || (session.agent_role || '').toLowerCase().includes('html developer'))
+            && (req.body.activeBlockHtml || req.body.currentCanvasHtml);
+        if (hasCanvasContext) {
+            ragNamespaces = ragNamespaces.filter(n => n !== 'emails');
         }
         const blockKeywords = /\b(block|header|footer|preheader|hero|banner|cta|button|product.?card|body.?copy|section.?heading|partner|icon|terms|module)\b/i;
         const isBriefQuery = (session.agent_id === 'campaign-manager' || session.agent_id === 'raul') && /\b(brief|block|structure|email|sections?|template)\b/i.test(message);
@@ -6790,6 +6800,44 @@ YOUR RESPONSE MUST BE EXACTLY THAT ONE QUESTION. NO INTRODUCTION. NO FOLLOW-UP. 
         // Inject canvas state so the AI knows what's already on the canvas
         if (canvasBlockNames?.length > 0) {
             systemPrompt += `\n\n## Current Canvas State\nThe canvas already has these blocks in order: ${canvasBlockNames.map(n => `"${n}"`).join(', ')}.\nDo NOT generate a full HTML document — only output a new block fragment (no <!DOCTYPE html>).`;
+        }
+
+        // Inject the actual HTML content the user is editing so the agent can rebrand surgically
+        // instead of guessing what the current email/block looks like.
+        // Strategy (hybrid):
+        //   - If a block is selected (activeBlock + activeBlockHtml) → inject ONLY that block's HTML
+        //     so the agent knows exactly what to PATCH without wasting tokens on siblings.
+        //   - Otherwise, if we have currentCanvasHtml → inject the full canvas HTML so the agent
+        //     can reason about the whole email (global rebrand, structural changes).
+        if (isHtmlDev && activeBlock && activeBlockHtml) {
+            systemPrompt += `\n\n## Active Block — USER IS EDITING THIS
+The user has selected the block named "${activeBlock}" in the canvas. Its current HTML is:
+
+\`\`\`html
+${activeBlockHtml}
+\`\`\`
+
+When the user asks you to modify, rebrand, restyle, or change "this block" or "the selected block", you MUST:
+1. Read the HTML above carefully — preserve its table structure, MSO conditional comments, and data-block-name attribute.
+2. Apply ONLY the changes the user asks for (colors, typography, copy, spacing, imagery) — keep everything else intact.
+3. Output ONLY a PATCH marker with the updated block HTML:
+<!--PATCH:${activeBlock}-->[complete updated <table...> with the same data-block-name="${activeBlock}" attribute]
+
+Do NOT output a full email. Do NOT output other blocks. Do NOT describe what you're doing — only emit the PATCH marker followed by the block HTML.`;
+        } else if (isHtmlDev && currentCanvasHtml) {
+            // Truncate very long canvas HTML so we don't blow the context window on huge emails.
+            const MAX_CANVAS_CHARS = 40000;
+            const canvasHtmlForPrompt = currentCanvasHtml.length > MAX_CANVAS_CHARS
+                ? currentCanvasHtml.slice(0, MAX_CANVAS_CHARS) + '\n<!-- [truncated: canvas HTML was longer than 40k chars] -->'
+                : currentCanvasHtml;
+            systemPrompt += `\n\n## Current Canvas HTML — USER'S EMAIL IN THE EDITOR
+The user currently has this email in the Email Studio canvas. When the user asks about "the email in the canvas", "this email", or "the current email", they mean THIS HTML — NOT any email from the knowledge base:
+
+\`\`\`html
+${canvasHtmlForPrompt}
+\`\`\`
+
+If the user asks to rebrand, restyle, or modify this email, analyze the HTML above and respond surgically. Do NOT reference emails from the knowledge base as "the canvas email" — the canvas is the source of truth.`;
         }
         // Block assembly mode note will be injected after filteredPipelineHtml is computed (below)
 
