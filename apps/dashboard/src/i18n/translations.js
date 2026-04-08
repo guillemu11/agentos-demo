@@ -19,6 +19,45 @@ export const translations = {
       knowledgeBase: 'Knowledge Base',
       autoResearch: 'AutoResearch',
       settings: 'Configuracion',
+      imageStudio: 'Image Studio',
+    },
+
+    imageStudio: {
+      title: 'Image Studio',
+      subtitle: 'Generate animated GIFs powered by agent workflows',
+      tabs: {
+        slideshow: 'Slideshow',
+        typographic: 'Typographic',
+        veo: 'Video (Veo)',
+      },
+      chat: {
+        placeholder: 'Describe the GIF you want...',
+        send: 'Generate',
+      },
+      steps: {
+        planning: 'Planning',
+        planReady: 'Plan ready',
+        rendering: 'Rendering',
+        encoding: 'Encoding',
+        persisting: 'Saving',
+        done: 'Done',
+        error: 'Error',
+      },
+      preview: {
+        empty: 'Your GIF will appear here',
+        metaFrames: 'Frames',
+        metaDuration: 'Duration',
+        metaSize: 'Size',
+        metaDimensions: 'Dimensions',
+        save: 'Save to gallery',
+        sendToEmail: 'Send to Email Studio',
+        download: 'Download',
+      },
+      gallery: {
+        title: 'Gallery',
+        empty: 'No GIFs generated yet',
+      },
+      modeComingSoon: 'This mode is coming soon — try Typographic while we ship the others.',
     },
 
     // Error Boundary
@@ -1656,6 +1695,45 @@ export const translations = {
       knowledgeBase: 'Knowledge Base',
       autoResearch: 'AutoResearch',
       settings: 'Settings',
+      imageStudio: 'Image Studio',
+    },
+
+    imageStudio: {
+      title: 'Image Studio',
+      subtitle: 'Generate animated GIFs powered by agent workflows',
+      tabs: {
+        slideshow: 'Slideshow',
+        typographic: 'Typographic',
+        veo: 'Video (Veo)',
+      },
+      chat: {
+        placeholder: 'Describe the GIF you want...',
+        send: 'Generate',
+      },
+      steps: {
+        planning: 'Planning',
+        planReady: 'Plan ready',
+        rendering: 'Rendering',
+        encoding: 'Encoding',
+        persisting: 'Saving',
+        done: 'Done',
+        error: 'Error',
+      },
+      preview: {
+        empty: 'Your GIF will appear here',
+        metaFrames: 'Frames',
+        metaDuration: 'Duration',
+        metaSize: 'Size',
+        metaDimensions: 'Dimensions',
+        save: 'Save to gallery',
+        sendToEmail: 'Send to Email Studio',
+        download: 'Download',
+      },
+      gallery: {
+        title: 'Gallery',
+        empty: 'No GIFs generated yet',
+      },
+      modeComingSoon: 'This mode is coming soon — try Typographic while we ship the others.',
     },
 
     error: {
