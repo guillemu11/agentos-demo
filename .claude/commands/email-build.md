@@ -79,6 +79,111 @@ node tmp-mc-preview/preview-server.js <assetId> [--lang=en] [--port=3333]
 
 Opens a localhost preview with arrow navigation between variants, subscriber info sidebar, and live email rendering in an iframe.
 
+## BAU Campaign Pattern (Route Launch, Partner Offer, Product Offer, etc.)
+
+BAU (Business As Usual) campaigns reuse a shared template with dynamic DE names
+constructed at send-time from the email's `__AdditionalEmailAttribute` parameters.
+
+### How attribute parameters build DE names
+
+```ampscript
+SET @attribute3 = __AdditionalEmailAttribute3
+SET @attribute5 = __AdditionalEmailAttribute5
+SET @campaign_name = Substring(@attribute3, 1, Length(@attribute3) - 14)
+SET @campaign_type = Substring(@attribute3, Length(@attribute3) - 1, Length(@attribute3))
+SET @campaign_code = Substring(@attribute5, 1, Length(@attribute5) - 7)
+SET @campaign_date = Substring(@attribute5, Length(@attribute5) - 5, Length(@attribute5))
+SET @campaign_id = Concat(@campaign_name, '_', @campaign_code, '_', @campaign_date, '_', @campaign_type)
+```
+
+The Content DE name is: `{campaign_name}_{campaign_date}_RL_DynamicContent`
+The Audience DE name is: `{campaign_name}_{campaign_date}_TargetAudience_DE`
+
+**Example (HKG RouteLaunch):**
+- campaign_name = `hkawrhellaunchmar26`
+- campaign_date = `230326`
+- Content DE = `hkawrhellaunchmar26_230326_RL_DynamicContent`
+- Campaign ID = `hkawrhellaunchmar26_CCROUTELCH_230326_in`
+
+### Content DE primary keys
+
+The Content DE uses a composite PK: `campaign_id × language × market_code × tier`
+
+Tier values:
+- `skw` — Skywards members only
+- `ebase` — Non-members only
+- `both` — Same content for all tiers (common in Route Launch)
+
+When tier="both" exists, AMPscript overrides `@tier_key` to "both" for ALL subscribers.
+
+### Content DE lookup in AMPscript
+
+```ampscript
+SET @Email_DynamicContent = LookupRows(@RL_DynamicContent,
+    'language', Lowercase(@lm_code),
+    'market_code', Lowercase(@country),
+    'campaign_id', Lowercase(@campaign_id),
+    'tier', @tier_key)
+```
+
+**Important:** The DE name is a *variable* (`@RL_DynamicContent`), not a string literal.
+Our `parseDELookups()` regex only catches string literals, so the analyzer returns
+an empty manifest for BAU campaigns. You must discover the DE names manually via SOAP
+search (`Name like 'RL_DynamicContent'`) or construct them from the attribute parameters.
+
+### Header logic (v2 vs v3, independent of tier)
+
+The header block uses `@headerver`, NOT `@tier_key`:
+- `v3` = Skywards members (IO, Platinum, Gold, Silver, Blue) — shows Skywards bar with tier name + miles
+- `v2` = Non-members — no Skywards bar
+
+Within v3, the tier name and miles balance are subscriber-specific (personalized at render).
+
+### Variant matrix for BAU campaigns
+
+```
+Variants = languages × header_types × (optional: tier-specific content)
+```
+
+Typical Route Launch: 2 languages × 2 headers = 4 variants (content is tier="both")
+Typical Partner Offer: 3 languages × 2 headers × 2 tiers = 12 variants
+
+### VAWP DE for BAU
+
+BAU campaigns use a shared VAWP: `'BAU CS Master dataset'` (not campaign-specific).
+This DE has subscriber data including `country_of_residence`, `per_language`, `loy_tier_code`.
+
+### Block layout pattern (Route Launch)
+
+```
+1.  GA Tracking (block 20603)
+2.  Header v2/v3 by language (block 16618 → language-specific sub-blocks)
+3.  Spacer + Masthead (when no fares)
+4.  Masthead body copy by language (block 18129)
+5.  Fare blocks (conditional: 2-class YJ / 2-class JF / 3-class)
+6.  Offer block (conditional)
+7.  Story left circle (conditional)
+8.  Double story 1+2 from Stories_Ref_Table (conditional)
+9.  Double story 3+4 inline from content DE (conditional)
+10. Rolling Static Content (market-dependent: worry-free / travel-hub / emirates-exp / before-travel)
+11. Global spacer
+12. Footer by language (block 39445)
+13. Terms by language (block 17372)
+14. Caveat (block 35063)
+15. ODR (block 36843)
+```
+
+### Working with BAU campaigns in the pipeline
+
+Since the analyzer can't discover dynamic DEs, use this workflow:
+
+1. **Resolve template** normally: `resolveEmailTemplate(mc, assetId)` → gets the codesnippet block
+2. **Search for DEs** via SOAP: filter `Name like 'RL_DynamicContent'` to find all BAU DEs
+3. **Query the content DE** via REST: merge `keys + values` (PKs are in `item.keys`, not `item.values`)
+4. **Manually construct the manifest** with the discovered DE names and block IDs
+5. **Fetch blocks recursively** — BAU template (e.g., block 43026) references 25+ logic blocks
+6. **Render** using the standard renderer with the manual manifest
+
 ## Critical learnings from Emirates patterns
 
 ### Block resolution (2-3 levels of nesting)
