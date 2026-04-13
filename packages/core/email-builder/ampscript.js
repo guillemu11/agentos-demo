@@ -5,6 +5,44 @@
  */
 
 /**
+ * Clean a template shell by resolving language conditionals to English/LTR
+ * and stripping remaining AMPscript. Use this for the outer email wrapper.
+ *
+ * Handles patterns like:
+ *   %%[IF @template_language == 'ARABIC' THEN]%%dir="rtl"%%[ELSE]%%dir="ltr"%%[ENDIF]%%
+ *   %%[IF @language == 'ARABIC' THEN]%%right%%[ELSE]%%left%%[ENDIF]%%
+ *
+ * @param {string} html - Template shell HTML with AMPscript conditionals
+ * @returns {string} Clean HTML (English/LTR defaults)
+ */
+export function cleanTemplateShell(html) {
+  if (!html) return '';
+
+  let result = html;
+
+  // Resolve inline IF/ELSE conditionals — keep the ELSE branch (non-Arabic = English/LTR)
+  result = result.replace(
+    /%%\[IF\s+@\w+\s*==\s*['"]ARABIC['"]\s*THEN\]%%([^%]*)%%\[ELSE\]%%([^%]*)%%\[ENDIF\]%%/gi,
+    '$2'
+  );
+
+  // Generic single-line IF/THEN/ELSE: keep the ELSE value
+  result = result.replace(
+    /%%\[IF\s+[^\]]*THEN\]%%([^%]*)%%\[ELSE\]%%([^%]*)%%\[ENDIF\]%%/gi,
+    '$2'
+  );
+
+  // Strip remaining %%[...]%% blocks
+  result = result.replace(/%%\[[\s\S]*?\]%%/g, '');
+  // Strip %%=...=%% inline expressions
+  result = result.replace(/%%=[^%]*=%%/g, '');
+  // Strip any remaining %% markers
+  result = result.replace(/%%[^%]*%%/g, '');
+
+  return result;
+}
+
+/**
  * Remove all AMPscript executable blocks and inline references from HTML.
  * Strips:
  *   - %%[...]%% blocks (multiline, including SET / IF / ELSE / ENDIF)
@@ -87,6 +125,18 @@ export function replaceAmpscriptVars(
 
   // alias="..." attributes (with single or double quotes)
   result = result.replace(/\s*alias=["'][^"']*["']/gi, '');
+
+  // Resolve inline IF/ELSE conditionals (e.g., %%[IF @x == 'ARABIC' THEN]%%right%%[ELSE]%%left%%[ENDIF]%%)
+  // These appear in template shells for RTL/LTR. We keep the ELSE branch (non-Arabic = LTR).
+  result = result.replace(
+    /%%\[IF\s+@\w+\s*==\s*['"]ARABIC['"]\s*THEN\]%%([^%]*)%%\[ELSE\]%%([^%]*)%%\[ENDIF\]%%/gi,
+    '$2'
+  );
+  // Generic IF/THEN/ELSE: keep the ELSE value (safer default)
+  result = result.replace(
+    /%%\[IF\s+[^\]]*THEN\]%%([^%]*)%%\[ELSE\]%%([^%]*)%%\[ENDIF\]%%/gi,
+    '$2'
+  );
 
   // any remaining %% markers
   result = result.replace(/%%[^%]*%%/g, '');
