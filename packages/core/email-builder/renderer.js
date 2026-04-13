@@ -159,6 +159,18 @@ export function buildVariableMap({
       vars.story_left_circle_alias = cashStory.story_alias || '';
     }
 
+    // ── Story4 → story_right_circle (used in EBase and similar emails) ──
+    const story4Name = dc.story4;
+    const story4 = findStory(stories, story4Name);
+    if (story4) {
+      vars.story_right_circle_image = img(story4.story_image_circle || story4.story_image);
+      vars.story_right_circle_header = story4.story_header || '';
+      vars.story_right_circle_body = url(story4.story_body || '');
+      vars.story_right_circle_cta = story4.story_cta || '';
+      vars.story_right_circle_link = url(story4.story_url || '');
+      vars.story_right_circle_alias = story4.story_alias || '';
+    }
+
     // ── Destination/inspiration story (single_story_left block) ──
     const destStory = findStory(stories, dc.destination_generic);
     if (destStory) {
@@ -189,14 +201,103 @@ export function buildVariableMap({
     vars.caveat_terms = url(caveat.caveat_terms6 || caveat.caveat_terms1 || '');
   }
 
+  // ── Generic image ID resolution ──
+  // Any variable whose value is a pure numeric ID and whose key contains
+  // 'image', 'logo', 'hero', 'icon' → resolve to CDN URL via imageMap.
+  // This catches ContentImagebyID patterns like main_hero_image, story_image, etc.
+  const imageKeyPattern = /image|logo|hero|icon/i;
+  for (const [k, v] of Object.entries(vars)) {
+    if (v && imageKeyPattern.test(k) && /^\d+$/.test(String(v))) {
+      const resolved = imageMap[String(v)];
+      if (resolved) vars[k] = resolved;
+    }
+  }
+
+  // ── AMPscript internal variable mappings ──
+  // AMPscript sets intermediate variables from DE fields via ContentImagebyID.
+  // e.g., main_hero_image (DE field, asset ID) → @hero_image (AMPscript var, URL)
+  // We resolve these so the block templates can find them.
+  if (vars.main_hero_image) vars.hero_image = vars.main_hero_image;
+  if (vars.main_link) vars.hero_image_link = url(vars.main_link);
+  if (vars.main_alias) vars.hero_image_link_alias = vars.main_alias;
+
+  // Story image mappings: the blocks use @storyN_image but AMPscript resolves
+  // from story_image_circle (asset ID) → storyN_image (URL)
+  // buildVariableMap already does this for stories found via findStory(),
+  // but we also need @story_right_circle_image for story4
+  for (let i = 1; i <= 3; i++) {
+    // Ensure story images are URLs not IDs
+    if (vars[`story${i}_image`] && /^\d+$/.test(String(vars[`story${i}_image`]))) {
+      const resolved = imageMap[String(vars[`story${i}_image`])];
+      if (resolved) vars[`story${i}_image`] = resolved;
+    }
+  }
+  // story_right_circle uses story4's data
+  if (vars.story_left_circle_image && /^\d+$/.test(String(vars.story_left_circle_image))) {
+    const resolved = imageMap[String(vars.story_left_circle_image)];
+    if (resolved) vars.story_left_circle_image = resolved;
+  }
+
+  // ── Personalization ──
+  // Body copy: replace {FirstName}, {LastName}, [#] placeholders
+  if (vars.body_copy && subscriber.first_name) {
+    vars.body_copy = vars.body_copy
+      .replace(/\{FirstName\}/gi, subscriber.first_name)
+      .replace(/\{first_name\}/gi, subscriber.first_name)
+      .replace(/\[#\]/g, subscriber.first_name);
+  }
+  // Subject line: replace [#] with first_name
+  if (vars.subject_line && subscriber.first_name) {
+    vars.subject_line = vars.subject_line.replace(/\[#\]/g, subscriber.first_name);
+  }
+  // Body copy salutation: prepend greeting with first_name if not already in body
+  // AMPscript does: @body_copy_salutation = Lookup('REF_Salutation_Language', 'salutation', 'language', @lm_code)
+  // then prepends it to body_copy. If we have salutation data, use it.
+  if (salutation?.salutation && subscriber.first_name) {
+    const greeting = salutation.salutation
+      .replace(/\{first_name\}/gi, subscriber.first_name)
+      .replace(/\{FirstName\}/gi, subscriber.first_name);
+    vars.body_copy_salutation = greeting;
+    // Prepend to body_copy if not already there
+    if (vars.body_copy && !vars.body_copy.startsWith(greeting)) {
+      vars.body_copy = greeting + vars.body_copy;
+    }
+  } else if (subscriber.first_name && vars.body_copy) {
+    // Fallback: simple "Hello {name}, " prefix
+    const greeting = `Hello ${subscriber.first_name}, `;
+    vars.body_copy_salutation = greeting;
+    if (!vars.body_copy.toLowerCase().startsWith('hello')) {
+      vars.body_copy = greeting + vars.body_copy;
+    }
+  }
+
   return vars;
 }
 
 /**
  * Find a story by name in the stories array.
+ * If stories are filtered by language already, direct match works.
+ * Otherwise tries story_name match on the full array.
  */
 function findStory(stories, storyName) {
   if (!storyName || !stories) return null;
+  return stories.find(s => s.story_name === storyName) || null;
+}
+
+/**
+ * Find a story by name, preferring a specific language.
+ */
+function findStoryByLang(stories, storyName, langCode) {
+  if (!storyName || !stories) return null;
+  // Try with language match first
+  if (langCode) {
+    const withLang = stories.find(s =>
+      s.story_name === storyName &&
+      (s.language || s.Language || '').toLowerCase() === langCode.toLowerCase()
+    );
+    if (withLang) return withLang;
+  }
+  // Fallback to any language
   return stories.find(s => s.story_name === storyName) || null;
 }
 
@@ -360,15 +461,19 @@ export function renderAllVariants({ manifest, data, subscriber, templateShell, o
   const market = options.market || 'uk/english';
   const results = {};
 
-  // Find the main dynamic content DE
-  const dynamicContentDE = Object.entries(deData).find(
-    ([name]) => !name.toLowerCase().includes('header')
-      && !name.toLowerCase().includes('footer')
-      && !name.toLowerCase().includes('stories')
-      && !name.toLowerCase().includes('caveat')
-      && !name.toLowerCase().includes('salutation')
-      && !name.toLowerCase().includes('ref_')
+  // Find the main dynamic content DE — prioritize 'dynamic' in name
+  const dcCandidatesRA = Object.entries(deData).filter(
+    ([name]) => {
+      const n = name.toLowerCase();
+      return !n.includes('header') && !n.includes('footer') && !n.includes('stories')
+        && !n.includes('caveat') && !n.includes('salutation') && !n.includes('ref_')
+        && !n.includes('vawp') && !n.includes('offline') && !n.includes('centralized')
+        && !n.includes('impression') && !n.includes('fares');
+    }
   );
+  const dynamicContentDE = dcCandidatesRA.find(([n]) => n.toLowerCase().includes('dynamic'))
+    || dcCandidatesRA.find(([n]) => n.toLowerCase().includes('content'))
+    || dcCandidatesRA.sort((a, b) => (b[1]?.length || 0) - (a[1]?.length || 0))[0];
 
   if (!dynamicContentDE) {
     throw new Error('No dynamic content DE found in fetched data');
@@ -465,4 +570,240 @@ export function renderAllVariants({ manifest, data, subscriber, templateShell, o
   }
 
   return results;
+}
+
+/**
+ * Generate preview variants with metadata for the preview server.
+ * Uses VAWP subscriber data to create realistic previews with personalization.
+ *
+ * @param {object} params - Same as renderAllVariants plus vawpRows and langRefRows
+ * @returns {Array<{filename: string, html: string, meta: object}>}
+ */
+export function generatePreviewVariants({ manifest, data, templateShell, options = {} }) {
+  const { blocks, deData, imageMap } = data;
+  const market = options.market || 'uk/english';
+  const previews = [];
+
+  // Find DEs by role (returns ALL rows — will be filtered by language per variant)
+  const findDE = (test) => Object.entries(deData).find(([n]) => test(n.toLowerCase()))?.[1] || [];
+
+  const allHeaderRows = findDE(n => n.includes('header') && !n.includes('vawp') && !n.includes('ref_'));
+  const allFooterRows = findDE(n => n.includes('footer'));
+  const allStoriesRows = findDE(n => n.includes('stories') || (n.includes('story') && !n.includes('vawp')));
+  const allCaveatRows = findDE(n => n.includes('caveat'));
+  const allSalutationRows = findDE(n => n.includes('salutation'));
+
+  // Helper: filter rows by language with fallback
+  // Emirates DEs use inconsistent language codes: 'ENGLISH', 'english', 'en', 'en-GB'
+  const langShortMap = {
+    ENGLISH: 'en', 'ENGLISH US': 'en', ARABIC: 'ar', FRENCH: 'fr', GERMAN: 'de',
+    SPANISH: 'es', ITALIAN: 'it', PORTUGUESE: 'pt', 'PORTUGUESE BR': 'pt_br',
+    RUSSIAN: 'ru', JAPANESE: 'ja', KOREAN: 'ko', DUTCH: 'nl', CZECH: 'cs',
+    DANISH: 'da', GREEK: 'el', HUNGARIAN: 'hu', NORWEGIAN: 'no', POLISH: 'pl',
+    SWEDISH: 'sv', TURKISH: 'tr', THAI: 'th', BAHASA: 'id', VIETNAMESE: 'vi',
+    'SIMPLIFIED CHINESE': 'ch_scn', 'TRADITIONAL CHINESE': 'ch_tcn', TAIWANESE: 'tw',
+  };
+  function findByLang(rows, lang) {
+    if (!rows || rows.length === 0) return null;
+    const langUpper = (lang || 'ENGLISH').toUpperCase();
+    const langShort = langShortMap[langUpper] || lang?.toLowerCase()?.split('-')[0] || 'en';
+
+    // Try exact match (ENGLISH, english, en, en-GB...)
+    for (const tryLang of [langUpper, langUpper.toLowerCase(), langShort]) {
+      const row = rows.find(r => (r.language || r.Language || '').toLowerCase() === tryLang.toLowerCase());
+      if (row) return row;
+    }
+    // Try base language (ENGLISH US → ENGLISH, pt_br → pt)
+    if (langUpper.includes(' ')) {
+      const base = langUpper.split(' ')[0];
+      const row = rows.find(r => (r.language || r.Language || '').toUpperCase() === base);
+      if (row) return row;
+    }
+    // Fallback to English
+    for (const en of ['ENGLISH', 'english', 'en']) {
+      const row = rows.find(r => (r.language || r.Language || '').toLowerCase() === en);
+      if (row) return row;
+    }
+    return rows[0] || null;
+  }
+
+  // Find VAWP DE
+  const vawpDE = Object.entries(deData).find(([n]) => n.toLowerCase().includes('vawp'));
+  const vawpRows = vawpDE?.[1] || [];
+
+  // Find language reference DE
+  const langRefDE = Object.entries(deData).find(([n]) =>
+    n.toLowerCase().includes('language') && n.toLowerCase().includes('ref')
+  );
+  const langRefRows = langRefDE?.[1] || [];
+
+  // Find dynamic content DE — prioritize names with 'dynamic' + 'content'
+  const dcCandidates = Object.entries(deData).filter(([name]) => {
+    const n = name.toLowerCase();
+    return !n.includes('header') && !n.includes('footer') && !n.includes('stories')
+      && !n.includes('story') && !n.includes('caveat') && !n.includes('salutation')
+      && !n.includes('ref_') && !n.includes('vawp') && !n.includes('offline')
+      && !n.includes('centralized') && !n.includes('impression') && !n.includes('fares');
+  });
+  // Prefer DE with 'dynamic' or 'content' in name, then fallback to largest
+  const dcDE = dcCandidates.find(([n]) => n.toLowerCase().includes('dynamic'))
+    || dcCandidates.find(([n]) => n.toLowerCase().includes('content'))
+    || dcCandidates.sort((a, b) => (b[1]?.length || 0) - (a[1]?.length || 0))[0];
+  const dcRows = dcDE?.[1] || [];
+
+  // Detect header types
+  let headerTypes = ['default'];
+  const blockKeys = Object.keys(blocks);
+  if (blockKeys.some(k => k.endsWith('_skw')) && blockKeys.some(k => k.endsWith('_ebase'))) {
+    headerTypes = ['skw', 'ebase'];
+  }
+
+  // Detect segments
+  let segments = manifest.variants.segments.length > 0
+    ? manifest.variants.segments
+    : [...new Set(dcRows.map(r => (r.segment || r.Segment || '').toLowerCase()).filter(Boolean))];
+  if (segments.length === 0) segments = ['default'];
+
+  // Build subscriber list from VAWP — pick one per unique Culture_code
+  let subscribers = [];
+  if (vawpRows.length > 0) {
+    const seenCultures = new Set();
+    for (const row of vawpRows) {
+      const culture = row.Culture_code || row.culture_code || '';
+      if (culture && !seenCultures.has(culture)) {
+        seenCultures.add(culture);
+        subscribers.push({
+          first_name: row.first_name || row.First_Name || 'Valued Member',
+          last_name: row.last_name || row.Last_Name || '',
+          Culture_code: culture,
+          Country_code: (row.Country_code || row.country_code || '').toUpperCase(),
+          per_email_address: row.per_email_address || '',
+          prospect_id: row.prospect_id || '',
+        });
+      }
+    }
+    // If user requested specific language, filter
+    if (options.language && options.language !== 'all') {
+      const targetLang = options.language.toLowerCase();
+      const filtered = subscribers.filter(s =>
+        s.Culture_code.toLowerCase().startsWith(targetLang)
+      );
+      if (filtered.length > 0) subscribers = filtered;
+    }
+  }
+  // Fallback: use the provided subscriber or default
+  if (subscribers.length === 0) {
+    subscribers = [options.subscriber || { first_name: 'Valued Member', TierName: 'Blue' }];
+  }
+
+  // Resolve Culture_code → language name using langRef
+  function resolveLanguage(cultureCode) {
+    if (!cultureCode || langRefRows.length === 0) return 'ENGLISH';
+    const ref = langRefRows.find(r =>
+      (r.Lang_ID_code || r.lang_id_code || '') === cultureCode
+    );
+    return ref?.per_language || ref?.Per_Language || 'ENGLISH';
+  }
+
+  // For each subscriber × segment × headerType combination, generate a variant
+  const blockOrder = manifest.blockOrder.allBlocks || manifest.blockOrder.default || [];
+
+  for (const sub of subscribers) {
+    const language = resolveLanguage(sub.Culture_code);
+
+    // Find the content DE row for this language (with fallback)
+    const langUpper = language.toUpperCase();
+    let segmentContent = dcRows.find(r =>
+      (r.language || r.Language || '').toUpperCase() === langUpper
+    );
+    // Fallback: 'ENGLISH US' → try 'ENGLISH', 'PORTUGUESE BR' → try 'PORTUGUESE'
+    if (!segmentContent && langUpper.includes(' ')) {
+      const baseLang = langUpper.split(' ')[0];
+      segmentContent = dcRows.find(r =>
+        (r.language || r.Language || '').toUpperCase() === baseLang
+      );
+    }
+    // Final fallback: first English row, then first row
+    if (!segmentContent) {
+      segmentContent = dcRows.find(r =>
+        (r.language || r.Language || '').toUpperCase() === 'ENGLISH'
+      ) || dcRows[0] || {};
+    }
+
+    for (const segment of segments) {
+      // If segments are real, find the matching DC row
+      const segDC = segment !== 'default'
+        ? dcRows.find(r => (r.segment || r.Segment || '').toLowerCase() === segment) || segmentContent
+        : segmentContent;
+
+      for (const headerType of headerTypes) {
+        // Filter supporting DEs by language for this subscriber
+        const headerContent = findByLang(allHeaderRows, language);
+        const footerContent = findByLang(allFooterRows, language);
+        const caveat = findByLang(allCaveatRows, language);
+        const salutation = findByLang(allSalutationRows, language);
+        // Stories: filter by language — try short code (en), full name (ENGLISH), and lm_code
+        const langLower = language.toLowerCase();
+        const langShort = langShortMap[language.toUpperCase()] || langLower.split(' ')[0];
+        const storiesForLang = allStoriesRows.filter(s => {
+          const sLang = (s.language || s.Language || '').toLowerCase();
+          return sLang === langShort || sLang === langLower;
+        });
+        const storiesRows = storiesForLang.length > 0 ? storiesForLang : allStoriesRows;
+
+        const vars = buildVariableMap({
+          subscriber: sub,
+          headerContent,
+          footerContent,
+          segmentContent: segDC,
+          stories: storiesRows,
+          caveat,
+          salutation,
+          imageMap,
+          market,
+        });
+
+        // Swap header blocks for this variant
+        const variantBlocks = { ...blocks };
+        for (const blockId of blockOrder) {
+          const variantKey = `${blockId}_${headerType}`;
+          if (variantKey in blocks) {
+            variantBlocks[blockId] = blocks[variantKey];
+          }
+        }
+
+        const html = renderVariant({
+          blocks: variantBlocks, vars, blockOrder, templateShell,
+          preheader: vars.Preheader,
+        });
+
+        // Build descriptive filename and metadata
+        const parts = [];
+        if (segments.length > 1) parts.push(segment);
+        if (headerTypes.length > 1) parts.push(headerType);
+        parts.push(sub.Culture_code || 'default');
+        const filename = parts.join('_') + '.html';
+
+        previews.push({
+          filename,
+          html,
+          meta: {
+            segment: segment !== 'default' ? segment : null,
+            headerType: headerType !== 'default' ? headerType : null,
+            subscriber: {
+              name: `${sub.first_name} ${sub.last_name}`.trim(),
+              email: sub.per_email_address,
+              culture: sub.Culture_code,
+              country: sub.Country_code,
+            },
+            language,
+            subject: vars.subject_line || '',
+            sizeKb: (Buffer.byteLength(html, 'utf8') / 1024).toFixed(1),
+          },
+        });
+      }
+    }
+  }
+
+  return previews;
 }

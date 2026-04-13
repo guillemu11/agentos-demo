@@ -1,0 +1,1214 @@
+<!-- ====== REFERENCE BLOCK: swgjsntfurs ====== -->
+%%=ContentBlockbyID("44158")=%%
+
+<!-- ====== BLOCK: 1hos4mfayk5 (type: htmlblock) ====== -->
+<table cellpadding="0" cellspacing="0" width="100%" role="presentation" style="min-width: 100%; " class="stylingblock-content-wrapper"><tr><td class="stylingblock-content-wrapper camarker-inner">%%[
+SET @VAWP_person_DE = 'Churn_Audience_VAWP_v2'
+
+IF _messagecontext == 'VAWP' THEN
+
+    SET @VAWP_Lookup = LookupOrderedRows(@VAWP_person_DE, 1, 'Inserted_CST_DT DESC', 'customer_natural_key', _subscriberKey)
+
+    IF RowCount(@VAWP_Lookup) > 0 THEN
+        SET @VAWP_Row = Row(@VAWP_Lookup, 1)
+  
+        SET @customer_natural_key = Field(@VAWP_Row, 'customer_natural_key')
+        SET @segment = Field(@VAWP_Row, 'segment') 
+        SET @marketing_id = Field(@VAWP_Row, 'marketing_id') 
+        SET @title = Field(@VAWP_Row, 'title')
+        SET @first_name = Trim(ProperCase(Field(@VAWP_Row, 'first_name'))) 
+        SET @last_name = Field(@VAWP_Row, 'last_name')
+        SET @language = Field(@VAWP_Row, 'language')
+        SET @country = Field(@VAWP_Row, 'residence_country')
+        SET @membership_number = Field(@VAWP_Row, 'membership_number')
+        SET @tier = Field(@VAWP_Row, 'tier')
+        SET @miles_balance = Field(@VAWP_Row, 'miles_balance')
+        SET @ebase_subscriber_flag = Field(@VAWP_Row, 'ebase_subscriber_flag')
+        SET @economy_class_recency_bucket = Field(@VAWP_Row, 'economy_class_recency_bucket')
+        SET @business_class_recency_bucket = Field(@VAWP_Row, 'business_class_recency_bucket')
+        SET @first_class_recency_bucket = Field(@VAWP_Row, 'first_class_recency_bucket')
+        SET @email = Field(@VAWP_Row, 'email')
+        SET @skywards_email_marketable = Field(@VAWP_Row, 'skywards_email_marketable')
+        SET @person_id = Field(@VAWP_Row, 'person_id')
+        SET @flight_active_0_12 = Field(@VAWP_Row, 'flight_active_0_12')
+        SET @flight_active_13_24 = Field(@VAWP_Row, 'flight_active_13_24')
+        SET @flight_active_25_36 = Field(@VAWP_Row, 'flight_active_25_36')
+        SET @never_flown_flag = Field(@VAWP_Row, 'never_flown_flag')
+        SET @drv_home_airport = Field(@VAWP_Row, 'drv_home_airport')
+        SET @prf_departure_airport = Field(@VAWP_Row, 'prf_departure_airport')
+        SET @add_cty_code = Field(@VAWP_Row, 'add_cty_code')
+        SET @add_post_code = Field(@VAWP_Row, 'add_post_code') 
+        SET @emcg_uuid = Field(@VAWP_Row, 'emcg_uuid')
+        SET @control_group = Field(@VAWP_Row, 'control_group')
+    ENDIF
+
+ELSE
+    SET @customer_natural_key = AttributeValue("customer_natural_key")
+    SET @segment = AttributeValue("segment")
+    SET @marketing_id = AttributeValue("marketing_id")
+    SET @title = AttributeValue("title")
+    SET @first_name = Trim(ProperCase(AttributeValue("first_name")))
+    SET @last_name = AttributeValue("last_name")
+    SET @language = AttributeValue("language")
+    SET @country = AttributeValue("residence_country")
+    SET @membership_number = AttributeValue("membership_number")
+    SET @tier = AttributeValue("tier")
+    SET @miles_balance = AttributeValue("miles_balance")
+    SET @ebase_subscriber_flag = AttributeValue("ebase_subscriber_flag")
+    SET @economy_class_recency_bucket = AttributeValue("economy_class_recency_bucket")
+    SET @business_class_recency_bucket = AttributeValue("business_class_recency_bucket")
+    SET @first_class_recency_bucket = AttributeValue("first_class_recency_bucket")
+    SET @email = AttributeValue("email")
+    SET @skywards_email_marketable = AttributeValue("skywards_email_marketable")
+    SET @person_id = AttributeValue("person_id")
+    SET @flight_active_0_12 = AttributeValue("flight_active_0_12")
+    SET @flight_active_13_24 = AttributeValue("flight_active_13_24")
+    SET @flight_active_25_36 = AttributeValue("flight_active_25_36")
+    SET @never_flown_flag = AttributeValue("never_flown_flag")
+    SET @drv_home_airport = AttributeValue("drv_home_airport")
+    SET @prf_departure_airport = AttributeValue("prf_departure_airport")
+    SET @add_cty_code = AttributeValue("add_cty_code")
+    SET @add_post_code = AttributeValue("add_post_code")
+    SET @emcg_uuid = AttributeValue("emcg_uuid")
+    SET @control_group = AttributeValue("control_group")
+ENDIF
+
+
+IF NOT EMPTY( @language ) THEN
+    SET @lm_code = Lookup( 'ENT.REF_Language_cross_reference', 'Content_code', 'per_language', @language )
+    SET @lm_folder = Lookup( 'ENT.REF_Language_cross_reference', 'Content_folder', 'per_language', @language )
+    SET @Lang_ID_code = Lookup( 'ENT.REF_Language_cross_reference', 'Lang_ID_code', 'per_language', @language )
+ENDIF
+IF @country == 'GB' THEN
+ SET @country = 'uk'
+ SET @MARKETCODE = 'uk'
+ SET @url_market_code = 'uk'
+ SET @url_market_language = 'uk'
+ELSEIF @country == 'SK' THEN
+ SET @country = 'at'
+ SET @MARKETCODE = 'at'
+ SET @url_market_code = 'at'
+ SET @url_market_language = 'at'
+ELSEIF @country == 'ND' THEN
+ SET @country = ''
+ SET @MARKETCODE = ''
+ SET @url_market_code = ''
+ SET @url_market_language = ''
+ELSE
+ SET @country = Lowercase( @country )
+ SET @MARKETCODE = Lowercase( @country )
+ SET @url_market_code = Lowercase( @country )
+ SET @url_market_language = Lowercase( @country )
+ENDIF
+IF @language == 'PORTUGUESE BR' THEN
+    SET @link_language = 'portuguese'
+    SET @language = Lowercase( @language )
+ELSEIF @language == 'SIMPLIFIED CHINESE' THEN
+    SET @link_language = 'chinese'
+    SET @language = Lowercase( @language )
+ELSEIF @language == 'TRADITIONAL CHINESE' THEN
+    SET @link_language = 'chinese'
+    SET @language = Lowercase( @language )
+ELSEIF @language == 'TAIWANESE' THEN
+    SET @link_language = 'chinese'
+    SET @language = Lowercase( @language )
+ELSEIF @language == 'ENGLISH US' THEN
+    SET @link_language = 'english'
+    SET @language = 'ENGLISH'
+ELSEIF @language == 'BELGIUM DUTCH' THEN
+    SET @link_language = 'dutch'
+    SET @language = 'DUTCH'
+ELSEIF @language == 'BELGIUM FRENCH' THEN
+    SET @link_language = 'french'
+    SET @language = 'FRENCH'
+ELSEIF @language == 'BAHASA' THEN
+    SET @link_language = 'indonesian'
+    SET @language = Lowercase( @language )
+ELSE
+    SET @link_language =  Lowercase( @language )
+    SET @language = Lowercase( @language )
+ENDIF 
+
+ IF Trim( @tier ) == 'IO' THEN
+     SET @TierName = 'Invitation Only'
+     SET @miles_tracker_tier = 'miles_tracker_blue'
+    ELSEIF Trim( @tier ) == 'Platinum' THEN
+     SET @TierName = 'Platinum'
+     SET @miles_tracker_tier = 'miles_tracker_platinum'
+    ELSEIF Trim( @tier ) == 'Gold' THEN
+     SET @TierName = 'Gold'
+     SET @miles_tracker_tier = 'miles_tracker_gold'
+    ELSEIF Trim( @tier ) == 'Silver' THEN
+     SET @TierName = 'Silver'
+     SET @miles_tracker_tier = 'miles_tracker_silver'
+    ELSEIF Trim( @tier ) == 'Blue' THEN
+     SET @TierName = 'Blue'
+     SET @miles_tracker_tier = 'miles_tracker_blue'
+    ELSE
+     SET @TierName = ''
+    ENDIF
+
+
+SET @offline_market_check = LookupRows( 'REF_offline_markets', 'code', @country ) 
+IF EMPTY ( @country ) OR @country == 'ND' OR @country == 'GLOBAL' OR RowCount(@offline_market_check) > 0 THEN 
+SET @country_lang = 'english'
+ELSE
+SET @country_lang = concat ( @url_market_code, '/', @link_language )
+ENDIF
+
+
+SET @regEx1 = '(http|ftp|https)://([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:/~+#-]*[\w@?^=%&/~+#-])?'
+    SET @current_year = FormatDate( Now(), 'YYYY' )
+    SET @CurrentWeek = Lookup( 'FtFares_DynamicWeek', 'CurrentWeek', 'CurrentYear', @current_year )
+    SET @current_month = FormatDate( @Inserted_CST_DT, 'MM' )
+<!-- Centralized Header Build  -->
+SET @Header_Content = LookupRows( 'Header_CentralizedContent', 'language', Lowercase( @lm_code ) )
+IF RowCount(@Header_Content) > 0 THEN
+    SET @Header_Row = row( @Header_Content, 1 )
+    SET @vawp_text = Trim ( field(@Header_Row,'vawp_text') )
+    SET @vawp_alias = Trim ( field(@Header_Row,'vawp_alias') )
+    SET @header_logo_id = Trim ( field(@Header_Row,'header_logo') )
+    IF NOT EMPTY (@header_logo_id) THEN
+        SET @header_logo_tag = ContentImagebyID(@header_logo_id,@header_logo_id )
+        SET @header_logo = RegExMatch(@header_logo_tag, @regEx1,0, 'IgnoreCase', 'Multiline');
+    ENDIF
+    SET @header_logo_link = Trim ( field(@Header_Row,'header_logo_link') )
+         IF IndexOf(@header_logo_link, 'xx/xx') > 0 THEN
+             SET @header_logo_link = Replace(@header_logo_link,'xx/xx',@country_lang)
+         ENDIF
+    SET @header_logo_alias = Trim ( field(@Header_Row,'header_logo_alias') )
+    SET @header_login_logo_id = Trim ( field(@Header_Row,'header_login_logo') )
+     IF NOT EMPTY (@header_login_logo_id) THEN
+         SET @header_login_logo_tag = ContentImagebyID(@header_login_logo_id,@header_login_logo_id )
+         SET @header_login_logo = RegExMatch(@header_login_logo_tag, @regEx1,0, 'IgnoreCase', 'Multiline');
+     ENDIF
+    SET @header_login_link = Trim ( field(@Header_Row,'header_login_link') )
+         IF IndexOf(@header_login_link, 'xx/xx') > 0 THEN
+             SET @header_login_link = Replace(@header_login_link,'xx/xx',@country_lang)
+         ENDIF
+    SET @header_login_alias = Trim ( field(@Header_Row,'header_login_alias') )
+    SET @skw_miles_text = Trim ( field(@Header_Row,'skw_miles_text') )
+    SET @join_skw_link = Trim ( field(@Header_Row,'join_skw_link') )
+         IF IndexOf(@join_skw_link, 'xx/xx') > 0 THEN
+             SET @join_skw_link = Replace(@join_skw_link,'xx/xx',@country_lang)
+         ENDIF
+    SET @join_skw_alias = Trim ( field(@Header_Row,'join_skw_alias') )
+    SET @join_skw_text = Trim ( field(@Header_Row,'join_skw_text') )
+ ENDIF
+<!-- Body Build  -->
+SET @Email_Content = LookupRows('Churn_DynamicContent_shortlinks','language', Lowercase( @lm_code ), 'Segment', @Segment)
+IF RowCount(@Email_Content) > 0 THEN
+        SET @Singlerow_Email_Content = row( @Email_Content, 1 )
+        SET @subject_line = field(@Singlerow_Email_Content,'subject_line')
+            IF IndexOf(@subject_line, '{first_name}') > 0 THEN
+                SET @subject_line = Replace(@subject_line,'{first_name}',@first_name)
+            ENDIF
+        SET @main_subheader = field(@Singlerow_Email_Content,'main_subheader')
+        SET @main_header = field(@Singlerow_Email_Content,'main_header')
+        SET @Preheader = field(@Singlerow_Email_Content,'preheader')
+        SET @body_copy = field(@Singlerow_Email_Content,'body_copy')
+            IF IndexOf(@body_copy, '{first_name}') > 0 THEN
+                SET @body_copy = Replace(@body_copy,'{first_name}',@first_name)
+            ENDIF
+        SET @body_copy_salutation = Lookup( 'REF_Salutation_Language', 'salutation', 'language', Lowercase( @lm_code ) )
+        IF NOT EMPTY (@first_name) THEN
+            IF IndexOf(@body_copy_salutation, '{first_name}') > 0 THEN
+                SET @body_copy_salutation = Replace(@body_copy_salutation,'{first_name}',@first_name)
+                SET @body_copy = concat (@body_copy_salutation, @body_copy )
+            ELSE
+                SET @body_copy = concat (@body_copy_salutation, @body_copy )
+            ENDIF
+        ELSE
+            SET @body_first_letter = Substring(@body_copy, 1, 1)
+            SET @body_first_letter_upper = Propercase (@body_first_letter)
+            SET @body_lenght = Length( @body_copy )
+            SET @body_without_first_letter = Substring(@body_copy, 2, @body_lenght)
+            SET @body_copy = Concat (@body_first_letter_upper, @body_without_first_letter)
+        ENDIF
+        
+        SET @link_alias = field(@Singlerow_Email_Content,'body_link_alias')
+
+        SET @Story1 = field(@Singlerow_Email_Content,'Story1')
+        SET @Story2 = field(@Singlerow_Email_Content,'Story2')
+        SET @Story3 = field(@Singlerow_Email_Content,'Story3')
+        SET @Story4 = field(@Singlerow_Email_Content,'Story4')
+        SET @Story5 = field(@Singlerow_Email_Content,'Story5')
+        SET @Story6 = field(@Singlerow_Email_Content,'Story6')
+        SET @Cash_Miles = field(@Singlerow_Email_Content,'Cash_Miles')
+        SET @Destination_Generic = field(@Singlerow_Email_Content,'Destination_Generic')
+
+SET @Link1 = Field(@Singlerow_Email_Content,'Link1')
+SET @Link2 = Field(@Singlerow_Email_Content,'Link2')
+SET @Link3 = Field(@Singlerow_Email_Content,'Link3')
+SET @Link4 = Field(@Singlerow_Email_Content,'Link4')
+SET @link1_text = Field(@Singlerow_Email_Content,'Link1_text')
+SET @link2_text = Field(@Singlerow_Email_Content,'Link2_text')
+SET @link3_text = Field(@Singlerow_Email_Content,'Link3_text')
+SET @link4_text = Field(@Singlerow_Email_Content,'Link4_text')
+SET @AliasLink1 = Field(@Singlerow_Email_Content,'AliasLink1')
+SET @AliasLink2 = Field(@Singlerow_Email_Content,'AliasLink2')
+SET @AliasLink3 = Field(@Singlerow_Email_Content,'AliasLink3')
+SET @AliasLink4 = Field(@Singlerow_Email_Content,'AliasLink4')
+
+IF IndexOf(@Link1,'xx/xx')>0 THEN SET @Link1 = Replace(@Link1,'xx/xx',@country_lang) ENDIF
+IF IndexOf(@Link2,'xx/xx')>0 THEN SET @Link2 = Replace(@Link2,'xx/xx',@country_lang) ENDIF
+IF IndexOf(@Link3,'xx/xx')>0 THEN SET @Link3 = Replace(@Link3,'xx/xx',@country_lang) ENDIF
+IF IndexOf(@Link4,'xx/xx')>0 THEN SET @Link4 = Replace(@Link4,'xx/xx',@country_lang) ENDIF
+
+SET @pos1 = IndexOf(@body_copy, "Link1")
+SET @pos2 = IndexOf(@body_copy, "Link2")
+SET @pos3 = IndexOf(@body_copy, "Link3")
+SET @pos4 = IndexOf(@body_copy, "Link4")
+SET @link_len = 5
+
+SET @before_link1 = IIF(@pos1>0, Substring(@body_copy, 1, Subtract(@pos1,1)), @body_copy)
+
+SET @start_between1_2 = Add(@pos1,@link_len)
+SET @length_between1_2 = Subtract(@pos2,@start_between1_2)
+SET @between_link1_2 = IIF(@pos1>0 AND @pos2>@pos1, Substring(@body_copy,@start_between1_2,@length_between1_2), "")
+
+SET @start_between2_3 = Add(@pos2,@link_len)
+SET @length_between2_3 = Subtract(@pos3,@start_between2_3)
+SET @between_link2_3 = IIF(@pos2>0 AND @pos3>@pos2, Substring(@body_copy,@start_between2_3,@length_between2_3), "")
+
+SET @start_between3_4 = Add(@pos3,@link_len)
+SET @length_between3_4 = Subtract(@pos4,@start_between3_4)
+SET @between_link3_4 = IIF(@pos3>0 AND @pos4>@pos3, Substring(@body_copy,@start_between3_4,@length_between3_4), "")
+
+SET @last_pos = IIF(@pos4>0,@pos4, IIF(@pos3>0,@pos3, IIF(@pos2>0,@pos2, IIF(@pos1>0,@pos1,0))))
+SET @after_last_link = IIF(@last_pos>0, Substring(@body_copy, Add(@last_pos,@link_len), Length(@body_copy)), "")
+
+/* Normaliza solo para decidir el glue (no tocamos los tramos reales) */
+SET @s12 = Trim(Replace(@between_link1_2,'&nbsp;',' '))
+SET @s23 = Trim(Replace(@between_link2_3,'&nbsp;',' '))
+SET @s34 = Trim(Replace(@between_link3_4,'&nbsp;',' '))
+SET @s4e = Trim(Replace(@after_last_link,'&nbsp;',' '))
+
+SET @c12 = IIF(Length(@s12)>0, Substring(@s12,1,1), '')
+SET @c23 = IIF(Length(@s23)>0, Substring(@s23,1,1), '')
+SET @c34 = IIF(Length(@s34)>0, Substring(@s34,1,1), '')
+SET @c4e = IIF(Length(@s4e)>0, Substring(@s4e,1,1), '')
+
+/* Si el primer char NO es alfanumérico (o es < o está vacío) => sin espacio */
+SET @word = 'abcdefghijklmnopqrstuvwxyz0123456789'
+SET @glue12 = IIF(Empty(@c12) OR @c12=='<' OR IndexOf(@word, Lowercase(@c12))<=0, '', ' ')
+SET @glue23 = IIF(Empty(@c23) OR @c23=='<' OR IndexOf(@word, Lowercase(@c23))<=0, '', ' ')
+SET @glue34 = IIF(Empty(@c34) OR @c34=='<' OR IndexOf(@word, Lowercase(@c34))<=0, '', ' ')
+SET @glue4e = IIF(Empty(@c4e) OR @c4e=='<' OR IndexOf(@word, Lowercase(@c4e))<=0, '', ' ')
+
+
+
+
+
+
+        SET @body_link = field(@Singlerow_Email_Content,'body_link')
+            IF IndexOf(@body_link, 'xx/xx') > 0 THEN
+                SET @body_link = Replace(@body_link,'xx/xx',@country_lang)
+            ENDIF
+            SET @url1 = ''
+            SET @url1 = @body_link
+            SET @loop = 1
+]%%
+%%=ContentBlockByID("32798")=%%
+%%[SET @link = @url1
+        SET @cta = field(@Singlerow_Email_Content,'body_cta')
+        SET @section_title1 = field(@Singlerow_Email_Content,'section_title1')
+        SET @section_title2 = field(@Singlerow_Email_Content,'section_title2')
+ENDIF
+
+
+
+<!-- triple Story -->
+IF EMPTY (@Story1) == False AND EMPTY (@Story2) == False AND EMPTY (@Story3) == False THEN
+SET @story1content = LookupRows('Stories_Ref_Table_shortlink','language', Lowercase( @lm_code ), 'story_name', @Story1)
+IF RowCount(@story1content) > 0 THEN
+        SET @story1content_row = row( @story1content, 1 )
+        SET @story1_image_id = field(@story1content_row,'story_image_circle')
+            IF NOT EMPTY ( @story1_image_id ) THEN
+            SET @story1_image_tag = ContentImagebyID(@story1_image_id,@story1_image_id)
+            SET @story1_image = RegExMatch(@story1_image_tag, @regEx1,0, 'IgnoreCase', 'Multiline');
+            ENDIF
+        SET @story1_header = field(@story1content_row,'story_header')
+        SET @story1_body = field(@story1content_row,'story_body')
+            IF IndexOf(@story1_body, 'xx/xx') > 0 THEN
+                SET @story1_body = Replace(@story1_body,'xx/xx',@country_lang)
+            ENDIF
+        SET @story1_alias = field(@story1content_row,'story_alias')
+        SET @story1_link = field(@story1content_row,'story_url')
+            IF IndexOf(@story1_link, 'xx/xx') > 0 THEN
+                SET @story1_link = Replace(@story1_link,'xx/xx',@country_lang)
+            ENDIF
+ENDIF
+SET @story2content = LookupRows('Stories_Ref_Table_shortlink','language', Lowercase( @lm_code ), 'story_name', @Story2)
+IF RowCount(@story2content) > 0 THEN
+        SET @story2content_row = row( @story2content, 1 )
+        SET @story2_image_id = field(@story2content_row,'story_image_circle')
+            IF NOT EMPTY ( @story2_image_id ) THEN
+            SET @story2_image_tag = ContentImagebyID(@story2_image_id,@story2_image_id)
+            SET @story2_image = RegExMatch(@story2_image_tag, @regEx1,0, 'IgnoreCase', 'Multiline');
+            ENDIF
+        SET @story2_header = field(@story2content_row,'story_header')
+        SET @story2_body = field(@story2content_row,'story_body')
+            IF IndexOf(@story2_body, 'xx/xx') > 0 THEN
+                SET @story2_body = Replace(@story2_body,'xx/xx',@country_lang)
+            ENDIF
+        SET @story2_alias = field(@story2content_row,'story_alias')
+        SET @story2_link = field(@story2content_row,'story_url')
+            IF IndexOf(@story2_link, 'xx/xx') > 0 THEN
+                SET @story2_link = Replace(@story2_link,'xx/xx',@country_lang)
+            ENDIF
+ENDIF
+SET @story3content = LookupRows('Stories_Ref_Table_shortlink','language', Lowercase( @lm_code ), 'story_name', @Story3)
+IF RowCount(@story3content) > 0 THEN
+        SET @story3content_row = row( @story3content, 1 )
+        SET @story3_image_id = field(@story3content_row,'story_image_circle')
+            IF NOT EMPTY ( @story3_image_id ) THEN
+            SET @story3_image_tag = ContentImagebyID(@story3_image_id,@story3_image_id)
+            SET @story3_image = RegExMatch(@story3_image_tag, @regEx1,0, 'IgnoreCase', 'Multiline');
+            ENDIF
+        SET @story3_header = field(@story3content_row,'story_header')
+        SET @story3_body = field(@story3content_row,'story_body')
+            IF IndexOf(@story3_body, 'xx/xx') > 0 THEN
+                SET @story3_body = Replace(@story3_body,'xx/xx',@country_lang)
+            ENDIF
+        SET @story3_alias = field(@story3content_row,'story_alias')
+        SET @story3_link = field(@story3content_row,'story_url')
+            IF IndexOf(@story3_link, 'xx/xx') > 0 THEN
+                SET @story3_link = Replace(@story3_link,'xx/xx',@country_lang)
+            ENDIF
+ENDIF
+ENDIF
+
+<!-- triple Story 2-->
+IF EMPTY (@Story4) == False AND EMPTY (@Story5) == False AND EMPTY (@Story6) == False THEN
+SET @story11content = LookupRows('Stories_Ref_Table_shortlink','language', Lowercase( @lm_code ), 'story_name', @Story4)
+IF RowCount(@story11content) > 0 THEN
+        SET @story11content_row = row( @story11content, 1 )
+        SET @story11_image_id = field(@story11content_row,'story_image_circle')
+            IF NOT EMPTY ( @story11_image_id ) THEN
+            SET @story11_image_tag = ContentImagebyID(@story11_image_id,@story11_image_id)
+            SET @story11_image = RegExMatch(@story11_image_tag, @regEx1,0, 'IgnoreCase', 'Multiline');
+            ENDIF
+        SET @story11_header = field(@story11content_row,'story_header')
+        SET @story11_body = field(@story11content_row,'story_body')
+            IF IndexOf(@story11_body, 'xx/xx') > 0 THEN
+                SET @story11_body = Replace(@story11_body,'xx/xx',@country_lang)
+            ENDIF
+        SET @story11_alias = field(@story11content_row,'story_alias')
+        SET @story11_link = field(@story11content_row,'story_url')
+            IF IndexOf(@story11_link, 'xx/xx') > 0 THEN
+                SET @story11_link = Replace(@story11_link,'xx/xx',@country_lang)
+            ENDIF
+ENDIF
+SET @story22content = LookupRows('Stories_Ref_Table_shortlink','language', Lowercase( @lm_code ), 'story_name', @Story5)
+IF RowCount(@story22content) > 0 THEN
+        SET @story22content_row = row( @story22content, 1 )
+        SET @story22_image_id = field(@story22content_row,'story_image_circle')
+            IF NOT EMPTY ( @story22_image_id ) THEN
+            SET @story22_image_tag = ContentImagebyID(@story22_image_id,@story22_image_id)
+            SET @story22_image = RegExMatch(@story22_image_tag, @regEx1,0, 'IgnoreCase', 'Multiline');
+            ENDIF
+        SET @story22_header = field(@story22content_row,'story_header')
+        SET @story22_body = field(@story22content_row,'story_body')
+            IF IndexOf(@story22_body, 'xx/xx') > 0 THEN
+                SET @story22_body = Replace(@story22_body,'xx/xx',@country_lang)
+            ENDIF
+        SET @story22_alias = field(@story22content_row,'story_alias')
+        SET @story22_link = field(@story22content_row,'story_url')
+            IF IndexOf(@story22_link, 'xx/xx') > 0 THEN
+                SET @story22_link = Replace(@story22_link,'xx/xx',@country_lang)
+            ENDIF
+ENDIF
+SET @story33content = LookupRows('Stories_Ref_Table_shortlink','language', Lowercase( @lm_code ), 'story_name', @Story6)
+IF RowCount(@story33content) > 0 THEN
+        SET @story33content_row = row( @story33content, 1 )
+        SET @story33_image_id = field(@story33content_row,'story_image_circle')
+            IF NOT EMPTY ( @story33_image_id ) THEN
+            SET @story33_image_tag = ContentImagebyID(@story33_image_id,@story33_image_id)
+            SET @story33_image = RegExMatch(@story33_image_tag, @regEx1,0, 'IgnoreCase', 'Multiline');
+            ENDIF
+        SET @story33_header = field(@story33content_row,'story_header')
+        SET @story33_body = field(@story33content_row,'story_body')
+            IF IndexOf(@story33_body, 'xx/xx') > 0 THEN
+                SET @story33_body = Replace(@story33_body,'xx/xx',@country_lang)
+            ENDIF
+        SET @story33_alias = field(@story33content_row,'story_alias')
+        SET @story33_link = field(@story33content_row,'story_url')
+            IF IndexOf(@story33_link, 'xx/xx') > 0 THEN
+                SET @story33_link = Replace(@story33_link,'xx/xx',@country_lang)
+            ENDIF
+ENDIF
+ENDIF
+
+
+
+<!-- cash plus miles Story -->
+SET @cashmilesArea_content = LookupRows('Stories_Ref_Table_shortlink','language', Lowercase( @lm_code ), 'story_name', @Cash_Miles)
+
+IF RowCount(@cashmilesArea_content) > 0 THEN
+    SET @cashArea_SingleRow = row( @cashmilesArea_content, 1 )
+    SET @cash_area_sub_image_id = field(@cashArea_SingleRow,'story_image_circle')
+        IF NOT EMPTY (@cash_area_sub_image_id) THEN
+            SET @cash_area_sub_image_tag = ContentImagebyID(@cash_area_sub_image_id,@cash_area_sub_image_id )
+            SET @cash_story_single_image = RegExMatch(@cash_area_sub_image_tag, @regEx1,0, 'IgnoreCase', 'Multiline');
+        ENDIF
+    SET @cash_story_single_subheader = field(@cashArea_SingleRow,'story_subheader')
+    SET @cash_story_single_header = field(@cashArea_SingleRow,'story_header')
+    SET @cash_story_single_body = field(@cashArea_SingleRow,'story_body')
+    SET @cash_story_single_link_alias = field(@cashArea_SingleRow,'story_alias')
+    SET @cash_story_single_cta = field(@cashArea_SingleRow,'story_cta')
+    SET @cash_story_single_link = field(@cashArea_SingleRow,'story_url')
+        IF IndexOf(@cash_story_single_link, 'xx/xx') > 0 THEN
+            SET @cash_story_single_link = Replace(@cash_story_single_link,'xx/xx',@country_lang)
+        ENDIF
+ENDIF
+
+<!-- Story Right Inspiration Destinations -->
+SET @story6content = LookupRows('Stories_Ref_Table_shortlink','language', Lowercase( @lm_code ), 'story_name', @Destination_Generic)
+IF RowCount(@story6content) > 0 THEN
+    SET @story6content_row = row( @story6content, 1 )
+    SET @story6_image_id = field(@story6content_row,'story_image')
+        IF NOT EMPTY ( @story6_image_id ) THEN
+        SET @story6_image_tag = ContentImagebyID(@story6_image_id,@story6_image_id)
+        SET @story_story_single_image = RegExMatch(@story6_image_tag, @regEx1, 0, 'IgnoreCase', 'Multiline');
+        ENDIF
+    SET @story_story_single_header = field(@story6content_row,'story_header')
+    SET @story_story_single_subheader = field(@story6content_row,'story_subheader')
+    SET @story_story_single_alias = field(@story6content_row,'story_alias')
+    SET @story_story_single_body = field(@story6content_row,'story_body')
+    SET @story_story_single_cta = field(@story6content_row,'story_cta')
+    SET @story_story_single_link = field(@story6content_row,'story_url')
+        IF IndexOf(@story_story_single_link, 'xx/xx') > 0 THEN
+            SET @story_story_single_link = Replace(@story_story_single_link,'xx/xx',@country_lang)
+        ENDIF
+ENDIF
+
+<!-- Caveat 6  -->
+
+        SET @caveat_terms6_content = LookupRows( 'REF_Caveat_Disclaimer_shortlink', 'language', Lowercase( @lm_code ) )
+            IF RowCount(@caveat_terms6_content) > 0 THEN
+
+                SET @caveat_terms6_Row = row( @caveat_terms6_content, 1 )
+                SET @caveat_terms6 = field(@caveat_terms6_Row,'caveat_terms6')
+                    IF IndexOf(@caveat_terms6, 'xx/xx') > 0 THEN
+                    SET @caveat_terms6 = Replace(@caveat_terms6,'xx/xx',@country_lang)
+                    ENDIF
+            ENDIF
+            
+<!-- Centralized Footer Build  -->
+    SET @Footer_Content = LookupRows( 'Footer_CentralizedContent', 'language', @lm_code )
+    IF RowCount(@Footer_Content) > 0 THEN
+        SET @Footer_Row = row( @Footer_Content, 1 )
+        SET @logo_image_id = field(@Footer_Row,'logo_image')
+            IF NOT EMPTY (@logo_image_id) THEN
+                SET @logo_image_tag = ContentImagebyID(@logo_image_id,@logo_image_id )
+                SET @logo_image = RegExMatch(@logo_image_tag, @regEx1,0, 'IgnoreCase', 'Multiline');
+            ENDIF
+        SET @logo_link = field(@Footer_Row,'logo_link')
+            IF IndexOf(@logo_link, 'xx/xx') > 0 THEN
+                SET @logo_link = Replace(@logo_link,'xx/xx',@country_lang)
+            ENDIF
+        SET @logo_link_alias = field(@Footer_Row,'logo_link_alias')
+        SET @unsub_text = field(@Footer_Row,'unsub_text')
+        SET @unsub_link = field(@Footer_Row,'unsub_link')
+            IF IndexOf(@unsub_link, '/xx/xx/') > 0 THEN
+                SET @unsub_link = Replace(@unsub_link,'xx/xx',@country_lang)
+            ENDIF
+            IF IndexOf(@unsub_link, '{email}') > 0 THEN
+                SET @unsub_link = Replace(@unsub_link,'{email}',@per_email_address)
+            ENDIF
+            /*Encrypt the unsub link  */
+            SET @url1 = ''
+            /*Set all URL to URL1 to URL10 for Encryption*/
+            SET @url1 = @unsub_link
+            SET @loop = 1]%%
+%%=ContentBlockByID("38235")=%%
+%%[/*Set all URLs back to Original  after Encryption*/
+            SET @unsub_link = @url1
+        SET @unsub_link_alias = field(@Footer_Row,'unsub_link_alias')
+        SET @contactus_text = field(@Footer_Row,'contactus_text')
+        SET @contactus_link = field(@Footer_Row,'contactus_link')
+            IF IndexOf(@contactus_link, 'xx/xx') > 0 THEN
+                SET @contactus_link = Replace(@contactus_link,'xx/xx',@country_lang)
+            ENDIF
+        SET @contactus_link_alias = field(@Footer_Row,'contactus_link_alias')
+        SET @privacy_text = field(@Footer_Row,'privacy_text')
+        SET @privacy_link = field(@Footer_Row,'privacy_link')
+            IF IndexOf(@privacy_link, 'xx/xx') > 0 THEN
+                SET @privacy_link = Replace(@privacy_link,'xx/xx',@country_lang)
+            ENDIF
+        SET @privacy_link_alias = field(@Footer_Row,'privacy_link_alias')
+        SET @copywrite = field(@Footer_Row,'copywrite')
+            IF IndexOf(@copywrite, '{current_year}') > 0 THEN
+                SET @copywrite = Replace(@copywrite,'{current_year}',@current_year)
+            ENDIF
+    ENDIF
+]%%
+
+%%[
+
+    SET @Centralized_Header_id = Lookup( 'REF_centralized_blocks', 'id', 'block_id', '42706' )
+    
+    SET @Centralized_Header_Content = LookupRows( 'REF_centralized_products', 'story_alias', @header_logo_alias )
+    
+        SET @Centralized_Header_story_alias_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @header_logo_alias ) 
+            IF RowCount(@Centralized_Header_Content) > 0 THEN
+                SET @Centralized_Header_row = row( @Centralized_Header_Content, 1 )
+                
+                SET @Centralized_Header_category_name = field(@Centralized_Header_row,'category_name')
+                SET @Centralized_Header_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @Centralized_Header_category_name ) 
+
+                SET @Centralized_Header_product_name = field(@Centralized_Header_row,'product_name')
+                SET @Centralized_Header_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @Centralized_Header_product_name ) 
+                
+                SET @Centralized_Header_story_name = field(@Centralized_Header_row,'story_name')
+                SET @Centralized_Header_story_name_id = Lookup( 'REF_Impression_region_storyname_ids', 'id', 'story_name', @Centralized_Header_story_name ) 
+            ENDIF
+
+    SET @Centralized_Header_region = Concat ( @Centralized_Header_id, '|', @Centralized_Header_category_name_id, '|', @Centralized_Header_product_name_id, '|', @Centralized_Header_story_name_id, '|', @Centralized_Header_story_alias_id)
+
+
+    SET @Header_Title_V3_id = Lookup( 'REF_centralized_blocks', 'id', 'block_id', '37241' )
+
+    SET @main_header_alias = 'emiratesexperience'
+    
+    SET @Header_Title_V3_Content = LookupRows( 'REF_centralized_products', 'story_alias', @main_header_alias )
+    
+        SET @Header_Title_V3_alias_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @main_header_alias ) 
+            IF RowCount(@Header_Title_V3_Content) > 0 THEN
+                SET @Header_Title_V3_row = row( @Header_Title_V3_Content, 1 )
+                
+                SET @Header_Title_V3_category_name = field(@Header_Title_V3_row,'category_name')
+                SET @Header_Title_V3_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @Header_Title_V3_category_name ) 
+
+                SET @Header_Title_V3_product_name = field(@Header_Title_V3_row,'product_name')
+                SET @Header_Title_V3_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @Header_Title_V3_product_name ) 
+                
+                SET @Header_Title_V3_story_name = field(@Header_Title_V3_row,'story_name')
+                SET @Header_Title_V3_story_name_id = Lookup( 'REF_Impression_region_storyname_ids', 'id', 'story_name', @Header_Title_V3_story_name ) 
+            ENDIF
+
+    SET @Header_Title_V3_region = Concat ( @Header_Title_V3_id, '|', @Header_Title_V3_category_name_id, '|', @Header_Title_V3_product_name_id, '|', @Header_Title_V3_story_name_id, '|', @Header_Title_V3_alias_id)
+
+
+    SET @body_block_name = Lookup( 'REF_centralized_blocks', 'id', 'block_id', '44975' )
+
+    SET @link_aliases_string = ""
+    SET @body_alias_id_string = ""
+    SET @body_story_name_id_string = ""
+    SET @body_category_name_id = ""
+SET @body_product_name_id = ""
+
+    /* --- Process AliasLink1 --- */
+
+    IF NOT EMPTY(@AliasLink1) THEN
+        SET @link_aliases_string = Concat(@link_aliases_string, @AliasLink1)
+        SET @alias1_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @AliasLink1 )
+
+        /* Alias ID Lookup */
+        IF NOT EMPTY(@alias1_id) THEN
+            SET @body_alias_id_string = Concat(@body_alias_id_string, @alias1_id)
+        ENDIF
+
+        /* Story Name ID Lookup for Alias 1 */
+        SET @story1_row = LookupRows('REF_centralized_products', 'story_alias', @AliasLink1)
+        IF RowCount(@story1_row) > 0 THEN
+            SET @story1_name = Field(Row(@story1_row, 1), 'story_name')
+            SET @story1_name_id = Lookup('REF_Impression_region_storyname_ids', 'id', 'story_name', @story1_name)
+            IF NOT EMPTY(@story1_name_id) THEN
+                SET @body_story_name_id_string = Concat(@body_story_name_id_string, @story1_name_id)
+            ENDIF
+        ENDIF
+    ENDIF
+
+    /* --- Process AliasLink2 --- */
+
+    IF NOT EMPTY(@AliasLink2) THEN
+    /* Concatenate Aliases */
+        IF NOT EMPTY(@link_aliases_string) THEN
+            SET @link_aliases_string = Concat(@link_aliases_string, ',', @AliasLink2)
+        ELSE
+            SET @link_aliases_string = @AliasLink2
+        ENDIF
+
+        /* Alias ID Lookup */
+        SET @alias2_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @AliasLink2 )
+        IF NOT EMPTY(@alias2_id) THEN
+            IF NOT EMPTY(@body_alias_id_string) THEN
+                SET @body_alias_id_string = Concat(@body_alias_id_string, ',', @alias2_id)
+            ELSE
+                SET @body_alias_id_string = @alias2_id
+            ENDIF
+        ENDIF
+
+        /* Story Name ID Lookup for Alias 2 */
+        SET @story2_row = LookupRows('REF_centralized_products', 'story_alias', @AliasLink2)
+        IF RowCount(@story2_row) > 0 THEN
+            SET @story2_name = Field(Row(@story2_row, 1), 'story_name')
+            SET @story2_name_id = Lookup('REF_Impression_region_storyname_ids', 'id', 'story_name', @story2_name)
+            IF NOT EMPTY(@story2_name_id) THEN
+                IF NOT EMPTY(@body_story_name_id_string) THEN
+                    SET @body_story_name_id_string = Concat(@body_story_name_id_string, ',', @story2_name_id)
+                ELSE
+                    SET @body_story_name_id_string = @story2_name_id
+                ENDIF
+            ENDIF
+        ENDIF
+    ENDIF
+
+    /* --- Process AliasLink3 --- */
+
+    IF NOT EMPTY(@AliasLink3) THEN
+    /* Concatenate Aliases */
+        IF NOT EMPTY(@link_aliases_string) THEN
+            SET @link_aliases_string = Concat(@link_aliases_string, ',', @AliasLink3)
+        ELSE
+            SET @link_aliases_string = @AliasLink3
+        ENDIF
+
+        /* Alias ID Lookup */
+        SET @alias3_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @AliasLink3 )
+        IF NOT EMPTY(@alias3_id) THEN
+            IF NOT EMPTY(@body_alias_id_string) THEN
+                SET @body_alias_id_string = Concat(@body_alias_id_string, ',', @alias3_id)
+            ELSE
+                SET @body_alias_id_string = @alias3_id
+            ENDIF
+        ENDIF
+
+        /* Story Name ID Lookup for Alias 3 */
+        SET @story3_row = LookupRows('REF_centralized_products', 'story_alias', @AliasLink3)
+        IF RowCount(@story3_row) > 0 THEN
+            SET @story3_name = Field(Row(@story3_row, 1), 'story_name')
+            SET @story3_name_id = Lookup('REF_Impression_region_storyname_ids', 'id', 'story_name', @story3_name)
+            IF NOT EMPTY(@story3_name_id) THEN
+                IF NOT EMPTY(@body_story_name_id_string) THEN
+                    SET @body_story_name_id_string = Concat(@body_story_name_id_string, ',', @story3_name_id)
+                ELSE
+                    SET @body_story_name_id_string = @story3_name_id
+                ENDIF
+            ENDIF
+        ENDIF
+    ENDIF
+
+    /* --- Process AliasLink4 --- */
+
+    IF NOT EMPTY(@AliasLink4) THEN
+    /* Concatenate Aliases */
+        IF NOT EMPTY(@link_aliases_string) THEN
+            SET @link_aliases_string = Concat(@link_aliases_string, ',', @AliasLink4)
+        ELSE
+            SET @link_aliases_string = @AliasLink4
+        ENDIF
+
+        /* Alias ID Lookup */
+        SET @alias4_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @AliasLink4 )
+        IF NOT EMPTY(@alias4_id) THEN
+            IF NOT EMPTY(@body_alias_id_string) THEN
+            SET @body_alias_id_string = Concat(@body_alias_id_string, ',', @alias4_id)
+        ELSE
+            SET @body_alias_id_string = @alias4_id
+            ENDIF
+        ENDIF
+
+            /* Story Name ID Lookup for Alias 4 */
+        SET @story4_row = LookupRows('REF_centralized_products', 'story_alias', @AliasLink4)
+        IF RowCount(@story4_row) > 0 THEN
+            SET @story4_name = Field(Row(@story4_row, 1), 'story_name')
+            SET @story4_name_id = Lookup('REF_Impression_region_storyname_ids', 'id', 'story_name', @story4_name)
+            IF NOT EMPTY(@story4_name_id) THEN
+                IF NOT EMPTY(@body_story_name_id_string) THEN
+                    SET @body_story_name_id_string = Concat(@body_story_name_id_string, ',', @story4_name_id)
+                ELSE
+                    SET @body_story_name_id_string = @story4_name_id
+                ENDIF
+            ENDIF
+        ENDIF
+    ENDIF
+
+    /* Use the first available alias for a simple, single lookup of Category and Product details */
+    IF NOT EMPTY(@AliasLink1) THEN
+        SET @category_product_row = LookupRows('REF_centralized_products', 'story_alias', @AliasLink1)
+        
+        IF RowCount(@category_product_row) > 0 THEN
+            SET @first_product_row = Row(@category_product_row, 1)
+            
+            SET @body_category_name = Field(@first_product_row,'category_name')
+            SET @body_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @body_category_name ) 
+
+            SET @body_product_name = Field(@first_product_row,'product_name')
+            SET @body_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @body_product_name ) 
+        ENDIF
+
+    /* If AliasLink2 is empty, check AliasLink2 as a fallback, and so on (optional safety check) */
+    ELSEIF NOT EMPTY(@AliasLink2) THEN
+            SET @category_product_row = LookupRows('REF_centralized_products', 'story_alias', @AliasLink2)
+            
+            IF RowCount(@category_product_row) > 0 THEN
+                SET @first_product_row = Row(@category_product_row, 1)
+                
+                SET @body_category_name = Field(@first_product_row,'category_name')
+                SET @body_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @body_category_name ) 
+
+                SET @body_product_name = Field(@first_product_row,'product_name')
+                SET @body_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @body_product_name ) 
+            ENDIF
+    
+    /* If AliasLink3 is empty, check AliasLink2 as a fallback, and so on (optional safety check) */
+    ELSEIF NOT EMPTY(@AliasLink3) THEN
+            SET @category_product_row = LookupRows('REF_centralized_products', 'story_alias', @AliasLink3)
+            
+            IF RowCount(@category_product_row) > 0 THEN
+                SET @first_product_row = Row(@category_product_row, 1)
+                
+                SET @body_category_name = Field(@first_product_row,'category_name')
+                SET @body_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @body_category_name ) 
+
+                SET @body_product_name = Field(@first_product_row,'product_name')
+                SET @body_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @body_product_name ) 
+            ENDIF
+
+    /* If AliasLink4 is empty, check AliasLink2 as a fallback, and so on (optional safety check) */
+    ELSEIF NOT EMPTY(@AliasLink4) THEN
+            SET @category_product_row = LookupRows('REF_centralized_products', 'story_alias', @AliasLink4)
+            
+            IF RowCount(@category_product_row) > 0 THEN
+                SET @first_product_row = Row(@category_product_row, 1)
+                
+                SET @body_category_name = Field(@first_product_row,'category_name')
+                SET @body_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @body_category_name ) 
+
+                SET @body_product_name = Field(@first_product_row,'product_name')
+                SET @body_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @body_product_name ) 
+            ENDIF
+    ENDIF
+
+    SET @bodycopy_region = Concat ( @body_block_name, '|', @body_category_name_id, '|', @body_product_name_id, '|',  @body_story_name_id_string, '|', @body_alias_id_string)
+
+
+    SET @Single_Story_Left_id = Lookup( 'REF_centralized_blocks', 'id', 'block_id', '41760' )
+
+    SET @Destination_Generic_Content = LookupRows( 'REF_centralized_products', 'story_name', @Destination_Generic )
+    IF RowCount(@Destination_Generic_Content) > 0 THEN
+
+        SET @Destination_Generic_Row = row( @Destination_Generic_Content, 1 )
+
+        SET @Destination_Generic_name_id = Lookup( 'REF_Impression_region_storyname_ids', 'id', 'story_name', @Destination_Generic ) 
+        
+        SET @Destination_Generic_category_name = field(@Destination_Generic_Row,'category_name')
+        SET @Destination_Generic_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @Destination_Generic_category_name ) 
+        
+        SET @Destination_Generic_product_name = field(@Destination_Generic_Row,'product_name')
+        SET @Destination_Generic_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @Destination_Generic_product_name ) 
+
+        SET @Destination_Generic_alias = field(@Destination_Generic_Row,'story_alias')
+        SET @Destination_Generic_alias_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @Destination_Generic_alias ) 
+        
+    ENDIF
+
+    SET @Single_Story_Left_region = Concat ( @Single_Story_Left_id, '|', @Destination_Generic_category_name_id, '|', @Destination_Generic_product_name_id, '|',  @Destination_Generic_name_id, '|', @Destination_Generic_alias_id)
+
+
+    SET @red_cta_id = Lookup( 'REF_centralized_blocks', 'id', 'block_id', '42617' )
+
+    SET @link_alias_Content = LookupRows( 'REF_centralized_products', 'story_alias', @link_alias )
+    IF RowCount(@link_alias_Content) > 0 THEN
+
+        SET @link_alias_Row = row( @link_alias_Content, 1 )
+
+        SET @link_alias_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @link_alias ) 
+        
+        SET @link_alias_category_name = field(@link_alias_Row,'category_name')
+        SET @link_alias_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @link_alias_category_name ) 
+        
+        SET @link_alias_product_name = field(@link_alias_Row,'product_name')
+        SET @link_alias_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @link_alias_product_name ) 
+
+        SET @link_alias_name = field(@link_alias_Row,'story_name')
+        SET @link_alias_name_id = Lookup( 'REF_Impression_region_storyname_ids', 'id', 'story_name', @link_alias_name ) 
+        
+    ENDIF
+
+    SET @red_cta_region = Concat ( @red_cta_id, '|', @link_alias_category_name_id, '|', @link_alias_product_name_id, '|',  @link_alias_name_id, '|', @link_alias_id)
+
+    SET @Three_Col_Block_id = Lookup( 'REF_centralized_blocks', 'id', 'block_id', '34287' )
+
+    SET @story1_Content = LookupRows( 'REF_centralized_products', 'story_name', @Story1 )
+    IF RowCount(@story1_Content) > 0 THEN
+
+        SET @story1_Row = row( @story1_Content, 1 )
+
+        SET @story1_name_id = Lookup( 'REF_Impression_region_storyname_ids', 'id', 'story_name', @story1 ) 
+        
+        SET @story1_category_name = field(@story1_Row,'category_name')
+        SET @story1_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @story1_category_name ) 
+        
+        SET @story1_product_name = field(@story1_Row,'product_name')
+        SET @story1_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @story1_product_name ) 
+
+        SET @story1_alias = field(@story1_Row,'story_alias')
+        SET @story1_alias_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @story1_alias ) 
+        
+    ENDIF
+
+    SET @story2_Content = LookupRows( 'REF_centralized_products', 'story_name', @Story2 )
+    IF RowCount(@story2_Content) > 0 THEN
+
+        SET @story2_Row = row( @story2_Content, 1 )
+
+        SET @story2_name_id = Lookup( 'REF_Impression_region_storyname_ids', 'id', 'story_name', @story2 ) 
+        
+        SET @story2_category_name = field(@story2_Row,'category_name')
+        SET @story2_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @story2_category_name ) 
+        
+        SET @story2_product_name = field(@story2_Row,'product_name')
+        SET @story2_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @story2_product_name ) 
+
+        SET @story2_alias = field(@story2_Row,'story_alias')
+        SET @story2_alias_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @story2_alias ) 
+        
+    ENDIF
+
+    SET @story3_Content = LookupRows( 'REF_centralized_products', 'story_name', @Story3 )
+    IF RowCount(@story3_Content) > 0 THEN
+
+        SET @story3_Row = row( @story3_Content, 1 )
+
+        SET @story3_name_id = Lookup( 'REF_Impression_region_storyname_ids', 'id', 'story_name', @story3 ) 
+        
+        SET @story3_category_name = field(@story3_Row,'category_name')
+        SET @story3_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @story3_category_name ) 
+        
+        SET @story3_product_name = field(@story3_Row,'product_name')
+        SET @story3_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @story3_product_name ) 
+
+        SET @story3_alias = field(@story3_Row,'story_alias')
+        SET @story3_alias_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @story3_alias ) 
+        
+    ENDIF
+
+    SET @story1_region = Concat(@Three_Col_Block_id, '|', @story1_category_name_id, '|', @story1_product_name_id, '|', @story1_name_id, '|', @story1_alias_id)
+    SET @story2_region = Concat(@Three_Col_Block_id, '|', @story2_category_name_id, '|', @story2_product_name_id, '|', @story2_name_id, '|', @story2_alias_id)
+    SET @story3_region = Concat(@Three_Col_Block_id, '|', @story3_category_name_id, '|', @story3_product_name_id, '|', @story3_name_id, '|', @story3_alias_id)
+
+    SET @story4_Content = LookupRows( 'REF_centralized_products', 'story_name', @Story4 )
+    IF RowCount(@story4_Content) > 0 THEN
+
+        SET @story4_Row = row( @story4_Content, 1 )
+
+        SET @story4_name_id = Lookup( 'REF_Impression_region_storyname_ids', 'id', 'story_name', @story4 ) 
+        
+        SET @story4_category_name = field(@story4_Row,'category_name')
+        SET @story4_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @story4_category_name ) 
+        
+        SET @story4_product_name = field(@story4_Row,'product_name')
+        SET @story4_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @story4_product_name ) 
+
+        SET @story4_alias = field(@story4_Row,'story_alias')
+        SET @story4_alias_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @story4_alias ) 
+        
+    ENDIF
+
+    SET @story5_Content = LookupRows( 'REF_centralized_products', 'story_name', @Story5 )
+    IF RowCount(@story5_Content) > 0 THEN
+
+        SET @story5_Row = row( @story5_Content, 1 )
+
+        SET @story5_name_id = Lookup( 'REF_Impression_region_storyname_ids', 'id', 'story_name', @story5 ) 
+        
+        SET @story5_category_name = field(@story5_Row,'category_name')
+        SET @story5_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @story5_category_name ) 
+        
+        SET @story5_product_name = field(@story5_Row,'product_name')
+        SET @story5_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @story5_product_name ) 
+
+        SET @story5_alias = field(@story5_Row,'story_alias')
+        SET @story5_alias_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @story5_alias ) 
+        
+    ENDIF
+
+    SET @story6_Content = LookupRows( 'REF_centralized_products', 'story_name', @Story6 )
+    IF RowCount(@story6_Content) > 0 THEN
+
+        SET @story6_Row = row( @story6_Content, 1 )
+
+        SET @story6_name_id = Lookup( 'REF_Impression_region_storyname_ids', 'id', 'story_name', @story6 ) 
+        
+        SET @story6_category_name = field(@story6_Row,'category_name')
+        SET @story6_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @story6_category_name ) 
+        
+        SET @story6_product_name = field(@story6_Row,'product_name')
+        SET @story6_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @story6_product_name ) 
+
+        SET @story6_alias = field(@story6_Row,'story_alias')
+        SET @story6_alias_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @story6_alias ) 
+        
+    ENDIF
+
+    SET @story4_region = Concat(@Three_Col_Block_id, '|', @story4_category_name_id, '|', @story4_product_name_id, '|', @story4_name_id, '|', @story4_alias_id)
+    SET @story5_region = Concat(@Three_Col_Block_id, '|', @story5_category_name_id, '|', @story5_product_name_id, '|', @story5_name_id, '|', @story5_alias_id)
+    SET @story6_region = Concat(@Three_Col_Block_id, '|', @story6_category_name_id, '|', @story6_product_name_id, '|', @story6_name_id, '|', @story6_alias_id)
+
+    SET @cash_miles_block_id = Lookup( 'REF_centralized_blocks', 'id', 'block_id', '40816' )
+
+    SET @Cash_Miles_Content = LookupRows( 'REF_centralized_products', 'story_name', @Cash_Miles )
+    IF RowCount(@Cash_Miles_Content) > 0 THEN 
+
+        SET @Cash_Miles_Row = row( @Cash_Miles_Content, 1 )
+
+        SET @Cash_Miles_story_name_id = Lookup( 'REF_Impression_region_storyname_ids', 'id', 'story_name', @Cash_Miles )
+        
+        SET @Cash_Miles_category_name = field(@Cash_Miles_Row,'category_name')
+        SET @Cash_Miles_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @Cash_Miles_category_name ) 
+        
+        SET @Cash_Miles_product_name = field(@Cash_Miles_Row,'product_name')
+        SET @Cash_Miles_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @Cash_Miles_product_name ) 
+        
+        SET @cash_story_single_link_alias = field(@Cash_Miles_Row,'story_alias')
+        SET @cash_story_single_link_alias_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @cash_story_single_link_alias ) 
+    ENDIF
+
+    SET @cash_miles_block_region = Concat ( @cash_miles_block_id, '|', @Cash_Miles_category_name_id, '|', @Cash_Miles_product_name_id, '|',  @Cash_Miles_story_name_id, '|', @cash_story_single_link_alias_id)
+
+
+    SET @footer_block_name = Lookup( 'REF_centralized_blocks', 'id', 'block_id', '39445' )
+
+    SET @footer_Content = LookupRows( 'REF_centralized_products', 'story_alias', @logo_link_alias )
+    
+    SET @footer_alias_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @logo_link_alias ) 
+        IF RowCount(@footer_Content) > 0 THEN
+            SET @footer_row = row( @footer_Content, 1 )
+            
+            SET @footer_category_name = field(@footer_row,'category_name')
+            SET @footer_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @footer_category_name ) 
+
+            SET @footer_product_name = field(@footer_row,'product_name')
+            SET @footer_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @footer_product_name ) 
+            
+            SET @footer_story_name = field(@footer_row,'story_name')
+            SET @footer_story_name_id = Lookup( 'REF_Impression_region_storyname_ids', 'id', 'story_name', @footer_story_name ) 
+        ENDIF
+
+    SET @footer_logo_region = Concat ( @footer_block_name, '|', @footer_category_name_id, '|', @footer_product_name_id, '|', @footer_story_name_id, '|', @footer_alias_id)
+
+
+    SET @caveat_block_name = Lookup( 'REF_centralized_blocks', 'id', 'block_id', '35063' )
+
+    SET @caveat_terms_6 = 'caveatterms6'
+
+    SET @caveat_Content = LookupRows( 'REF_centralized_products', 'story_alias', @caveat_terms_6 )
+    
+        SET @caveat_alias_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @caveat_terms_6 ) 
+            IF RowCount(@caveat_Content) > 0 THEN
+                SET @caveat_row = row( @caveat_Content, 1 )
+                
+                SET @caveat_category_name = field(@caveat_row,'category_name')
+                SET @caveat_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @caveat_category_name ) 
+
+                SET @caveat_product_name = field(@caveat_row,'product_name')
+                SET @caveat_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @caveat_product_name ) 
+                
+                SET @caveat_story_name = field(@caveat_row,'story_name')
+                SET @caveat_story_name_id = Lookup( 'REF_Impression_region_storyname_ids', 'id', 'story_name', @caveat_story_name )  
+            ENDIF
+
+    SET @caveat_region = Concat ( @caveat_block_name, '|', @caveat_category_name_id, '|', @caveat_product_name_id, '|', @caveat_story_name_id, '|', @caveat_alias_id)
+
+
+    SET @odr_id = Lookup( 'REF_centralized_blocks', 'id', 'block_id', '36843' )
+
+        SET @odr = 'odr'
+
+        SET @odr_Content = LookupRows( 'REF_centralized_products', 'story_alias', @odr )
+        
+            SET @odr_alias_id = Lookup( 'REF_Impression_region_storyalias_ids', 'id', 'story_alias', @odr ) 
+                IF RowCount(@odr_Content) > 0 THEN
+                    SET @odr_row = row( @odr_Content, 1 )
+                    
+                    SET @odr_category_name = field(@odr_row,'category_name')
+                    SET @odr_category_name_id = Lookup( 'REF_Impression_region_category_ids', 'id', 'category_name', @odr_category_name ) 
+
+                    SET @odr_product_name = field(@odr_row,'product_name')
+                    SET @odr_product_name_id = Lookup( 'REF_Impression_region_product_ids', 'id', 'product_name', @odr_product_name ) 
+                    
+                    SET @odr_story_name = field(@odr_row,'story_name')
+                    SET @odr_story_name_id = Lookup( 'REF_Impression_region_storyname_ids', 'id', 'story_name', @odr_story_name ) 
+                ENDIF
+
+    SET @odr_region = Concat ( @odr_id, '|', @odr_category_name_id, '|', @odr_product_name_id, '|', @odr_story_name_id, '|', @odr_alias_id)
+
+
+]%%
+
+<div style="font-size:0px;line-height:1px;mso-line-height-rule:exactly;display:none;max-width:0px;max-height:0px;opacity:0;overflow:hidden;mso-hide:all;">
+%%=v(@Preheader)=%%
+</div>
+
+%%[ <!-- Centralized Header  --> ]%%
+%%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@Centralized_Header_region,"')=%","%"))=%%
+%%=ContentBlockbyID("42706")=%%
+%%=EndImpressionRegion()=%%
+
+%%[ <!-- Spacer  --> ]%%
+%%=ContentBlockbyID("37247")=%%
+
+%%[ <!-- Header title  --> ]%%
+%%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@Header_Title_V3_region,"')=%","%"))=%%
+%%=ContentBlockbyID("37241")=%%
+%%=EndImpressionRegion()=%%
+
+%%[ <!-- Body copy --> ]%%
+%%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@bodycopy_region,"')=%","%"))=%%
+%%=ContentBlockbyID("44975")=%%
+%%=EndImpressionRegion()=%%
+
+%%[ 
+IF @Segment == 'preventionindirect' or @Segment == 'preventiondirect' or @Segment == 'reactivationindirect' THEN
+    IF NOT EMPTY ( @story_story_single_image ) THEN 
+    <!-- inspiration Block  -->
+    SET @story_single_image = @story_story_single_image
+    SET @story_single_header = @story_story_single_header
+    SET @story_single_subheader = @story_story_single_subheader
+    SET @story_single_body = @story_story_single_body
+    SET @story_single_cta = @story_story_single_cta
+    SET @story_single_link = @story_story_single_link
+    SET @story_single_link_alias = @story_story_single_alias
+]%%
+%%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@Single_Story_Left_region,"')=%","%"))=%%
+%%=ContentBlockbyID("41760")=%%
+%%=EndImpressionRegion()=%%
+%%[ENDIF
+ENDIF
+]%%
+
+%%[ <!-- red CTA--> ]%%
+%%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@red_cta_region,"')=%","%"))=%%
+%%=ContentBlockbyID("42617")=%%
+%%=EndImpressionRegion()=%%
+%%[
+    IF NOT EMPTY ( @story1_image ) AND NOT EMPTY ( @story2_image ) AND NOT EMPTY ( @story3_image ) THEN ]%%
+%%[ <!-- Section Title Block no line  -->
+        IF NOT EMPTY (@section_title1) THEN
+        SET @section_title = @section_title1
+]%%
+%%=ContentBlockbyID("41659")=%%
+%%[ENDIF]%%
+
+%%[ <!-- 3 Columns Block  -->]%%
+%%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@story1_region,"')=%","%"))=%%
+%%[SET @story1_image = @story1_image
+SET @story1_header = @story1_header
+SET @story1_body = @story1_body
+SET @story1_link = @story1_link
+SET @story1_alias = @story1_alias]%%
+%%=EndImpressionRegion()=%%
+
+%%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@story2_region,"')=%","%"))=%%
+%%[SET @story2_image = @story2_image
+SET @story2_header = @story2_header
+SET @story2_body = @story2_body
+SET @story2_link = @story2_link
+SET @story2_alias = @story2_alias]%%
+%%=EndImpressionRegion()=%%
+
+%%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@story3_region,"')=%","%"))=%%
+%%[SET @story3_image = @story3_image
+SET @story3_header = @story3_header
+SET @story3_body = @story3_body
+SET @story3_link = @story3_link
+SET @story3_alias = @story3_alias
+]%%
+
+%%=ContentBlockbyID("34287")=%%
+%%=EndImpressionRegion()=%%
+%%[ENDIF]%%
+
+%%[
+IF @Segment == 'preventionindirect' or @Segment == 'preventiondirect' or @Segment == 'reactivationindirect' THEN
+    IF NOT EMPTY ( @cash_story_single_image ) THEN
+    <!-- cash plus miles Block  -->
+    SET @story_left_circle_image = @cash_story_single_image
+    SET @story_left_circle_header = @cash_story_single_header
+    SET @story_left_circle_body = @cash_story_single_body
+    SET @story_left_circle_cta = @cash_story_single_cta
+    SET @story_left_circle_link = @cash_story_single_link
+    SET @story_left_circle_alias = @cash_story_single_link_alias
+    
+]%%
+    %%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@cash_miles_block_region,"')=%","%"))=%%
+    %%=ContentBlockbyID("40816")=%%
+    %%=EndImpressionRegion()=%%
+%%[ENDIF
+ELSE 
+    IF NOT EMPTY ( @story_story_single_image ) THEN 
+    <!-- inspiration Block  -->
+    SET @story_single_image = @story_story_single_image
+    SET @story_single_header = @story_story_single_header
+    SET @story_single_subheader = @story_story_single_subheader
+    SET @story_single_body = @story_story_single_body
+    SET @story_single_cta = @story_story_single_cta
+    SET @story_single_link = @story_story_single_link
+    SET @story_single_link_alias = @story_story_single_alias
+]%%
+%%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@Single_Story_Left_region,"')=%","%"))=%%
+%%=ContentBlockbyID("41760")=%%
+%%=EndImpressionRegion()=%%
+
+%%[ENDIF]%%
+%%[ENDIF]%%
+
+%%[
+    IF NOT EMPTY ( @story11_image ) AND NOT EMPTY ( @story22_image ) AND NOT EMPTY ( @story33_image ) THEN ]%%
+
+    %%[ <!-- Section Title Block no line  -->
+        IF NOT EMPTY (@section_title1) THEN
+        SET @section_title = @section_title2
+    ]%%
+    %%=ContentBlockbyID("41659")=%%
+    %%[ENDIF]%%
+
+    %%[ <!-- 3 Columns Block  -->]%%
+    %%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@story4_region,"')=%","%"))=%%
+    %%[SET @story1_image = @story11_image
+    SET @story1_header = @story11_header
+    SET @story1_body = @story11_body
+    SET @story1_alias = @story11_alias
+    SET @story1_link = @story11_link]%%
+    %%=EndImpressionRegion()=%%
+
+    %%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@story5_region,"')=%","%"))=%%
+    %%[SET @story2_image = @story22_image
+    SET @story2_header = @story22_header
+    SET @story2_body = @story22_body
+    SET @story2_alias = @story22_alias
+    SET @story2_link = @story22_link]%%
+    %%=EndImpressionRegion()=%%
+
+    %%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@story6_region,"')=%","%"))=%%
+    %%[SET @story3_image = @story33_image
+    SET @story3_header = @story33_header
+    SET @story3_body = @story33_body
+    SET @story3_alias = @story33_alias
+    SET @story3_link = @story33_link]%%
+
+%%=ContentBlockbyID("34287")=%%
+%%=EndImpressionRegion()=%%
+%%[ENDIF]%%
+
+%%[ <!-- Centralized Footer  --> ]%%
+%%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@footer_logo_region,"')=%","%"))=%%
+%%=ContentBlockbyID("39445")=%%
+%%=EndImpressionRegion()=%%
+
+ %%[
+    IF NOT EMPTY (@caveat_terms6) THEN
+    SET @caveat_terms = @caveat_terms6 ]%%
+    %%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@caveat_region,"')=%","%"))=%%
+    %%=ContentBlockbyID("35063")=%%
+    %%=EndImpressionRegion()=%%
+%%[ENDIF]%%
+%%[<!-- ODR logic  --> ]%%
+    %%=TreatAsContent(concat("%","%=BeginImpressionRegion('",@odr_region,"')=%","%"))=%%
+    %%=ContentBlockbyID("36843")=%%
+    %%=EndImpressionRegion()=%%</td></tr></table>
+

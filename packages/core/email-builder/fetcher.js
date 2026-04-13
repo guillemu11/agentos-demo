@@ -169,11 +169,10 @@ export async function fetchCampaignData(manifest, mcClient, options = {}) {
     }
     onProgress('de', `  DE "${de.name}" → key: ${externalKey}`);
 
-    // Query with language filter if the DE uses language as lookup field
-    const hasLangField = de.lookupFields.includes('language');
-    const rows = hasLangField
-      ? await queryDEWithLangFallback(mcClient, externalKey, lang)
-      : await queryDE(mcClient, externalKey);
+    // Fetch all rows. Stories DEs can be very large (2000+ rows), so
+    // increase limit for DEs with 'stories' or 'story' in the name.
+    const isLargeDE = de.name.toLowerCase().includes('stories') || de.name.toLowerCase().includes('story');
+    const rows = await queryDE(mcClient, externalKey, null, isLargeDE ? 2500 : 500);
 
     deData[de.name] = rows;
     onProgress('de', `  DE "${de.name}": ${rows.length} rows`);
@@ -432,14 +431,33 @@ async function queryDE(mcClient, externalKey, filter = null, maxRows = 500) {
  * Emirates DEs use inconsistent language codes across different DEs.
  */
 async function queryDEWithLangFallback(mcClient, externalKey, lang) {
-  // Try exact language code
-  let rows = await queryDE(mcClient, externalKey, `language eq '${lang}'`);
-  if (rows.length > 0) return rows;
+  // Emirates DEs use various language formats: 'en', 'english', 'ENGLISH', 'ARABIC', etc.
+  // Try multiple variants in order of specificity.
+  const langVariants = new Set();
 
-  // Try 'english' if 'en' didn't work (and vice versa)
-  const altLang = lang === 'en' ? 'english' : 'en';
-  rows = await queryDE(mcClient, externalKey, `language eq '${altLang}'`);
-  if (rows.length > 0) return rows;
+  // Map short codes to full names (Emirates convention is UPPERCASE full names)
+  const langMap = {
+    en: ['en', 'english', 'ENGLISH', 'ENGLISH US'],
+    ar: ['ar', 'arabic', 'ARABIC'],
+    fr: ['fr', 'french', 'FRENCH'],
+    de: ['de', 'german', 'GERMAN'],
+    es: ['es', 'spanish', 'SPANISH'],
+    pt: ['pt', 'portuguese', 'PORTUGUESE', 'PORTUGUESE BR'],
+    it: ['it', 'italian', 'ITALIAN'],
+    ru: ['ru', 'russian', 'RUSSIAN'],
+    zh: ['zh', 'chinese', 'SIMPLIFIED CHINESE', 'TRADITIONAL CHINESE'],
+    ja: ['ja', 'japanese', 'JAPANESE'],
+    ko: ['ko', 'korean', 'KOREAN'],
+  };
+
+  const key = lang.toLowerCase().split('-')[0]; // 'en-GB' → 'en'
+  const variants = langMap[key] || [lang, lang.toLowerCase(), lang.toUpperCase()];
+  for (const v of variants) langVariants.add(v);
+
+  for (const variant of langVariants) {
+    const rows = await queryDE(mcClient, externalKey, `language eq '${variant}'`);
+    if (rows.length > 0) return rows;
+  }
 
   // Fallback: get all rows
   return queryDE(mcClient, externalKey);
@@ -450,14 +468,11 @@ async function queryDEWithLangFallback(mcClient, externalKey, lang) {
  * Maps DE names to the content shape expected by collectImageIds.
  */
 function buildImageContent(deData) {
-  const content = { stories: [] };
-
-  for (const [name, rows] of Object.entries(deData)) {
-    const lower = name.toLowerCase();
-    if (lower.includes('header')) content.headerContent = rows;
-    else if (lower.includes('footer')) content.footerContent = rows;
-    else if (lower.includes('stories') || lower.includes('story')) content.stories = rows;
+  // Pass ALL DE rows to collectImageIds — it scans every field
+  // whose name contains 'image', 'logo', 'hero', 'icon' for numeric IDs.
+  const allRows = [];
+  for (const [, rows] of Object.entries(deData)) {
+    if (Array.isArray(rows)) allRows.push(...rows);
   }
-
-  return content;
+  return { dynamicContent: allRows };
 }

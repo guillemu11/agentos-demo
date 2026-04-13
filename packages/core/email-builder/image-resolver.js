@@ -55,26 +55,31 @@ export async function resolveImageBatch(mcClient, imageIds, existingMap = {}, co
 export function collectImageIds(content) {
   const ids = new Set();
   const add = (v) => { if (v && v !== '' && /^\d+$/.test(String(v))) ids.add(String(v)); };
+  const imageKeyPattern = /image|logo|hero|icon/i;
 
-  // Header image fields
-  (content.headerContent || []).forEach(h => {
-    add(h.header_logo);
-    add(h.header_login_logo);
-  });
+  // Scan ALL data in content — any field whose name contains image/logo/hero/icon
+  // and whose value is a pure numeric ID is an image asset reference.
+  function scanRows(rows) {
+    if (!Array.isArray(rows)) return;
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      for (const [key, val] of Object.entries(row)) {
+        if (imageKeyPattern.test(key)) add(val);
+      }
+    }
+  }
 
-  // Footer image fields
-  (content.footerContent || []).forEach(f => {
-    add(f.logo_image);
-    add(f.co_logo);
-  });
+  scanRows(content.headerContent);
+  scanRows(content.footerContent);
+  scanRows(content.stories);
+  scanRows(content.dynamicContent);
 
-  // Story image fields (multiple possible image columns)
-  (content.stories || []).forEach(s => {
-    add(s.story_image);
-    add(s.story_image_circle);
-    add(s.story_image_single);
-    add(s.story_image_icon);
-  });
+  // Also scan any other arrays passed in
+  for (const [key, val] of Object.entries(content)) {
+    if (Array.isArray(val) && !['headerContent', 'footerContent', 'stories', 'dynamicContent'].includes(key)) {
+      scanRows(val);
+    }
+  }
 
   return [...ids];
 }

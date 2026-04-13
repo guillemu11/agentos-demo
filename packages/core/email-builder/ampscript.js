@@ -250,9 +250,9 @@ export function parseContentBlockRefs(ampscript) {
  */
 export function parseDELookups(ampscript) {
   if (!ampscript) return [];
-  // Match LookupRows('Name', ...) or LookupOrderedRows('Name', ...)
+  // Match Lookup('Name', ...), LookupRows('Name', ...) or LookupOrderedRows('Name', ...)
   // First argument may use single or double quotes
-  const re = /Lookup(?:Ordered)?Rows\s*\(\s*['"]([^'"]+)['"]/gi;
+  const re = /Lookup(?:Ordered)?(?:Rows)?\s*\(\s*['"]([^'"]+)['"]/gi;
   const names = new Set();
   let m;
   while ((m = re.exec(ampscript)) !== null) {

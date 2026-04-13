@@ -15,7 +15,7 @@
 
 export { analyzeTemplate } from './analyzer.js';
 export { fetchCampaignData, resolveEmailTemplate } from './fetcher.js';
-export { renderAllVariants, renderVariant, buildVariableMap } from './renderer.js';
+export { renderAllVariants, renderVariant, buildVariableMap, generatePreviewVariants } from './renderer.js';
 export { resolveImageBatch, collectImageIds } from './image-resolver.js';
 export {
   stripAmpscriptBlocks,
