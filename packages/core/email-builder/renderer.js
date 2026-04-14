@@ -90,11 +90,15 @@ export function buildVariableMap({
     vars.section_title2 = dc.section_title2 || '';
     vars.section_title = dc.section_title1 || '';
 
-    // Body copy with link splitting
+    // Body copy with link splitting.
+    // NOTE: keep @body_copy and @body_copy_salutation as separate variables —
+    // the block templates render them in different elements (bold salutation +
+    // separate body paragraph). Prepending salText to body_copy here causes
+    // the salutation to appear twice in the rendered email.
     const salText = salutation?.salutation
       ? salutation.salutation.replace('{first_name}', subscriber.first_name || '')
       : '';
-    const fullBody = salText + (dc.body_copy || '');
+    const fullBody = dc.body_copy || '';
     vars.body_copy = fullBody;
     vars.body_copy_salutation = salText;
 
@@ -221,6 +225,27 @@ export function buildVariableMap({
   if (vars.main_link) vars.hero_image_link = url(vars.main_link);
   if (vars.main_alias) vars.hero_image_link_alias = vars.main_alias;
 
+  // Route Launch masthead uses @fare_image as the hero, not @main_hero_image.
+  // AMPscript runs ContentImagebyID(fare_image) and regex-extracts the src URL.
+  // We short-circuit: if fare_image is a numeric ID, resolve it directly.
+  if (vars.fare_image && /^\d+$/.test(String(vars.fare_image))) {
+    const resolved = imageMap[String(vars.fare_image)];
+    if (resolved) vars.fare_image = resolved;
+  }
+  if (vars.fare_image_url) vars.fare_image_url = url(vars.fare_image_url);
+  if (!vars.hero_image && vars.fare_image) vars.hero_image = vars.fare_image;
+
+  // When no fare prices are present, the "short white" masthead block renders
+  // instead of the fare blocks. AMPscript assignments we need to replicate:
+  //   SET @masthead_image = @fare_image        (URL)
+  //   SET @masthead_image_link = @fare_image_url
+  //   SET @main_cta_text = @fare_image_alias || @main_cta_alias
+  if (!vars.masthead_image && vars.fare_image) vars.masthead_image = vars.fare_image;
+  if (!vars.masthead_image_link && vars.fare_image_url) vars.masthead_image_link = vars.fare_image_url;
+  if (!vars.main_cta_text) vars.main_cta_text = vars.main_cta_alias || vars.fare_image_alias || '';
+  // subject_line is usually in dc but not always; fall back gracefully
+  if (!vars.subject_line && segmentContent?.main_header) vars.subject_line = segmentContent.main_header;
+
   // Story image mappings: the blocks use @storyN_image but AMPscript resolves
   // from story_image_circle (asset ID) → storyN_image (URL)
   // buildVariableMap already does this for stories found via findStory(),
@@ -250,25 +275,14 @@ export function buildVariableMap({
   if (vars.subject_line && subscriber.first_name) {
     vars.subject_line = vars.subject_line.replace(/\[#\]/g, subscriber.first_name);
   }
-  // Body copy salutation: prepend greeting with first_name if not already in body
-  // AMPscript does: @body_copy_salutation = Lookup('REF_Salutation_Language', 'salutation', 'language', @lm_code)
-  // then prepends it to body_copy. If we have salutation data, use it.
+  // Body copy salutation — populate only the salutation variable. Do NOT
+  // prepend it to body_copy; the block template renders them separately.
   if (salutation?.salutation && subscriber.first_name) {
-    const greeting = salutation.salutation
+    vars.body_copy_salutation = salutation.salutation
       .replace(/\{first_name\}/gi, subscriber.first_name)
       .replace(/\{FirstName\}/gi, subscriber.first_name);
-    vars.body_copy_salutation = greeting;
-    // Prepend to body_copy if not already there
-    if (vars.body_copy && !vars.body_copy.startsWith(greeting)) {
-      vars.body_copy = greeting + vars.body_copy;
-    }
-  } else if (subscriber.first_name && vars.body_copy) {
-    // Fallback: simple "Hello {name}, " prefix
-    const greeting = `Hello ${subscriber.first_name}, `;
-    vars.body_copy_salutation = greeting;
-    if (!vars.body_copy.toLowerCase().startsWith('hello')) {
-      vars.body_copy = greeting + vars.body_copy;
-    }
+  } else if (subscriber.first_name && !vars.body_copy_salutation) {
+    vars.body_copy_salutation = `Hello ${subscriber.first_name},`;
   }
 
   return vars;
@@ -731,10 +745,21 @@ export function generatePreviewVariants({ manifest, data, templateShell, options
     }
 
     for (const segment of segments) {
-      // If segments are real, find the matching DC row
-      const segDC = segment !== 'default'
-        ? dcRows.find(r => (r.segment || r.Segment || '').toLowerCase() === segment) || segmentContent
-        : segmentContent;
+      // Composite lookup: (language, Segment) — replica LookupRows AMPscript semantics
+      let segDC;
+      if (segment === 'default') {
+        segDC = segmentContent;
+      } else {
+        const matchLangSeg = (lang) => dcRows.find(r =>
+          (r.language || r.Language || '').toUpperCase() === lang &&
+          (r.segment || r.Segment || '').toLowerCase() === segment
+        );
+        segDC =
+          matchLangSeg(langUpper) ||
+          (langUpper.includes(' ') && matchLangSeg(langUpper.split(' ')[0])) ||
+          matchLangSeg('ENGLISH') ||
+          segmentContent;
+      }
 
       for (const headerType of headerTypes) {
         // Filter supporting DEs by language for this subscriber
