@@ -30,6 +30,77 @@ import { parseContentBlockRefs } from './ampscript.js';
  * @param {Function} [options.onProgress] - (step, detail) => void
  * @returns {Promise<{templateHtml: string, emailName: string, assetType: string}>}
  */
+// Parse the BAU campaign hint directly from an email asset's
+// __AdditionalEmailAttribute3/5 values. This is the authoritative source —
+// Emirates' campaign-builder writes these at asset duplication time and the
+// send-time AMPscript reads them verbatim. Format:
+//   Attr3: "{campaignName}_deploydate_{dir}"        (last 14 chars are "_deploydate_xx")
+//   Attr5: "CC{TYPECODE}_{DDMMYY}"                  (last 6 chars are DDMMYY)
+// Returns { campaignHint, campaignDate, typeCode, direction } when all parts
+// are recognizable, null otherwise.
+export function parseAssetAttributes(asset) {
+  const attrs = asset?.data?.email?.attributes || [];
+  const byName = {};
+  for (const a of attrs) byName[a.name] = (a.value || '').toString();
+
+  const attr3 = byName.__AdditionalEmailAttribute3 || '';
+  const attr5 = byName.__AdditionalEmailAttribute5 || '';
+  if (!attr3 && !attr5) return null;
+
+  let campaignHint = null;
+  let direction = null;
+  if (attr3.length > 14) {
+    campaignHint = attr3.slice(0, attr3.length - 14);
+    direction = attr3.slice(-2);
+  }
+  let typeCode = null;
+  let campaignDate = null;
+  if (attr5.length >= 7) {
+    typeCode = attr5.slice(0, attr5.length - 7);   // "CCPRODUPDT"
+    campaignDate = attr5.slice(-6);                 // "270226"
+  }
+  return { campaignHint, campaignDate, typeCode, direction, attr3, attr5 };
+}
+
+// Derive a BAU campaign hint from an asset name (fallback when Attr3/5 are empty).
+// Emirates conventions:
+//   RouteLaunch: "20260302_AU_HelsinkiRouteLaunch" → "auawrhellaunchmar26"
+//   Partner Update / Partner Offer: "20260227_Japan_PU_in" → "japan" (loose hint)
+// Returns the most distinctive prefix the SOAP search can use.
+export function deriveCampaignHint(emailName) {
+  if (!emailName) return null;
+  const parts = String(emailName).split('_');
+  const datePart = parts.find(p => /^\d{8}$/.test(p));
+  const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+  // RouteLaunch: needs a 2-letter country + "RouteLaunch|RL" in the name
+  if (/routelaunch|rl/i.test(emailName)) {
+    const countryPart = parts.find(p => /^[A-Z]{2,3}$/.test(p) && p !== datePart);
+    if (countryPart) {
+      const c2 = countryPart.slice(0, 2).toLowerCase();
+      if (datePart) {
+        const monthIdx = parseInt(datePart.slice(4, 6), 10) - 1;
+        const month = MONTHS[monthIdx];
+        const yearShort = datePart.slice(2, 4);
+        if (month) return `${c2}awrhellaunch${month}${yearShort}`;
+      }
+      return `${c2}awrhel`;
+    }
+  }
+
+  // Partner Update / Partner Offer / Cabin Class etc. — use the descriptive
+  // word(s) between the date and the type code as the hint.
+  // "20260227_Japan_PU_in" → "japan", "20260301_GL_PartnerOffer" → "gl"
+  const typeIdx = parts.findIndex(p => /^(PU|PO|RL|CC)$/i.test(p));
+  if (typeIdx > 0) {
+    const beforeType = parts.slice(0, typeIdx).filter(p => p !== datePart);
+    const descriptor = beforeType[beforeType.length - 1];
+    if (descriptor) return descriptor.toLowerCase();
+  }
+
+  return null;
+}
+
 export async function resolveEmailTemplate(mcClient, assetId, options = {}) {
   const onProgress = options.onProgress || (() => {});
 
@@ -38,7 +109,18 @@ export async function resolveEmailTemplate(mcClient, assetId, options = {}) {
   const emailName = asset.name || `email_${assetId}`;
   const assetType = asset.assetType?.name || 'unknown';
 
+  // Prefer the authoritative campaign hint parsed from the asset's
+  // __AdditionalEmailAttribute values (set by the campaign-builder); fall back
+  // to a heuristic derived from the asset name.
+  const attrInfo = parseAssetAttributes(asset);
+  const derivedCampaignHint = attrInfo?.campaignHint || deriveCampaignHint(emailName);
+
   onProgress('resolve', `  ${emailName} (${assetType})`);
+  if (attrInfo?.campaignHint) {
+    onProgress('resolve', `  BAU attributes: hint=${attrInfo.campaignHint}, date=${attrInfo.campaignDate}, type=${attrInfo.typeCode}, dir=${attrInfo.direction}`);
+  } else if (derivedCampaignHint) {
+    onProgress('resolve', `  Derived BAU hint (heuristic): ${derivedCampaignHint}`);
+  }
 
   // Extract slot blocks from views.html.slots
   const slots = asset.views?.html?.slots || {};
@@ -49,7 +131,7 @@ export async function resolveEmailTemplate(mcClient, assetId, options = {}) {
     const html = asset.views?.html?.content || asset.content || '';
     if (html.includes('ContentBlockbyID') || html.includes('LookupRows')) {
       onProgress('resolve', '  Direct AMPscript template (no slots)');
-      return { templateHtml: html, emailName, assetType };
+      return { templateHtml: html, emailName, assetType, derivedCampaignHint, attrInfo };
     }
     throw new Error(`Email ${assetId} has no slot content and no AMPscript in views.html`);
   }
@@ -100,7 +182,7 @@ export async function resolveEmailTemplate(mcClient, assetId, options = {}) {
   const templateHtml = templateParts.join('\n');
   onProgress('resolve', `  Composed template: ${(templateHtml.length / 1024).toFixed(1)}KB from ${templateParts.length} block(s)`);
 
-  return { templateHtml, emailName, assetType };
+  return { templateHtml, emailName, assetType, derivedCampaignHint, attrInfo };
 }
 
 /**
@@ -172,7 +254,9 @@ export async function fetchCampaignData(manifest, mcClient, options = {}) {
     // Fetch all rows. Stories DEs can be very large (2000+ rows), so
     // increase limit for DEs with 'stories' or 'story' in the name.
     const isLargeDE = de.name.toLowerCase().includes('stories') || de.name.toLowerCase().includes('story');
-    const rows = await queryDE(mcClient, externalKey, null, isLargeDE ? 2500 : 500);
+    // Stories_Ref_Table_shortlink has ~5-6k rows (28 languages × ~200 stories).
+    // 2500 dropped whole language slices → story name lookups returned empty.
+    const rows = await queryDE(mcClient, externalKey, null, isLargeDE ? 20000 : 500);
 
     deData[de.name] = rows;
     onProgress('de', `  DE "${de.name}": ${rows.length} rows`);
@@ -475,4 +559,365 @@ function buildImageContent(deData) {
     if (Array.isArray(rows)) allRows.push(...rows);
   }
   return { dynamicContent: allRows };
+}
+
+// ─── BAU Campaign Support ──────────────────────────────────────────────────────
+// BAU campaigns (Route Launch, Partner Offer, Product Offer) use dynamic DE names
+// constructed from __AdditionalEmailAttribute parameters. The standard analyzer
+// can't discover these — we use SOAP search + AMPscript parsing to find them.
+
+/**
+ * Detect if a template is a BAU campaign by checking for the attribute parameter pattern.
+ * BAU templates use __AdditionalEmailAttribute3/5 to construct dynamic DE names.
+ *
+ * @param {string} templateHtml - Full AMPscript HTML
+ * @returns {boolean}
+ */
+export function isBAUTemplate(templateHtml) {
+  return /__AdditionalEmailAttribute/i.test(templateHtml) &&
+    /Concat\s*\([^)]*(?:RL_DynamicContent|PO_DynamicContent|PO_Products|PU_DynamicContent|CC_DynamicContent)/i.test(templateHtml);
+}
+
+/**
+ * Parse BAU attribute parameters from the AMPscript template.
+ * Extracts campaign_name, campaign_date, campaign_code, campaign_type from
+ * the __AdditionalEmailAttribute3/5 parsing logic.
+ *
+ * @param {string} templateHtml
+ * @returns {{ deSuffix: string, vawpDE: string|null }}
+ */
+export function parseBAUConfig(templateHtml) {
+  // Find ALL dynamic DE suffix patterns built via Concat
+  // RL: SET @RL_DynamicContent = Concat(@campaign_name, '_', @campaign_date, '_RL_DynamicContent')
+  // PO: SET @ProductOffer_DynamicContent = Concat(..., '_PO_DynamicContent')
+  //     SET @ProductOffer_Products = Concat(..., '_PO_Products')
+  //     SET @ProductOffer_CashMiles = Concat(..., '_PO_CashMiles')
+  const suffixes = [];
+  const concatPattern = /SET\s+@\w+\s*=\s*Concat\s*\([^)]*['"](_(?:RL|PO|PU|CC)_[^'"]+)['"]\s*\)/gi;
+  let match;
+  while ((match = concatPattern.exec(templateHtml)) !== null) {
+    if (!suffixes.includes(match[1])) suffixes.push(match[1]);
+  }
+
+  // Primary suffix is the DynamicContent one (for variant discovery)
+  const primarySuffix = suffixes.find(s => s.includes('DynamicContent')) || suffixes[0] || '_RL_DynamicContent';
+
+  // Find VAWP DE
+  const vawpMatch = templateHtml.match(/SET\s+@VAWP_person_DE\s*=\s*['"]([^'"]+)['"]/i);
+
+  return {
+    deSuffix: primarySuffix,
+    allSuffixes: suffixes,
+    vawpDE: vawpMatch?.[1] || null,
+  };
+}
+
+/**
+ * Discover BAU dynamic DEs from Marketing Cloud via SOAP search.
+ * Searches for DEs matching the *_RL_DynamicContent pattern.
+ *
+ * @param {object} mcClient
+ * @param {string} [campaignHint] - Optional campaign name hint to narrow search
+ * @param {Function} [onProgress]
+ * @returns {Promise<{contentDE: {name,key}, audienceDE: {name,key}|null, allDEs: Array}>}
+ */
+export async function discoverBAUDEs(mcClient, campaignHint, onProgress = () => {}, bauConfig = {}) {
+  onProgress('bau', 'Discovering BAU dynamic DEs...');
+
+  // Determine which suffixes to search for
+  const suffixes = bauConfig.allSuffixes || ['_RL_DynamicContent'];
+  const primarySuffix = bauConfig.deSuffix || suffixes[0];
+
+  // Search for the primary content DE
+  const searchValue = campaignHint
+    ? `${campaignHint}%${primarySuffix.replace(/^_/, '')}`
+    : primarySuffix.replace(/^_/, '');
+
+  const soapXml = `<RetrieveRequestMsg xmlns="http://exacttarget.com/wsdl/partnerAPI">
+    <RetrieveRequest>
+      <ObjectType>DataExtension</ObjectType>
+      <Properties>Name</Properties>
+      <Properties>CustomerKey</Properties>
+      <Properties>CreatedDate</Properties>
+      <Filter xsi:type="SimpleFilterPart" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <Property>Name</Property>
+        <SimpleOperator>like</SimpleOperator>
+        <Value>${searchValue}</Value>
+      </Filter>
+    </RetrieveRequest>
+  </RetrieveRequestMsg>`;
+
+  try {
+    const result = await mcClient.soap('Retrieve', soapXml);
+    const names = [...result.matchAll(/<Name>([^<]+)<\/Name>/g)].map(m => m[1]);
+    const keys = [...result.matchAll(/<CustomerKey>([^<]+)<\/CustomerKey>/g)].map(m => m[1]);
+
+    const des = names.map((name, i) => ({ name, key: keys[i] || null }));
+    onProgress('bau', `  Found ${des.length} ${primarySuffix} DEs`);
+
+    // Find the most specific match
+    let contentDE = des[0] || null;
+    if (campaignHint && des.length > 1) {
+      const hint = campaignHint.toLowerCase();
+      contentDE = des.find(d => d.name.toLowerCase().includes(hint)) || des[0];
+    }
+    if (des.length > 1 && !campaignHint) {
+      contentDE = des[des.length - 1]; // SOAP returns oldest first
+    }
+
+    if (contentDE) {
+      onProgress('bau', `  Content DE: ${contentDE.name} (key: ${contentDE.key})`);
+    }
+
+    // Discover sibling DEs (same campaign prefix, different suffixes)
+    // e.g., from PO_DynamicContent → PO_Products, PO_CashMiles
+    const siblingDEs = {};
+    if (contentDE && suffixes.length > 1) {
+      const prefix = contentDE.name.replace(primarySuffix, '');
+      for (const suffix of suffixes) {
+        if (suffix === primarySuffix) continue;
+        const siblingName = prefix + suffix;
+        const sibKey = await discoverDEKey(mcClient, siblingName);
+        if (sibKey) {
+          siblingDEs[suffix] = { name: siblingName, key: sibKey };
+          onProgress('bau', `  Sibling DE: ${siblingName}`);
+        }
+      }
+    }
+
+    // Try to find the matching TargetAudience DE
+    let audienceDE = null;
+    if (contentDE) {
+      const prefix = contentDE.name.replace(primarySuffix, '');
+      const audienceName = prefix + '_TargetAudience_DE';
+      const audKey = await discoverDEKey(mcClient, audienceName);
+      if (audKey) {
+        audienceDE = { name: audienceName, key: audKey };
+        onProgress('bau', `  Audience DE: ${audienceName}`);
+      }
+    }
+
+    return { contentDE, audienceDE, siblingDEs, allDEs: des };
+  } catch (err) {
+    onProgress('bau-error', `  SOAP search failed: ${err.message}`);
+    return { contentDE: null, audienceDE: null, siblingDEs: {}, allDEs: [] };
+  }
+}
+
+/**
+ * Fetch all data for a BAU campaign.
+ * Like fetchCampaignData but handles dynamic DEs and multi-language content.
+ *
+ * @param {object} params
+ * @param {object} params.contentDE - { name, key } from discoverBAUDEs
+ * @param {string[]} params.blockIds - Content block IDs from the template
+ * @param {object} params.mcClient
+ * @param {object} [params.options]
+ * @param {Function} [params.options.onProgress]
+ * @returns {Promise<{blocks, deData, imageMap, contentRows, languages}>}
+ */
+// Short language code (as used in content DEs) → full AMPscript name (as used in IF @language).
+const BAU_LANG_SHORT_TO_FULL = {
+  en: 'ENGLISH', ar: 'ARABIC', he: 'HEBREW', cz: 'CZECH', dk: 'DANISH',
+  nl: 'DUTCH', fr: 'FRENCH', de: 'GERMAN', gr: 'GREEK', it: 'ITALIAN',
+  pl: 'POLISH', pt_br: 'PORTUGUESE BR', pt_eu: 'PORTUGUESE EU',
+  ru: 'RUSSIAN', es: 'SPANISH', tr: 'TURKISH', th: 'THAI',
+  ch_scn: 'SIMPLIFIED CHINESE', ch_tcn: 'TRADITIONAL CHINESE',
+  jp: 'JAPANESE', kr: 'KOREAN', tw: 'TAIWANESE', id: 'BAHASA',
+  se: 'SWEDISH', hu: 'HUNGARIAN', vn: 'VIETNAMESE', nn: 'NORWEGIAN',
+};
+
+// Extract ContentBlockbyID refs from a block HTML, but only follow language branches
+// that match an active language set. Unconditional refs (outside any IF @language gate)
+// are always included.
+function collectActiveRefs(html, activeLangsFullUpper) {
+  const refs = new Set();
+  if (!html) return refs;
+
+  // Find every IF/ELSEIF @language == "X" THEN ... branch and its nested refs.
+  // A "branch" ends at the next ELSEIF / ELSE / ENDIF keyword.
+  const BRANCH_RE = /(?:IF|ELSEIF)\s+(?:\()?\s*@language\s*==\s*["']([^"']+)["'][\s\S]*?(?:THEN\s*\])([\s\S]*?)(?=%%\[\s*(?:ELSEIF|ELSE|ENDIF))/gi;
+  const gatedRanges = [];
+  let m;
+  while ((m = BRANCH_RE.exec(html)) !== null) {
+    const branchLang = m[1].toUpperCase();
+    const branchContent = m[2];
+    const start = m.index;
+    const end = m.index + m[0].length;
+    gatedRanges.push({ start, end });
+    if (activeLangsFullUpper.has(branchLang)) {
+      for (const r of branchContent.matchAll(/ContentBlockbyID\(["'](\d+)["']\)/gi)) {
+        refs.add(r[1]);
+      }
+    }
+  }
+
+  // Also include refs outside any gated range (unconditional / fallback content).
+  for (const r of html.matchAll(/ContentBlockbyID\(["'](\d+)["']\)/gi)) {
+    const pos = r.index;
+    const inside = gatedRanges.some(g => pos >= g.start && pos <= g.end);
+    if (!inside) refs.add(r[1]);
+  }
+
+  return refs;
+}
+
+export async function fetchBAUCampaignData({ contentDE, siblingDEs = {}, blockIds, mcClient, options = {} }) {
+  const onProgress = options.onProgress || (() => {});
+
+  // 1. Fetch content DE rows FIRST — so we know which languages are actually needed.
+  //    Skipping inactive-language sub-blocks avoids hundreds of wasted asset fetches.
+  const deData = {};
+  if (contentDE?.key) {
+    onProgress('des', `Fetching content DE: ${contentDE.name}...`);
+    const rows = await queryDE(mcClient, contentDE.key);
+    deData[contentDE.name] = rows;
+    onProgress('des', `  ${contentDE.name}: ${rows.length} rows`);
+  }
+
+  const contentRowsAll = deData[contentDE?.name] || [];
+  const activeLangsShort = [...new Set(contentRowsAll.map(r => (r.language || '').toLowerCase()).filter(Boolean))];
+  const activeLangsFullUpper = new Set(
+    activeLangsShort.map(code => (BAU_LANG_SHORT_TO_FULL[code] || code).toUpperCase())
+  );
+  onProgress('bau', `  Active languages: ${activeLangsShort.join(', ') || '(none — fetching all)'}`);
+
+  // 2. Fetch content blocks — only follow language branches for active languages.
+  onProgress('blocks', `Fetching ${blockIds.length} content blocks (filtered by active languages)...`);
+  const blocks = {};
+  const toFetch = [...blockIds];
+  const fetched = new Set();
+
+  while (toFetch.length > 0) {
+    const id = toFetch.shift();
+    if (fetched.has(id)) continue;
+    fetched.add(id);
+
+    try {
+      const asset = await mcClient.rest('GET', `/asset/v1/content/assets/${id}`);
+      const html = asset.views?.html?.content || asset.content || '';
+      blocks[id] = { name: asset.name || `block_${id}`, html };
+      onProgress('block', `  Block ${id}: ${asset.name} (${(html.length / 1024).toFixed(1)}KB)`);
+
+      // Walk nested refs, but only those that survive the language filter.
+      // If activeLangsFullUpper is empty (shouldn't happen post-DE-fetch), fall back to all refs.
+      const activeRefs = activeLangsFullUpper.size > 0
+        ? collectActiveRefs(html, activeLangsFullUpper)
+        : new Set([...html.matchAll(/ContentBlockbyID\(["'](\d+)["']\)/gi)].map(r => r[1]));
+      for (const refId of activeRefs) {
+        if (!fetched.has(refId)) toFetch.push(refId);
+      }
+    } catch (err) {
+      onProgress('block-error', `  Block ${id}: FAILED (${err.message})`);
+      blocks[id] = { name: `block_${id}`, html: '' };
+    }
+  }
+  onProgress('blocks', `  Fetched ${Object.keys(blocks).length} blocks (${blockIds.length} top-level, ${Object.keys(blocks).length - blockIds.length} nested)`);
+
+  // 2b. Fetch sibling DEs (PO_Products, PO_CashMiles, etc.)
+  for (const [suffix, de] of Object.entries(siblingDEs)) {
+    if (de?.key) {
+      onProgress('des', `Fetching sibling DE: ${de.name}...`);
+      const rows = await queryDE(mcClient, de.key);
+      deData[de.name] = rows;
+      onProgress('des', `  ${de.name}: ${rows.length} rows`);
+    }
+  }
+
+  // 3. Fetch Footer_CentralizedContent
+  const footerKey = await discoverDEKey(mcClient, 'Footer_CentralizedContent');
+  if (footerKey) {
+    const footerRows = await queryDE(mcClient, footerKey, null, 50);
+    deData['Footer_CentralizedContent'] = footerRows;
+    onProgress('des', `  Footer_CentralizedContent: ${footerRows.length} rows`);
+  }
+
+  // 4. Fetch REF_Caveat_Disclaimer
+  const caveatKey = await discoverDEKey(mcClient, 'REF_Caveat_Disclaimer');
+  if (caveatKey) {
+    const caveatRows = await queryDE(mcClient, caveatKey, null, 50);
+    deData['REF_Caveat_Disclaimer'] = caveatRows;
+    onProgress('des', `  REF_Caveat_Disclaimer: ${caveatRows.length} rows`);
+  }
+
+  // 4b. Fetch Rolling Static Content DEs (drives the worry-free / travel-hub /
+  //     emirates-experience / before-travel section per market+language).
+  const rollingKey = await discoverDEKey(mcClient, 'Rolling_Static_Content_per_Market-Language');
+  if (rollingKey) {
+    const rows = await queryDE(mcClient, rollingKey, null, 500);
+    deData['Rolling_Static_Content_per_Market-Language'] = rows;
+    onProgress('des', `  Rolling_Static_Content_per_Market-Language: ${rows.length} rows`);
+  }
+  const featuredKey = await discoverDEKey(mcClient, 'FeaturedItems_Ref_Table');
+  if (featuredKey) {
+    const rows = await queryDE(mcClient, featuredKey, null, 200);
+    deData['FeaturedItems_Ref_Table'] = rows;
+    onProgress('des', `  FeaturedItems_Ref_Table: ${rows.length} rows`);
+  }
+  // Production uses dedicated REF DEs for the static rolling sections instead
+  // of FeaturedItems_Ref_Table — the rows already carry offer_block_* fields
+  // shaped for the offer block template.
+  const worryKey = await discoverDEKey(mcClient, 'REF_Worry_Free_Travel');
+  if (worryKey) {
+    const rows = await queryDE(mcClient, worryKey, null, 50);
+    deData['REF_Worry_Free_Travel'] = rows;
+    onProgress('des', `  REF_Worry_Free_Travel: ${rows.length} rows`);
+  }
+
+  // 5. Resolve images
+  const contentForImages = buildImageContent(deData);
+  const imageIds = collectImageIds(contentForImages);
+  onProgress('images', `Resolving ${imageIds.length} image assets...`);
+  const imageMap = await resolveImageBatch(mcClient, imageIds);
+  onProgress('images', `  Resolved ${Object.keys(imageMap).length}/${imageIds.length} images`);
+
+  // 6. Derive languages and variant info from content rows
+  const contentRows = deData[contentDE?.name] || [];
+  const languages = [...new Set(contentRows.map(r => r.language).filter(Boolean))];
+  const tiers = [...new Set(contentRows.map(r => r.tier).filter(Boolean))];
+
+  onProgress('bau', `  Languages: ${languages.join(', ')}`);
+  onProgress('bau', `  Tiers: ${tiers.join(', ')}`);
+
+  return { blocks, deData, imageMap, contentRows, languages, tiers };
+}
+
+/**
+ * Resolve a logic block to a language-specific sub-block using pre-fetched blocks.
+ * Unlike resolveLanguageBranch (which fetches from MC), this uses the blocks map.
+ *
+ * @param {Record<string,{html:string}>} blocks - All fetched blocks
+ * @param {string} logicBlockId - The logic block ID to resolve
+ * @param {string} language - Target language in AMPscript format (e.g., 'ENGLISH', 'TRADITIONAL CHINESE')
+ * @returns {string|null} Resolved block ID, or null
+ */
+export function resolveLogicBlock(blocks, logicBlockId, language) {
+  const block = blocks[logicBlockId];
+  if (!block?.html) return null;
+
+  const html = block.html;
+
+  // Try exact language match
+  const langRegex = new RegExp(
+    `@language\\s*==\\s*["']${language}["']\\s*(?:\\)|THEN)\\s*\\]%%[\\s\\S]*?ContentBlockbyID\\(["'](\\d+)["']\\)`,
+    'i'
+  );
+  let match = html.match(langRegex);
+
+  // Try with OR variants (e.g., DUTCH OR BELGIUM DUTCH)
+  if (!match) {
+    const langRegex2 = new RegExp(
+      `["']${language}["'][^\\]]*THEN\\s*\\]%%[\\s\\S]*?ContentBlockbyID\\(["'](\\d+)["']\\)`,
+      'i'
+    );
+    match = html.match(langRegex2);
+  }
+
+  // Fallback to ELSE branch
+  if (!match) {
+    const elseRegex = /ELSE\s*\]%%[\s\S]*?ContentBlockbyID\(["'](\d+)["']\)/i;
+    match = html.match(elseRegex);
+  }
+
+  return match?.[1] || null;
 }

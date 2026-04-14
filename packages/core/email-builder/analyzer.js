@@ -36,7 +36,18 @@ export function analyzeTemplate(templateHtml) {
 
   const vawp = detectVAWP(templateHtml);
 
-  return { contentBlockIds, dataExtensions, variables, variants, blockOrder, vawp };
+  return {
+    contentBlockIds,
+    dataExtensions,
+    variables,
+    variants,
+    blockOrder,
+    vawp,
+    // Stash the raw template so the renderer can reconstruct positional
+    // render instructions (block positions with their IF guards and local
+    // SET rebindings). Non-enumerable so JSON.stringify() output stays clean.
+    _templateHtml: templateHtml,
+  };
 }
 
 /**
@@ -174,6 +185,56 @@ function detectBlockOrder(html, variants) {
     layoutGroups,
     // For campaigns without detected groups, use flat order
     default: uniqueRenderBlocks,
+  };
+}
+
+/**
+ * Analyze a BAU campaign template (Route Launch, Partner Offer, etc.)
+ *
+ * BAU templates use __AdditionalEmailAttribute parameters to construct
+ * dynamic DE names at send-time. The standard analyzer can't discover these,
+ * so this function parses the AMPscript structure to identify:
+ * - Top-level content block IDs referenced in the template
+ * - The dynamic content DE suffix pattern
+ * - VAWP DE configuration
+ * - Block layout order from the render section
+ *
+ * @param {string} templateHtml - Full AMPscript from the codesnippet block
+ * @returns {object} BAU-specific manifest
+ */
+export function analyzeBAUTemplate(templateHtml) {
+  // Standard analysis still gives us block refs, VAWP, and block order
+  const base = analyzeTemplate(templateHtml);
+
+  // Parse the dynamic DE name pattern (RL or PO)
+  const dcSuffixMatch = templateHtml.match(
+    /SET\s+@(?:RL_DynamicContent|ProductOffer_DynamicContent)\s*=\s*Concat\s*\([^)]*['"](_(?:RL|PO)_[^'"]+)['"]\s*\)/i
+  );
+
+  // Parse attribute parameter structure
+  const hasAttr3 = /__AdditionalEmailAttribute3/i.test(templateHtml);
+  const hasAttr5 = /__AdditionalEmailAttribute5/i.test(templateHtml);
+
+  // Detect tier/header logic
+  const hasBothTierCheck = /Lookup\s*\(\s*@RL_DynamicContent[^)]*'both'\s*\)/i.test(templateHtml);
+  const hasHeaderV2V3 = /SET\s+@headerver\s*=\s*["']v[23]["']/i.test(templateHtml);
+
+  // Detect static DEs (string literal lookups that ARE discoverable)
+  const staticDEs = parseDELookups(templateHtml).map(name => ({
+    name,
+    lookupFields: extractLookupFields(templateHtml, name),
+  }));
+
+  return {
+    ...base,
+    isBAU: true,
+    bau: {
+      deSuffix: dcSuffixMatch?.[1] || '_RL_DynamicContent',
+      hasAttributeParams: hasAttr3 && hasAttr5,
+      hasBothTierCheck,
+      hasHeaderV2V3,
+      staticDEs,
+    },
   };
 }
 

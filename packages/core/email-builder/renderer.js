@@ -10,7 +10,14 @@
  * prototype that generates all churn email variants.
  */
 
-import { stripAmpscriptBlocks, replaceAmpscriptVars, splitBodyCopy } from './ampscript.js';
+import {
+  stripAmpscriptBlocks,
+  replaceAmpscriptVars,
+  splitBodyCopy,
+  buildRenderInstructions,
+  applyLocalBindings,
+  evaluateGuard,
+} from './ampscript.js';
 
 // ─── URL helper ──────────────────────────────────────────────────────
 function fixUrl(url, market = 'uk/english') {
@@ -53,10 +60,32 @@ export function buildVariableMap({
   salutation,
   imageMap = {},
   market = 'uk/english',
+  language = '',
 }) {
   const vars = {};
   const img = (id) => resolveImg(imageMap, id);
   const url = (u) => fixUrl(u, market);
+  // Language-scoped story lookup. The caller may pre-filter `stories` by
+  // language but we defend against unfiltered lists (Stories_Ref_Table_shortlink
+  // has 2500 rows across all languages). Prefer exact match then base code.
+  const langCodes = [];
+  if (language) {
+    const lc = String(language).toLowerCase();
+    langCodes.push(lc);
+    if (lc.includes(' ')) langCodes.push(lc.split(' ')[0]);
+    // Common short-code shortcut: "english" → "en", "arabic" → "ar"
+    const shortMap = { english: 'en', arabic: 'ar', french: 'fr', german: 'de', spanish: 'es', italian: 'it', portuguese: 'pt', russian: 'ru', polish: 'pl', turkish: 'tr', dutch: 'nl', greek: 'gr', thai: 'th', japanese: 'jp', korean: 'kr', czech: 'cz', danish: 'dk', swedish: 'se', hungarian: 'hu', vietnamese: 'vn', norwegian: 'nn', indonesian: 'id', bahasa: 'id' };
+    if (shortMap[lc]) langCodes.push(shortMap[lc]);
+  }
+  const storyOf = (name) => {
+    if (!name || !stories) return null;
+    for (const lc of langCodes) {
+      const hit = stories.find(s => s.story_name === name &&
+        (s.language || s.Language || '').toLowerCase() === lc);
+      if (hit) return hit;
+    }
+    return stories.find(s => s.story_name === name) || null;
+  };
 
   // ── Subscriber data ──
   Object.assign(vars, subscriber);
@@ -126,46 +155,68 @@ export function buildVariableMap({
     // ── Stories 1-3 (3-column circle images) ──
     for (let i = 1; i <= 3; i++) {
       const storyName = dc[`story${i}`];
-      const story = findStory(stories, storyName);
+      const story = storyOf(storyName);
       if (story) {
         vars[`story${i}_image`] = img(story.story_image_circle || story.story_image);
         vars[`story${i}_header`] = story.story_header || '';
         vars[`story${i}_body`] = url(story.story_body || '');
         vars[`story${i}_link`] = url(story.story_url || '');
         vars[`story${i}_alias`] = story.story_alias || '';
+        vars[`story${i}_cta`] = story.story_cta || '';
       }
     }
 
-    // ── Stories 4-6 (second 3-column block, mapped to set2 vars) ──
+    // ── Stories 4-6 (second 3-column block). The CHURN template rebinds
+    // @story1_* = @story11_* before the second ContentBlockbyID("34287"),
+    // so populate both the @storyN_set2_* aliases AND the @storyNN_*
+    // (double-letter) names the template expects. ──
     if (dc.story4 && dc.story5 && dc.story6) {
       for (let i = 4; i <= 6; i++) {
         const storyName = dc[`story${i}`];
-        const story = findStory(stories, storyName);
+        const story = storyOf(storyName);
         if (story) {
           const idx = i - 3;
+          const doubled = `${idx}${idx}`; // 11, 22, 33
           vars[`story${idx}_set2_image`] = img(story.story_image_circle || story.story_image);
           vars[`story${idx}_set2_header`] = story.story_header || '';
           vars[`story${idx}_set2_body`] = url(story.story_body || '');
           vars[`story${idx}_set2_link`] = url(story.story_url || '');
           vars[`story${idx}_set2_alias`] = story.story_alias || '';
+          // Double-letter variants used by the template's rebinding pattern
+          vars[`story${doubled}_image`] = img(story.story_image_circle || story.story_image);
+          vars[`story${doubled}_header`] = story.story_header || '';
+          vars[`story${doubled}_body`] = url(story.story_body || '');
+          vars[`story${doubled}_link`] = url(story.story_url || '');
+          vars[`story${doubled}_alias`] = story.story_alias || '';
+          vars[`story${doubled}_cta`] = story.story_cta || '';
         }
       }
     }
 
-    // ── Cash+Miles story (story_left_circle block) ──
-    const cashStory = findStory(stories, dc.cash_miles);
+    // ── Cash+Miles story (story_left_circle block).
+    // CHURN binds @story_left_circle_* = @cash_story_single_* at render time,
+    // so also populate the @cash_story_single_* keys the local binding reads. ──
+    const cashStory = storyOf(dc.cash_miles);
     if (cashStory) {
-      vars.story_left_circle_image = img(cashStory.story_image_circle || cashStory.story_image);
+      const cashImg = img(cashStory.story_image_circle || cashStory.story_image);
+      vars.story_left_circle_image = cashImg;
       vars.story_left_circle_header = cashStory.story_header || '';
       vars.story_left_circle_body = url(cashStory.story_body || '');
       vars.story_left_circle_cta = cashStory.story_cta || '';
       vars.story_left_circle_link = url(cashStory.story_url || '');
       vars.story_left_circle_alias = cashStory.story_alias || '';
+      // Source names used in CHURN conditional rebinding
+      vars.cash_story_single_image = cashImg;
+      vars.cash_story_single_header = cashStory.story_header || '';
+      vars.cash_story_single_body = url(cashStory.story_body || '');
+      vars.cash_story_single_cta = cashStory.story_cta || '';
+      vars.cash_story_single_link = url(cashStory.story_url || '');
+      vars.cash_story_single_link_alias = cashStory.story_alias || '';
     }
 
     // ── Story4 → story_right_circle (used in EBase and similar emails) ──
     const story4Name = dc.story4;
-    const story4 = findStory(stories, story4Name);
+    const story4 = storyOf(story4Name);
     if (story4) {
       vars.story_right_circle_image = img(story4.story_image_circle || story4.story_image);
       vars.story_right_circle_header = story4.story_header || '';
@@ -175,18 +226,46 @@ export function buildVariableMap({
       vars.story_right_circle_alias = story4.story_alias || '';
     }
 
-    // ── Destination/inspiration story (single_story_left block) ──
-    const destStory = findStory(stories, dc.destination_generic);
+    // ── Destination/inspiration story (single_story_left block).
+    // CHURN binds @story_single_* = @story_story_single_* at render time in
+    // the ELSE branch (segments without Cash+Miles), so publish both names. ──
+    const destStory = storyOf(dc.destination_generic);
     if (destStory) {
-      vars.story_single_image = img(destStory.story_image_single || destStory.story_image);
+      const singleImg = img(destStory.story_image_single || destStory.story_image_circle || destStory.story_image);
+      vars.story_single_image = singleImg;
       vars.story_single_header = destStory.story_header || '';
       vars.story_single_subheader = destStory.story_subheader || '';
       vars.story_single_body = url(destStory.story_body || '');
       vars.story_single_cta = destStory.story_cta || '';
       vars.story_single_link = url(destStory.story_url || '');
       vars.story_single_link_alias = destStory.story_alias || '';
+      // Double-prefixed names used by the template's conditional rebindings
+      vars.story_story_single_image = singleImg;
+      vars.story_story_single_header = destStory.story_header || '';
+      vars.story_story_single_subheader = destStory.story_subheader || '';
+      vars.story_story_single_body = url(destStory.story_body || '');
+      vars.story_story_single_cta = destStory.story_cta || '';
+      vars.story_story_single_link = url(destStory.story_url || '');
+      vars.story_story_single_alias = destStory.story_alias || '';
     }
+
+    // ── Segment variable (needed by positional guard evaluation) ──
+    // The template uses @Segment (capital) as the discriminator for the
+    // inspiration/Cash+Miles branches. AMPscript is case-insensitive so
+    // make it available under both casings.
+    if (dc.segment) {
+      vars.Segment = dc.segment;
+      vars.segment = dc.segment;
+    }
+    // Row-count markers used by outer guards — a DC row exists, so
+    // `RowCount(@Email_Content) > 0` must evaluate truthy. We publish a
+    // non-empty string so the evaluator's isFilled() returns true.
+    vars.Email_Content = '1';
   }
+
+  // Same marker for other lookup-result variables the outer guards check.
+  if (headerContent) vars.Header_Content = '1';
+  if (footerContent) vars.Footer_Content = '1';
 
   // ── Footer ──
   if (footerContent) {
@@ -420,6 +499,7 @@ export function renderVariant({
   preheader,
   bodyBlockId,
   threeColBlockId,
+  renderInstructions,
 }) {
   const parts = [];
 
@@ -428,25 +508,38 @@ export function renderVariant({
     parts.push(`<div style="font-size:0px;line-height:1px;mso-line-height-rule:exactly;display:none;max-width:0px;max-height:0px;opacity:0;overflow:hidden;mso-hide:all;">\n${preheader}\n</div>`);
   }
 
-  // Assemble blocks in order
-  for (const blockId of blockOrder) {
+  const renderOne = (blockId, blockVars) => {
     const block = blocks[blockId];
-    if (!block?.html) continue;
-
-    // Body copy block needs special rendering (link splitting)
-    // Auto-detect: the body copy block contains @before_link1 / TreatAsContent(@before_link1)
+    if (!block?.html) return null;
     const isBodyCopyBlock = bodyBlockId
       ? blockId === bodyBlockId
       : block.html.includes('@before_link1') || block.html.includes('before_link1');
-    if (isBodyCopyBlock) {
-      parts.push(renderBodyCopyBlock(vars));
-      continue;
+    if (isBodyCopyBlock) return renderBodyCopyBlock(blockVars);
+    return renderBlock(block.html, blockVars);
+  };
+
+  if (Array.isArray(renderInstructions) && renderInstructions.length > 0) {
+    // Positional rendering — respects duplicate blockIds, IF guards, and
+    // local SET rebindings (e.g. @story1_image = @story11_image before
+    // the second occurrence of the 3-column stories block).
+    let cursor = { ...vars };
+    for (const ins of renderInstructions) {
+      // Apply the SETs that precede this position onto the current cursor
+      // (cascading: later positions inherit rebindings from earlier ones).
+      cursor = applyLocalBindings(cursor, ins.localBindings || []);
+      // Evaluate the guard chain — all must pass (treat unknown as TRUE)
+      const passes = (ins.guards || []).every(g => evaluateGuard(g, cursor));
+      if (!passes) continue;
+      const piece = renderOne(ins.blockId, cursor);
+      if (piece) parts.push(piece);
     }
-
-    // 3-column block might need story set remapping
-    // (handled externally via renderThreeColumnBlock when needed)
-
-    parts.push(renderBlock(block.html, vars));
+  } else {
+    // Legacy: deduplicated block order. Loses position-specific rebindings
+    // but keeps the pipeline working for templates we haven't walked yet.
+    for (const blockId of blockOrder) {
+      const piece = renderOne(blockId, vars);
+      if (piece) parts.push(piece);
+    }
   }
 
   const content = parts.filter(Boolean).join('\n\n');
@@ -475,6 +568,13 @@ export function renderAllVariants({ manifest, data, subscriber, templateShell, o
   const market = options.market || 'uk/english';
   const results = {};
 
+  // Pre-compute positional render instructions from the raw template so every
+  // variant can reuse them (walks the AMPscript for block positions, guards
+  // and local SET rebindings between ContentBlockbyID tokens).
+  const renderInstructions = manifest._templateHtml
+    ? buildRenderInstructions(manifest._templateHtml)
+    : null;
+
   // Find the main dynamic content DE — prioritize 'dynamic' in name
   const dcCandidatesRA = Object.entries(deData).filter(
     ([name]) => {
@@ -500,10 +600,27 @@ export function renderAllVariants({ manifest, data, subscriber, templateShell, o
   const caveatRows = Object.entries(deData).find(([n]) => n.toLowerCase().includes('caveat'))?.[1] || [];
   const salutationRows = Object.entries(deData).find(([n]) => n.toLowerCase().includes('salutation'))?.[1] || [];
 
-  const headerContent = headerRows[0] || null;
-  const footerContent = footerRows[0] || null;
-  const caveat = caveatRows[0] || null;
-  const salutation = salutationRows[0] || null;
+  // Resolve a DE row by language. Emirates DEs are inconsistent —
+  // Header/Footer use 'ENGLISH'/'ARABIC', Stories use short codes ('en'/'ar'),
+  // REF_Salutation uses short codes too. The first row of a DE is often
+  // Arabic, so `rows[0]` is the classic source of AR-leaking-into-EN bugs.
+  function pickRow(rows, langHint) {
+    if (!rows || rows.length === 0) return null;
+    const candidates = [];
+    if (langHint) {
+      const s = String(langHint).toLowerCase();
+      candidates.push(s);
+      if (s.includes(' ')) candidates.push(s.split(' ')[0]);
+      const short = { english: 'en', arabic: 'ar', french: 'fr', german: 'de', spanish: 'es', italian: 'it', portuguese: 'pt', russian: 'ru', polish: 'pl', turkish: 'tr', dutch: 'nl' }[s];
+      if (short) candidates.push(short);
+    }
+    for (const c of candidates) {
+      const hit = rows.find(r => (r.language || r.Language || '').toLowerCase() === c);
+      if (hit) return hit;
+    }
+    // Final fallback: prefer English before rows[0] (which is often Arabic).
+    return rows.find(r => /^english|^en$/i.test(r.language || r.Language || '')) || rows[0];
+  }
 
   // Get segments from manifest or from data
   let segments = manifest.variants.segments.length > 0
@@ -537,16 +654,20 @@ export function renderAllVariants({ manifest, data, subscriber, templateShell, o
     if (!segmentContent) continue;
 
     for (const headerType of headerTypes) {
+      const variantLang = segmentContent?.language || '';
       const vars = buildVariableMap({
         subscriber,
-        headerContent,
-        footerContent,
+        headerContent: pickRow(headerRows, variantLang),
+        footerContent: pickRow(footerRows, variantLang),
         segmentContent,
+        // Stories DE uses short codes — pass through variantLang and the
+        // mapper in buildVariableMap expands to 'en'/'ar' etc.
         stories: storiesRows,
-        caveat,
-        salutation,
+        caveat: pickRow(caveatRows, variantLang),
+        salutation: pickRow(salutationRows, variantLang),
         imageMap,
         market,
+        language: variantLang,
       });
 
       // Determine block order for this variant
@@ -579,6 +700,7 @@ export function renderAllVariants({ manifest, data, subscriber, templateShell, o
         blockOrder,
         templateShell,
         preheader: vars.Preheader,
+        renderInstructions,
       });
     }
   }
@@ -597,6 +719,11 @@ export function generatePreviewVariants({ manifest, data, templateShell, options
   const { blocks, deData, imageMap } = data;
   const market = options.market || 'uk/english';
   const previews = [];
+  // Positional render instructions (walks AMPscript for block positions,
+  // guards, and local SET rebindings).
+  const renderInstructions = manifest._templateHtml
+    ? buildRenderInstructions(manifest._templateHtml)
+    : null;
 
   // Find DEs by role (returns ALL rows — will be filtered by language per variant)
   const findDE = (test) => Object.entries(deData).find(([n]) => test(n.toLowerCase()))?.[1] || [];
@@ -786,6 +913,7 @@ export function generatePreviewVariants({ manifest, data, templateShell, options
           salutation,
           imageMap,
           market,
+          language,
         });
 
         // Swap header blocks for this variant
@@ -800,6 +928,7 @@ export function generatePreviewVariants({ manifest, data, templateShell, options
         const html = renderVariant({
           blocks: variantBlocks, vars, blockOrder, templateShell,
           preheader: vars.Preheader,
+          renderInstructions,
         });
 
         // Build descriptive filename and metadata
