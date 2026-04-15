@@ -45,7 +45,7 @@ export default function ProjectAgentChat({ projectId, session, completedSessions
                 // when the user is asking the agent to analyze an existing email.
                 // Explicit additions still work via the <!--NEW_BLOCK:--> marker, which
                 // is handled in onStreamComplete below (not here).
-                const canvasHasContent = !!currentHtmlRef.current;
+                const canvasHasContent = !!(currentHtmlRef.current) || (canvasBlocks?.length > 0);
                 if (!canvasHasContent) {
                     event.html_sources.forEach(block => onHtmlBlock(block));
                 }

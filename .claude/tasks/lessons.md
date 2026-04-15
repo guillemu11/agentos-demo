@@ -152,6 +152,61 @@ Renderer prueba los candidatos antes de rendirse. Además populates `info_item{N
 - Frontend reacciona a `journey_state` actualizando `dsl`, que re-computa `dslToGraph(dsl)` + auto-layout dagre → ReactFlow re-renderiza con animación `--newly-added` (shimmer 900ms en el primer id nuevo detectado).
 - Deploy = una tool call más (`deploy_journey_draft`) que llama a `deployJourney` que orquesta folder → DE → query → shells → compile → Interaction POST. Siempre Draft. Status persiste a `deployed_draft`.
 
+### 2026-04-15 — Journey Builder deploy a SFMC: 6 bugs en cascada
+
+**Contexto:** primer deploy real de un journey (Dubai Holiday Reactivation) a SFMC Interactions API. Error tras error hasta que funcionó.
+
+---
+
+**Bug 1 — Shell naming collision: asset ya tomado en MC**
+**Error:** `MC REST 400: Asset names within a category and asset type must be unique. Dubai_Escapes_Hero is already taken.`
+**Causa:** El server estaba cacheando el módulo `shells.js` antiguo (sin stamp). Node.js ESM cachea módulos al importarlos — modificar el archivo en disco NO recarga el código en memoria. El stamp (`Dubai_Escapes_Hero_150426_1430`) evita colisiones incluso con assets en la papelera de MC.
+**Regla:** Después de cualquier cambio a un módulo backend, SIEMPRE reiniciar el server. El ESM cache no hace hot-reload. SFMC además retiene nombres de assets "eliminados" en su recycle bin — el stamp por minuto es suficiente protección para retries.
+
+---
+
+**Bug 2 — JSON Deserialization Exception en POST /interaction/v1/interactions**
+**Error:** `MC REST 400: JSON Deserialization Exception: Location Unknown`
+**Causa:** Dos problemas simultáneos: (a) `arguments: []` (array vacío) en activities donde MC espera un objeto `{}`; (b) `eventDefinitionKey: null` en el trigger donde MC espera string vacío `""`. MC usa Jackson (Java) — null donde espera String y [] donde espera Map lanza JsonMappingException genérico sin indicar el campo exacto.
+**Regla:** En payloads SFMC, nunca mandar `null` para campos string (usar `""`) y nunca mandar `[]` para campos que son objetos (usar `{}`). Ante cualquier 400 "Location Unknown", dumpear el payload a `/tmp` y comparar field-by-field con un journey real fetcheado via GET.
+
+---
+
+**Bug 3 — Activities blancas en el canvas de JB (tipos de actividad incorrectos)**
+**Error:** Wait y EngagementSplit aparecían como nodos blancos e inclicables en Journey Builder UI.
+**Causa:**
+- Wait: mandábamos `type: "WAITBYDURATION"` pero MC JB UI solo renderiza `type: "WAIT"` (con `metaData.uiType: "WAITBYDURATION"`). El API acepta ambos pero el canvas renderer solo conoce `"WAIT"`.
+- EngagementSplit: mandábamos `type: "ENGAGEMENTSPLIT"` — ese tipo NO existe. El real es `type: "ENGAGEMENTDECISION"` con `configurationArguments.refActivityCustomerKey` + `statsTypeId` (no `sendActivityKey` + `metric`).
+- Email: faltaba `applicationExtensionKey: "jb-email-activity"` en configurationArguments — sin él el canvas no sabe qué renderer usar.
+**Regla:** Para conocer el shape correcto de una actividad SFMC JB, SIEMPRE fetchear un journey real (GET /interaction/v1/interactions/{id}) y comparar. Los nombres en la UI y en la API divergen. Tabla de correcciones:
+  - Wait: `type="WAIT"`, `metaData.uiType="WAITBYDURATION"`, `waitUnit` en MAYÚSCULAS (`"DAYS"`)
+  - EngagementSplit: `type="ENGAGEMENTDECISION"`, `refActivityCustomerKey`, `statsTypeId` (1=Sent,2=Opened,3=Clicked,4=Unsub), `engagementUrls:{urls:[]}`
+  - Email: añadir `applicationExtensionKey: "jb-email-activity"` en configurationArguments
+
+---
+
+**Bug 4 — Entry source (trigger) sin DE visible en canvas**
+**Error:** El trigger mostraba "DATA EXTENSION" genérico sin vincular la DE creada.
+**Causa:** `type: "AutomationAudience"` con `dataExtensionId` no muestra la DE en el canvas. Para que el canvas muestre la DE real, necesitas `type: "EmailAudience"` con `eventDefinitionKey: "DEAudience-{GUID}"` (obtenido de POST `/interaction/v1/eventDefinitions`).
+**Regla:** Al crear un journey via API, añadir el paso `createEventDefinition` ANTES de `createInteraction`. El event definition key (`DEAudience-{GUID}`) va en `triggers[0].metaData.eventDefinitionKey`. Si falla (permisos), el fallback a `AutomationAudience` es seguro — no rompe el journey, solo no muestra el nombre de la DE.
+
+---
+
+**Bug 5 — DE del target con tipos y maxLength incorrectos**
+**Error:** `threshold_destination` creado como `Date` (debería ser `Text(20)`). Todos los campos Text con `maxLength: 254` en vez de sus longitudes reales.
+**Causa:** `fetchDeSchemaCompact` estaba fallando silenciosamente (devuelve null) y el fallback `inferType()` tenía un falso positivo: `endsWith('on')` matcheaba `threshold_destination` (termina en "on") → `Date`. Además, sin master schema, todos los Text defaultean a 254.
+**Fix:**
+1. `inferType` corregido: solo `includes('_date')`, `endsWith('date')`, `endsWith('_at')` → Date. Eliminado `endsWith('on')` que era demasiado amplio.
+2. `BAU_MASTER_SCHEMA` hardcodeado en `bau-master-schema.js` — fallback garantizado incluso si el fetch de MC falla. Incluye todos los ~200 campos de la master DE con tipos y longitudes exactas.
+**Regla:** NUNCA confiar solo en heurísticas de nombre para inferir tipos de DE. El schema real de la BAU master está en `packages/core/journey-builder/bau-master-schema.js`. Si añades columnas nuevas al SELECT de una query Journey, verificar que estén en ese archivo. El `inferType` es última línea de defensa, no la fuente de verdad.
+
+---
+
+**Bug 6 — Vite no arrancaba al reiniciar solo Express**
+**Error:** App no cargaba — puerto 4000 no escuchaba.
+**Causa:** Al reiniciar solo `node server.js` directamente (en lugar de `npm start`), Vite (puerto 4000) no se iniciaba. `npm start` lanza `concurrently "npm run server" "npm run dev"`. Si se inicia solo Express, el frontend no existe.
+**Regla:** Siempre reiniciar con ambos procesos. Para sesiones de debug donde se necesita reiniciar frecuentemente Express sin Vite, usar `node server.js` para Express Y verificar que Vite siga activo en 4000. Si no: `npx vite --port 4000` en apps/dashboard.
+
 ### 2026-04-15 — Railway migration: type mismatch + SSL gotcha
 
 **Contexto:** aplicar la migration `202604150001_journeys.sql` contra Railway. Dos falencias consecutivas.

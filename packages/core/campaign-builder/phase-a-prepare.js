@@ -13,6 +13,32 @@ import { generateImage, initGemini, isGeminiReady } from '../ai-providers/gemini
 
 const IMG_TOKEN_RE = /\[\[IMG:\s*([^\]]+?)\s*\]\]/g;
 
+// Retry wrapper for Anthropic streaming calls. Handles 429 rate-limit errors
+// by waiting for the TPM window to reset (~62s) before re-attempting.
+// Uses prompt-caching betas so cached tokens don't count toward the rate limit.
+async function streamWithRetry(anthropic, params, onText, onProgress, maxRetries = 2) {
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      const waitSec = 62;
+      onProgress?.('rate-limit-retry', { attempt, waitSec });
+      console.log(`[phase-a] 429 rate limit — waiting ${waitSec}s before retry ${attempt}/${maxRetries}`);
+      await new Promise(r => setTimeout(r, waitSec * 1000));
+    }
+    let text = '';
+    try {
+      const stream = anthropic.messages.stream(params);
+      stream.on('text', chunk => { text += chunk; onText?.(chunk); });
+      await stream.finalMessage();
+      return text;
+    } catch (err) {
+      lastErr = err;
+      if (err.status !== 429) throw err;
+    }
+  }
+  throw lastErr;
+}
+
 // Map short lang codes to the full AMPscript names Emirates blocks use.
 const LANG_FULL = {
   en: 'ENGLISH', ar: 'ARABIC', fr: 'FRENCH', de: 'GERMAN', es: 'SPANISH',
@@ -254,32 +280,23 @@ async function generateDERowsFromContext({
     maxLength: f.maxLength,
   }));
 
-  const prompt = `You are producing Marketing Cloud Data Extension rows for an Emirates "${typeDef.name}" campaign.
-
-Brief from user:
-${brief?.trim() || '(no brief — use sensible defaults)'}
-
-Targeting:
-- languages: ${JSON.stringify(languages)}
-- market: ${market}
-- variant: ${variant}
+  // Cacheable prefix: schema + rules (same for same campaign type).
+  // Variable suffix: brief + targeting + image catalog (changes per request).
+  const cachedPrefix = `You are producing Marketing Cloud Data Extension rows for an Emirates "${typeDef.name}" campaign.
 
 DE schema (use these exact field names):
 ${JSON.stringify(schemaDigest, null, 2)}
 
-Available image assets (already generated — use the numeric ID for any image field):
-${imageCatalog}
-
 Output rules:
-1. Emit ONE row per language in ${JSON.stringify(languages)}.
+1. Emit ONE row per language in the languages list (provided below).
 2. Primary keys on every row:
-     campaign_id = "${campaignId}"
+     campaign_id = "<provided below>"
      language    = "<lang code: en|ar|...>"
      tier        = "all"
      global      = "true"
-     market_code = "${String(market || '').toLowerCase()}"
+     market_code = "<market provided below, lowercase>"
 3. Populate every field you can fill from the brief — AMPscript guards hide blocks where driver fields are empty, so fill completely for the blocks you want rendered.
-4. For image fields (names matching image|logo|hero|masthead|banner), use one of the numeric IDs from the catalog above that best fits. Never invent IDs.
+4. For image fields (names matching image|logo|hero|masthead|banner), use one of the numeric IDs from the image catalog below that best fits. Never invent IDs.
 5. For TEXT fields: punchy marketing copy faithful to the brief, within maxLength.
 6. For RTL languages (ar, he): translate the text; image IDs stay numeric.
 7. For fields you have no content for, OMIT them entirely — do not emit null or empty string.
@@ -287,14 +304,34 @@ Output rules:
 Respond with EXACTLY this JSON and nothing else (no markdown fences):
 { "rows": [ { row for language 1 }, ... ] }`;
 
-  let text = '';
-  const stream = anthropic.messages.stream({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 8192,
-    messages: [{ role: 'user', content: prompt }],
-  });
-  stream.on('text', chunk => { text += chunk; });
-  await stream.finalMessage();
+  const variableSuffix = `Brief from user:
+${brief?.trim() || '(no brief — use sensible defaults)'}
+
+Targeting:
+- campaign_id: "${campaignId}"
+- languages: ${JSON.stringify(languages)}
+- market: ${market}
+- variant: ${variant}
+
+Available image assets (already generated — use the numeric ID for any image field):
+${imageCatalog}`;
+
+  const text = await streamWithRetry(
+    anthropic,
+    {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 8192,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: cachedPrefix, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: variableSuffix },
+        ],
+      }],
+    },
+    null,
+    onProgress,
+  );
 
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) throw new Error(`Row generation: Claude did not return JSON. Got: ${text.slice(0, 400)}`);
@@ -331,31 +368,22 @@ async function askClaudeToFillBlocks({
     .map(b => `--- BLOCK ${b.id} (${b.name}) ---\n${b.html}`)
     .join('\n\n');
 
-  const prompt = `You are filling content for an Emirates "${typeDefName}" email based on a brief.
-
-Brief from user:
-${brief?.trim() || '(no brief — use sensible defaults for this campaign type)'}
-
-Output language: ${langName} (${language}).
-Market: ${market}. Variant: ${variant}.
-
-Below is the HTML of every content block from the template, in order. Each block is Emirates HTML with AMPscript tokens like %%=v(@main_header)=%%, %%[IF ...]%%, ContentBlockbyID(...), etc.
+  // Split into cacheable prefix (template blocks — same for same campaign type+language)
+  // and non-cacheable suffix (brief + context — changes per request).
+  // Cached input tokens don't count toward the TPM rate limit.
+  const cachedPrefix = `You are an Emirates email content specialist. Below are the HTML blocks from a "${typeDefName}" email template. Each block contains AMPscript tokens and IF/ELSEIF/ENDIF language branches that have already been resolved to the active language.
 
 YOUR JOB for each block:
-1. Decide if the block is relevant to the brief. If NOT, omit it from output.
+1. Decide if the block is relevant to the campaign brief (provided below). If NOT, omit it from output.
 2. If relevant, emit the block's HTML with:
    - AMPscript variable tokens (%%=v(@foo)=%%, %%=TreatAsContent(@foo)=%%, %%foo%%, {FlightNo}-style runtime tokens) REPLACED with concrete CONTENT in ${langName} faithful to the brief. Headlines, body copy, CTA text, URLs — all must be real.
-   - AMPscript control flow (%%[IF ...]%%...%%[ELSE]%%...%%[ENDIF]%%) RESOLVED: pick the branch appropriate for language=${langName}, variant=${variant}, and inline only THAT branch's content (drop the others entirely).
+   - AMPscript control flow (%%[IF ...]%%...%%[ELSE]%%...%%[ENDIF]%%) RESOLVED: inline only the branch matching language=${langName}, variant=${variant} (drop all others).
    - Any <img src="..."> whose src points at an AMPscript token or asset placeholder REPLACED with src="[[IMG: detailed English one-sentence description of the image that fits the brief]]".
    - Any unresolvable AMPscript, Lookup(), LookupRows(), Field() calls stripped cleanly — leave the surrounding HTML intact.
 3. Preserve HTML layout, tables, inline styles, classes. Do NOT add or remove structural tags.
 4. For RTL languages (Arabic, Hebrew): translate all text; keep image prompts in English.
 5. Content MUST be specific to the brief — no generic filler, no placeholder copy, no lorem ipsum.
 6. Every block you include should contain visible content after substitution. If a block would come out empty or only whitespace, OMIT it.
-
-Blocks (${blocks.length} total, in render order):
-
-${blocksPayload}
 
 Output format — CRITICAL: do NOT use JSON. Use the following delimited plain-text format so large HTML values don't need escaping:
 
@@ -369,24 +397,43 @@ Rules:
 - One "<<<BLOCK:ID>>>" line per included block, followed by the raw filled HTML on subsequent lines.
 - Close the response with a single "<<<END>>>" line.
 - Include ONLY the blocks you chose to render. Omit irrelevant ones entirely.
-- Do NOT output JSON, markdown fences, commentary, or any prose outside the block delimiters.`;
+- Do NOT output JSON, markdown fences, commentary, or any prose outside the block delimiters.
+
+Template blocks (${blocks.length} total, in render order):
+
+${blocksPayload}`;
+
+  const variableSuffix = `Campaign brief:
+${brief?.trim() || '(no brief — use sensible defaults for this campaign type)'}
+
+Output language: ${langName} (${language}). Market: ${market}. Variant: ${variant}.
+
+Fill the blocks above based on this brief and campaign details.`;
 
   // Streaming is required by the SDK for long-running generations (>10min risk).
-  let text = '';
-  const stream = anthropic.messages.stream({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 32000,
-    messages: [{ role: 'user', content: prompt }],
-  });
+  // streamWithRetry handles 429 rate limits with backoff.
   let lastReport = Date.now();
-  stream.on('text', chunk => {
-    text += chunk;
-    if (Date.now() - lastReport > 2000) {
-      onProgress('generate:progress', { language, chars: text.length });
-      lastReport = Date.now();
-    }
-  });
-  await stream.finalMessage();
+  const text = await streamWithRetry(
+    anthropic,
+    {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 32000,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: cachedPrefix, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: variableSuffix },
+        ],
+      }],
+    },
+    chunk => {
+      if (Date.now() - lastReport > 2000) {
+        onProgress('generate:progress', { language, chars: chunk.length });
+        lastReport = Date.now();
+      }
+    },
+    onProgress,
+  );
 
   // Parse delimited text: <<<BLOCK:id>>>\n<html>\n<<<BLOCK:next>>>...<<<END>>>
   // Much safer than JSON for large unescaped HTML values (JSON.parse breaks at

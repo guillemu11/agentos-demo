@@ -4,6 +4,8 @@ import {
   Loader2, Rocket, ArrowLeft, CheckCircle2, Circle,
   MonitorSmartphone, Smartphone, AlertTriangle, Sparkles,
 } from 'lucide-react';
+import AIIdeasTab from '../components/ai-proposals/AIIdeasTab.jsx';
+import { AI_PROPOSALS } from '../data/aiProposals.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -342,6 +344,9 @@ export default function CampaignCreationPage() {
   const [pushing, setPushing] = useState(false);
   const [pushProgress, setPushProgress] = useState('');
   const [pushError, setPushError] = useState('');
+  const [pageTab, setPageTab] = useState('build');
+
+  const campaignHighPriorityCount = AI_PROPOSALS.campaignCreation.filter(p => p.priority === 'urgent' || p.priority === 'high').length;
 
   useEffect(() => {
     fetch(`${API_URL}/campaigns/bau/types`, { credentials: 'include' })
@@ -459,7 +464,27 @@ export default function CampaignCreationPage() {
         </ol>
       </header>
 
-      {view === 'brief' && (
+      <div className="bau-page-tabs">
+        <button
+          className={`bau-page-tab${pageTab === 'build' ? ' active' : ''}`}
+          onClick={() => setPageTab('build')}
+          type="button"
+        >
+          Build
+        </button>
+        <button
+          className={`bau-page-tab${pageTab === 'ai-ideas' ? ' active' : ''}`}
+          onClick={() => setPageTab('ai-ideas')}
+          type="button"
+        >
+          ✦ AI Ideas
+          {campaignHighPriorityCount > 0 && (
+            <span className="ai-tab-badge">{campaignHighPriorityCount}</span>
+          )}
+        </button>
+      </div>
+
+      {pageTab === 'build' && view === 'brief' && (
         <>
           <BriefPanel t={t} types={types} onBuild={handleBuild} busy={building} />
           {(buildProgress || buildError) && (
@@ -470,7 +495,7 @@ export default function CampaignCreationPage() {
         </>
       )}
 
-      {view === 'preview' && build && (
+      {pageTab === 'build' && view === 'preview' && build && (
         <PreviewGate
           t={t}
           build={build}
@@ -480,6 +505,14 @@ export default function CampaignCreationPage() {
           pushing={pushing}
           pushProgress={pushProgress}
           pushError={pushError}
+        />
+      )}
+
+      {pageTab === 'ai-ideas' && (
+        <AIIdeasTab
+          proposals={AI_PROPOSALS.campaignCreation}
+          onDemand
+          metaText="Generated on demand"
         />
       )}
     </div>

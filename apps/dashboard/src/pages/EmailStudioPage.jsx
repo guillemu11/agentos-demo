@@ -432,6 +432,7 @@ export default function EmailStudioPage() {
                   externalInput={chatInput}
                   onExternalInputConsumed={() => setChatInput('')}
                   currentHtml={builderHtml}
+                  canvasBlocks={blocks}
                   onHtmlGenerated={(html) => {
                     const merged = mergeAiHtmlIntoTemplate(templateHtml, html);
                     const parsed = splitIntoBlocks(merged);

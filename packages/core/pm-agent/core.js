@@ -872,6 +872,7 @@ If [RELEVANT KNOWLEDGE] has email blocks:
 Those blocks are automatically placed on the canvas by the system — you do NOT need to output HTML.
 ⚠️ CRITICAL: NEVER output HTML code (no code fences, no raw tags, no full HTML documents) in your text response.
 Your text response must be PLAIN TEXT ONLY: briefly list which blocks were placed (e.g. "I've added Header, Body Copy, CTA and Footer to the canvas.") and ask what adjustments are needed.
+⚠️ EXCEPTION TO RULE 3: If this system prompt includes a "## Current Canvas HTML" or "## Current Canvas State" section, the canvas already has an email loaded. Do NOT apply Rule 3. Instead, apply Rule 1 (PATCH) — output <!--PATCH:BlockName--> for each block the user wants to update with new content.
 
 **RULE 4 — HTML GENERATION** (no library blocks found, canvas empty):
 Only use this rule if [RELEVANT KNOWLEDGE] contains NO email blocks.

@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
+import AIIdeasTab from '../components/ai-proposals/AIIdeasTab.jsx';
+import { AI_PROPOSALS } from '../data/aiProposals.js';
 import { spyNetworkData } from '../data/agentViewMocks.js';
 import { ArrowLeft, Mail, ShoppingCart, Clock, Search, Download, Code, Pin, Tag, Users, Eye, Zap } from 'lucide-react';
 
@@ -469,6 +471,11 @@ function PersonaDetail({ persona, onBack, t }) {
     { id: 'timeline', label: t('spyNetwork.timeline') },
     { id: 'emails', label: t('spyNetwork.emails'), count: persona.emails.length },
     { id: 'notes', label: t('spyNetwork.notes'), count: persona.notes.length },
+    {
+      id: 'ai-ideas',
+      label: '✦ AI Ideas',
+      count: AI_PROPOSALS.competitorAnalysis.filter(p => p.priority === 'high' || p.priority === 'urgent').length,
+    },
   ];
 
   return (
@@ -528,6 +535,13 @@ function PersonaDetail({ persona, onBack, t }) {
       {activeTab === 'timeline' && <TimelineTab persona={persona} t={t} />}
       {activeTab === 'emails' && <EmailsTab persona={persona} t={t} />}
       {activeTab === 'notes' && <NotesTab persona={persona} t={t} />}
+      {activeTab === 'ai-ideas' && (
+        <AIIdeasTab
+          proposals={AI_PROPOSALS.competitorAnalysis}
+          onDemand={false}
+          metaText="Background scan · 45 min ago"
+        />
+      )}
     </div>
   );
 }

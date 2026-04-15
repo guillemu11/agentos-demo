@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Sparkles, Wrench, Check, AlertTriangle } from 'lucide-react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
+import ChatPromptChips from '../ai-proposals/ChatPromptChips.jsx';
+import AIIdeasTab from '../ai-proposals/AIIdeasTab.jsx';
+import { CHAT_PROMPT_CHIPS, AI_PROPOSALS } from '../../data/aiProposals.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -21,7 +24,10 @@ export default function UnifiedChatPanel({ activeVariant, onApplyPatch }) {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [streaming, setStreaming] = useState(false);
+    const [panelTab, setPanelTab] = useState('chat');
     const scrollRef = useRef(null);
+
+    const highPriorityCount = AI_PROPOSALS.studio.proposals.filter(p => p.priority === 'urgent' || p.priority === 'high').length;
 
     useEffect(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -112,13 +118,43 @@ export default function UnifiedChatPanel({ activeVariant, onApplyPatch }) {
 
     return (
         <aside className="us-chat">
-            <header className="us-chat-header">
-                <Sparkles size={14} />
-                <span>{t('unifiedStudio.chat.title')}</span>
+            <header className="us-chat-header" style={{ gap: 0, padding: 0 }}>
+                <button
+                    className={`journey-sidebar-tab${panelTab === 'chat' ? ' active' : ''}`}
+                    onClick={() => setPanelTab('chat')}
+                    type="button"
+                    style={{ flex: 1, padding: '10px 8px' }}
+                >
+                    <Sparkles size={12} />
+                    Chat
+                </button>
+                <button
+                    className={`journey-sidebar-tab${panelTab === 'ai-ideas' ? ' active' : ''}`}
+                    onClick={() => setPanelTab('ai-ideas')}
+                    type="button"
+                    style={{ flex: 1, padding: '10px 8px' }}
+                >
+                    ✦ AI Ideas
+                    {highPriorityCount > 0 && <span className="ai-tab-badge">{highPriorityCount}</span>}
+                </button>
             </header>
+            {panelTab === 'ai-ideas' ? (
+                <AIIdeasTab
+                    proposals={AI_PROPOSALS.studio.proposals}
+                    onDemand
+                    metaText="Analysis of active variant · now"
+                />
+            ) : (
+            <>
             <div className="us-chat-messages" ref={scrollRef}>
                 {messages.length === 0 && (
-                    <div className="us-chat-empty">{t('unifiedStudio.chat.empty')}</div>
+                    <div className="us-chat-empty">
+                        <div style={{ marginBottom: 8 }}>{t('unifiedStudio.chat.empty')}</div>
+                        <ChatPromptChips
+                            chips={CHAT_PROMPT_CHIPS.studio}
+                            onSelect={(chip) => { setInput(chip); }}
+                        />
+                    </div>
                 )}
                 {messages.map((m, i) => {
                     if (m.kind === 'text') {
@@ -184,10 +220,17 @@ export default function UnifiedChatPanel({ activeVariant, onApplyPatch }) {
                     rows={2}
                     disabled={streaming}
                 />
+                <ChatPromptChips
+                    chips={CHAT_PROMPT_CHIPS.studio}
+                    onSelect={(chip) => setInput(chip)}
+                    asButton
+                />
                 <button className="us-btn us-btn-primary" onClick={send} disabled={streaming || !input.trim()}>
                     <Send size={14} />
                 </button>
             </div>
+            </>
+            )}
         </aside>
     );
 }

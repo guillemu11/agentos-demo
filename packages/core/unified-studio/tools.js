@@ -73,6 +73,26 @@ export const UNIFIED_STUDIO_TOOLS = [
         client_mutation: true,
     },
     {
+        name: 'fill_block_variables',
+        description: 'Replace AMPscript variables (%%=v(@varName)=%% and %%=TreatAsContent(@varName)=%%) in an existing canvas block with real content values. Use this — NOT update_block — when the user asks to fill, populate, or generate content for existing blocks.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                blockId: {
+                    type: 'string',
+                    description: 'The exact blockId from canvas_blocks context (e.g. "b_em_GlobalBodyCopy_abc123")',
+                },
+                variables: {
+                    type: 'object',
+                    description: 'Map of AMPscript variable name (without @) → real value. E.g. { "body_copy": "Discover Australia...", "body_cta": "Book Now" }',
+                    additionalProperties: { type: 'string' },
+                },
+            },
+            required: ['blockId', 'variables'],
+        },
+        client_mutation: false,
+    },
+    {
         name: 'remove_block',
         description: 'Remove a block from the active variant. Only when user explicitly asks.',
         input_schema: {
@@ -253,6 +273,26 @@ export async function executeUnifiedStudioTool(toolName, input, ctx) {
                 },
             };
         }
+        if (toolName === 'fill_block_variables') {
+            const { blockId, variables } = input;
+            const { blockHtmlMap } = ctx;
+            if (!blockHtmlMap) return { text: 'No canvas blocks available.' };
+            const block = blockHtmlMap[blockId];
+            if (!block) return { text: `Block "${blockId}" not found in canvas. Check blockId from canvas_blocks context.` };
+
+            let html = block.html || '';
+            for (const [varName, value] of Object.entries(variables || {})) {
+                const re1 = new RegExp(`%%=v\\(@${varName}\\)=%%`, 'g');
+                html = html.replace(re1, value);
+                const re2 = new RegExp(`%%=TreatAsContent\\(@${varName}\\)=%%`, 'g');
+                html = html.replace(re2, value);
+            }
+            return {
+                text: `Filled ${Object.keys(variables || {}).length} variable(s) in block "${blockId}".`,
+                patch: { op: 'update_block', args: { blockId, html } },
+            };
+        }
+
     } catch (err) {
         return { text: `Tool ${toolName} failed: ${err.message}` };
     }
@@ -332,4 +372,13 @@ WORKFLOW RULES (strict)
 
 5. Never invent block ids. If search returned nothing, search again with a different query or admit the library has no match.
 
-6. Never call remove_block unless the user explicitly asked.`;
+6. Never call remove_block unless the user explicitly asked.
+
+7. FILL / POPULATE EXISTING BLOCKS — triggers when user says "fill content", "add real content", "generate content", "populate", "replace variables", "put real copy", or similar WITHOUT requesting new blocks:
+   - Do NOT call search_emirates_blocks or import_emirates_block
+   - Read canvas_blocks from the variant context — it lists each blockId, label, and its AMPscript variable names
+   - For each block that has vars listed (not "(no vars)"), call fill_block_variables with:
+     { blockId: <exact id from canvas_blocks>, variables: { varName: contextually-appropriate-real-value, ... } }
+   - Generate values that are relevant to the campaign brief (topic, destination, audience, offer)
+   - Blocks with "(no vars)" have no AMPscript variables — skip them silently
+   - Call all fill_block_variables in a single turn — do not explain before running them`;
