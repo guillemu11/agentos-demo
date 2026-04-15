@@ -36,6 +36,7 @@ import CompetitorAnalysisPage from './pages/CompetitorAnalysisPage.jsx';
 import BrandAuditPage from './pages/BrandAuditPage.jsx';
 import JourneysListPage from './pages/JourneysListPage.jsx';
 import JourneyBuilderPage from './pages/JourneyBuilderPage.jsx';
+import CampaignCalendarPage from './pages/CampaignCalendarPage.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -136,6 +137,7 @@ createRoot(document.getElementById('root')).render(
                       <Route path="/competitor-analysis" element={<CompetitorAnalysisPage />} />
                       <Route path="/brand-audit" element={<BrandAuditPage />} />
                       <Route path="/journeys" element={<JourneysListPage />} />
+                      <Route path="/calendar" element={<CampaignCalendarPage />} />
                       <Route path="/settings" element={<SettingsPage />} />
                     </Route>
                     {/* Journey builder — full-screen */}

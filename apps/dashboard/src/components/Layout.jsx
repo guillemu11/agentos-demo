@@ -59,6 +59,7 @@ export default function Layout({ user, onLogout }) {
                 { to: '/app/inbox', icon: icons.projectManager, label: t('layout.projectManager') },
                 { to: '/app/knowledge', icon: icons.knowledgeBase, label: t('layout.knowledgeBase') },
                 { to: '/app/journeys', icon: icons.workflows, label: t('layout.journeys') },
+                { to: '/app/calendar', icon: icons.calendar, label: t('layout.calendar') },
             ],
         },
     ];

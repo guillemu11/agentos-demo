@@ -43,6 +43,7 @@ import {
     setEntrySource as journeySetEntrySource,
 } from '../../packages/core/journey-builder/mutators.js';
 import { deployJourney } from '../../packages/core/journey-builder/deploy.js';
+import { getOrEnrich as enrichCalendarInsights } from './server-calendar-ai.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -415,6 +416,34 @@ async function logAudit(eventType, department, title, details, agentId = null) {
         [eventType, department, agentId, title, details]
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CAMPAIGN CALENDAR — AI insights
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.post('/api/calendar/ai-insights', requireAuth, async (req, res) => {
+    const { events = [], ruleHits = [], rangeStart, rangeEnd } = req.body || {};
+    if (!rangeStart || !rangeEnd) {
+        return res.status(400).json({ error: 'rangeStart and rangeEnd required' });
+    }
+    if (!process.env.ANTHROPIC_API_KEY) {
+        return res.json({
+            enriched: ruleHits.map(h => ({ id: h.id, narrative: h.title, action: '', estimatedImpact: '' })),
+            freeformInsights: [],
+            degraded: true,
+            error: 'ANTHROPIC_API_KEY not configured',
+        });
+    }
+    const truncatedEvents = events.slice(0, 200);
+    const truncatedRuleHits = ruleHits.slice(0, 50);
+    try {
+        const out = await enrichCalendarInsights({ client: anthropic, events: truncatedEvents, ruleHits: truncatedRuleHits, rangeStart, rangeEnd });
+        res.json(out);
+    } catch (err) {
+        console.error('[calendar/ai-insights] error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PROJECTS (original endpoints)
