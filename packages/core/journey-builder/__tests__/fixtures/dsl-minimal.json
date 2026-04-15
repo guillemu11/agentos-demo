@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "name": "Minimal",
+  "entry": {
+    "source": {
+      "type": "master_de_query",
+      "master_de_key": "BAU_Master_Dataset",
+      "sql": "SELECT contact_key, email FROM BAU_Master_Dataset WHERE market='UAE'",
+      "target_de_name": "Minimal_Entry"
+    }
+  },
+  "activities": [
+    {
+      "id": "send_1",
+      "type": "email_send",
+      "campaign_type": "product-offer-ecommerce",
+      "email_shell_name": "Minimal_Send",
+      "mc_email_id": null,
+      "next": null
+    }
+  ]
+}

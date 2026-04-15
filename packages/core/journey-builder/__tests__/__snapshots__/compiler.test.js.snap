@@ -1,0 +1,162 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`compileDslToInteraction > snapshots the full compiled output 1`] = `
+{
+  "activities": [
+    {
+      "configurationArguments": {
+        "waitDuration": 2,
+        "waitUnit": "Days",
+      },
+      "key": "wait_1",
+      "name": "wait_1",
+      "outcomes": [
+        {
+          "arguments": {},
+          "key": "wait_1-out",
+          "next": "split_1",
+        },
+      ],
+      "type": "WAITBYDURATION",
+    },
+    {
+      "configurationArguments": {},
+      "key": "split_1",
+      "name": "split_1",
+      "outcomes": [
+        {
+          "arguments": {
+            "criteriaDescription": "Gold",
+            "expression": "tier == 'Gold'",
+          },
+          "key": "split_1-br-0",
+          "next": "send_gold",
+        },
+        {
+          "arguments": {
+            "criteriaDescription": "Silver",
+            "expression": "tier == 'Silver'",
+          },
+          "key": "split_1-br-1",
+          "next": "send_silver",
+        },
+      ],
+      "type": "MULTICRITERIADECISION",
+    },
+    {
+      "configurationArguments": {
+        "triggeredSend": {
+          "autoAddSubscribers": true,
+          "autoUpdateSubscribers": true,
+          "emailId": 10000,
+          "name": "Gold_Shell",
+        },
+      },
+      "key": "send_gold",
+      "name": "send_gold",
+      "outcomes": [
+        {
+          "arguments": {},
+          "key": "send_gold-out",
+          "next": "wait_engage",
+        },
+      ],
+      "type": "EMAILV2",
+    },
+    {
+      "configurationArguments": {
+        "event": "email_opened",
+        "targetActivityKey": "send_gold",
+        "timeoutHours": 120,
+      },
+      "key": "wait_engage",
+      "name": "wait_engage",
+      "outcomes": [
+        {
+          "arguments": {
+            "path": "event",
+          },
+          "key": "wait_engage-event",
+          "next": "engage_split",
+        },
+      ],
+      "type": "WAITBYEVENT",
+    },
+    {
+      "configurationArguments": {
+        "metric": "opened",
+        "sendActivityKey": "send_gold",
+      },
+      "key": "engage_split",
+      "name": "engage_split",
+      "outcomes": [
+        {
+          "arguments": {
+            "path": "yes",
+          },
+          "key": "engage_split-yes",
+          "next": "send_followup",
+        },
+      ],
+      "type": "ENGAGEMENTSPLIT",
+    },
+    {
+      "configurationArguments": {
+        "triggeredSend": {
+          "autoAddSubscribers": true,
+          "autoUpdateSubscribers": true,
+          "emailId": 10001,
+          "name": "Followup_Shell",
+        },
+      },
+      "key": "send_followup",
+      "name": "send_followup",
+      "outcomes": [],
+      "type": "EMAILV2",
+    },
+    {
+      "configurationArguments": {
+        "triggeredSend": {
+          "autoAddSubscribers": true,
+          "autoUpdateSubscribers": true,
+          "emailId": 10002,
+          "name": "Silver_Shell",
+        },
+      },
+      "key": "send_silver",
+      "name": "send_silver",
+      "outcomes": [],
+      "type": "EMAILV2",
+    },
+  ],
+  "defaults": {
+    "email": [],
+    "properties": {
+      "analyticsTracking": {
+        "enabled": false,
+      },
+    },
+  },
+  "description": "Built by AgentOS Journey Builder",
+  "goals": [],
+  "key": "journey-promo_eid_uae_gcc_150425-TIMESTAMP",
+  "name": "Promo_Eid_UAE_GCC_150425",
+  "status": "Draft",
+  "triggers": [
+    {
+      "configurationArguments": {
+        "dataExtensionId": "TGT-KEY",
+      },
+      "eventDefinitionKey": null,
+      "key": "trigger-1",
+      "metaData": {
+        "eventDefinitionId": null,
+        "sourceInteractionId": "00000000-0000-0000-0000-000000000000",
+      },
+      "name": "Entry",
+      "type": "AutomationAudience",
+    },
+  ],
+  "workflowApiVersion": 1,
+}
+`;
