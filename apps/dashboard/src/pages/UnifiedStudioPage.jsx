@@ -160,6 +160,19 @@ export default function UnifiedStudioPage() {
                 const re = new RegExp(`<div data-block-id="${blockId}"[^>]*>[\\s\\S]*?</div>\\s*`, 'g');
                 next.html.fullHtml = (next.html.fullHtml || '').replace(re, '');
                 next.dirty.html = true;
+            } else if (op === 'import_emirates_block') {
+                const blockId = `b_em_${args.blockId}_${Date.now().toString(36)}`;
+                next.html.blockHtmlMap[blockId] = {
+                    type: 'emirates_library',
+                    label: args.label || args.blockId,
+                    html: args.html || '',
+                    file: args.file,
+                };
+                const blockWrap = `<div data-block-id="${blockId}" data-block-type="emirates_library" data-block-source="${args.file || args.blockId}">${args.html || ''}</div>`;
+                const pos = args.position || 'end';
+                const current = next.html.fullHtml || '';
+                next.html.fullHtml = pos === 'start' ? `${blockWrap}\n${current}` : `${current}\n${blockWrap}`;
+                next.dirty.html = true;
             } else if (op === 'import_mc_asset') {
                 const blockId = `b_mc_${args.assetId}`;
                 next.html.blockHtmlMap[blockId] = {

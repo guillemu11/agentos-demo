@@ -10,18 +10,18 @@ OS para equipos que trabajan con agentes IA. Dashboard centralizado: proyectos, 
 | Styling | CSS custom properties (NO Tailwind) |
 | Backend | Express 5, un solo `server.js` |
 | Auth | bcrypt, express-session, connect-pg-simple |
-| DB | PostgreSQL 16 (Docker, puerto 5434) |
+| DB | PostgreSQL 16 en **Railway** (única fuente de verdad, dev+prod) |
 | AI | Anthropic SDK (`claude-sonnet-4-6`), Google Gemini (embeddings + voz), Pinecone (vectores) |
 | i18n | Custom context + `translations.js` (ES + EN) |
 
 ## Comandos
 
 ```bash
-npm run setup          # DB + deps + migrations
-npm run db:up          # Docker PostgreSQL + Adminer
-npm start              # Vite (4000) + Express (3001) concurrente
-npm run db:down        # Parar DB
+npm run setup          # Deps + migrations contra Railway
+npm start              # Vite (4000) + Express (3002) concurrente
 ```
+
+> **Docker deprecado (2026-04-15).** `npm run db:up` / `db:down` siguen en `package.json` pero no usar — el server ignora la DB local. Railway es única fuente de verdad vía `DATABASE_URL` en `.env`.
 
 ## Reglas criticas
 
@@ -31,7 +31,8 @@ npm run db:down        # Parar DB
 4. **API_URL dinamico** — `import.meta.env.VITE_API_URL || '/api'`
 5. **Un solo server.js** — no fragmentar en routers
 6. **Queries parametrizadas** — siempre `$1, $2`, nunca string concatenation
-7. **ROADMAP.md es el norte** — verificar alineacion antes de proponer features
+7. **DB = Railway siempre** — `DATABASE_URL` apunta a `yamanote.proxy.rlwy.net:42145`. Sin SSL en ese proxy. Toda DDL se aplica contra Railway directamente (no Docker, no localhost). Reflejar cambios también en `packages/core/db/schema.sql`.
+8. **ROADMAP.md es el norte** — verificar alineacion antes de proponer features
 
 ## Reglas por area
 

@@ -50,6 +50,7 @@ export default function Layout({ user, onLogout }) {
             label: t('layout.studios'),
             items: [
                 { to: '/app/studio', icon: icons.studio, label: t('layout.studio') },
+                { to: '/app/image-studio', icon: icons.imageStudio, label: t('layout.imageStudio') },
             ],
         },
         {

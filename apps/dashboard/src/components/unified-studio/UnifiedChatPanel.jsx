@@ -5,6 +5,8 @@ import { useLanguage } from '../../i18n/LanguageContext.jsx';
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 const TOOL_LABELS = {
+    search_emirates_blocks: 'Buscar Emirates',
+    import_emirates_block: 'Importar Emirates',
     add_block: 'Añadir bloque',
     update_block: 'Actualizar bloque',
     remove_block: 'Eliminar bloque',
@@ -144,6 +146,7 @@ export default function UnifiedChatPanel({ activeVariant, onApplyPatch }) {
                                 e.op === 'set_subject' ? `"${e.args.text}"` :
                                 e.op === 'set_preheader' ? `"${e.args.text?.slice(0, 40)}..."` :
                                 e.op === 'add_block' ? `${e.args.type}${e.args.label ? ' — ' + e.args.label : ''}` :
+                                e.op === 'import_emirates_block' ? `${e.args.label || e.args.blockId}` :
                                 e.op === 'import_mc_asset' ? `${e.args.name || '#' + e.args.assetId}` :
                                 e.op === 'remove_block' ? `${e.args.blockId}` :
                                 '';

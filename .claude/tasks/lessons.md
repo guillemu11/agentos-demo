@@ -108,3 +108,23 @@ Renderer prueba los candidatos antes de rendirse. Además populates `info_item{N
 - max_tokens 32000 es razonable para 10-20 bloques; output típico ~20-40KB.
 - Data URIs inline de Imagen (~2.5MB/imagen PNG) son OK para preview en iframe pero engordan el HTML persistido en Postgres. Si escala: mover a `/tmp` o CDN propio.
 - Push a MC (phase B) va a requerir otro approach: derivar rows MC desde el HTML aprobado + subir las imágenes generadas como assets. TBD.
+
+### 2026-04-15 — DB drift: una semana de divergencia Docker local ↔ Railway
+
+**Contexto:** `.env` quedó apuntando a Docker local (`localhost:5434`) durante ~1 semana. Todas las migrations nuevas (7 tablas: `bau_builds`, `campaign_*`, `experiment_*`, `meeting_sessions`, `research_sessions`) se aplicaron solo a Docker. Railway se quedó con el schema viejo mientras acumulaba datos reales (knowledge_chunks 198, tasks 71, etc.) desde otro contexto de ejecución. Resultado: 27 `bau_builds` en local que no existían en Railway, y 7 tablas completas faltantes en prod.
+
+**Raíz:** no existe runner de migrations versionado. Cada DDL se aplica a mano contra "la DB que está conectada en ese momento", lo que equivale a elegir entre los dos entornos de forma silenciosa. Además, el flag de switch (`DATABASE_URL` comentada vs descomentada en `.env`) es invisible en logs y fácil de dejar mal.
+
+**Fix aplicado (cutover 2026-04-15):**
+1. Aplicar las 7 tablas a Railway con `CREATE TABLE IF NOT EXISTS` + indexes + FKs + CHECKs (idempotente).
+2. Copiar `bau_builds` de local → Railway con `ON CONFLICT (id) DO NOTHING`. 4/27 fallaron por payloads grandes de `images_base64` (4-8MB); fix: `JSON.stringify` explícito + cast `$N::jsonb`.
+3. `.env` ahora apunta SOLO a Railway; línea local comentada como legacy.
+4. Docker `npm run db:up` deprecado (no borrar scripts por si acaso, pero no usar).
+
+**Reglas futuras:**
+- **DB = Railway siempre.** Dev y prod comparten DB. Sin Docker local, sin mirror bidi.
+- **Sin SSL** en `yamanote.proxy.rlwy.net:42145` (proxy público). `new Pool({ connectionString })` sin `ssl:`.
+- **JSONB grande (>4MB) vía pg driver:** `JSON.stringify` explícito + cast `::jsonb` en el SQL. Auto-serialización del driver falla con "invalid input syntax for type json" en payloads grandes.
+- **Bidi-sync entre dev y prod es anti-patrón** (colisiones de `SERIAL`, FKs huérfanas). Una sola DB = cero drift posible.
+- **Tech debt crítico:** falta un runner de migrations idempotente (`migrations/NNNN_*.sql` + `schema_migrations` table). Mientras no exista, cualquier DDL manual futuro puede repetir el drift. Priorizar antes del próximo feature que toque schema.
+- **`bau_builds.images_base64`** crece rápido (4-8MB/fila). A 200+ builds mover a Blob storage; a 1000+ es urgente.

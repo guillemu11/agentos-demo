@@ -8394,7 +8394,7 @@ app.post('/api/chat/unified-studio', requireAuth, async (req, res) => {
             const toolResults = [];
             for (const tb of toolUseBlocks) {
                 send({ type: 'tool_start', id: tb.id, name: tb.name, input: tb.input });
-                const { text, patch } = await executeUnifiedStudioTool(tb.name, tb.input, { mc });
+                const { text, patch } = await executeUnifiedStudioTool(tb.name, tb.input, { mc, pool, searchKnowledge });
                 if (patch) send({ type: 'patch', op: patch.op, args: patch.args });
                 send({ type: 'tool_end', id: tb.id, name: tb.name });
                 toolResults.push({ type: 'tool_result', tool_use_id: tb.id, content: text });
