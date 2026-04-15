@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "name": "Promo_Eid_UAE_GCC_150425",
+  "entry": {
+    "source": {
+      "type": "master_de_query",
+      "master_de_key": "BAU_Master_Dataset",
+      "sql": "SELECT contact_key, email, tier, language FROM BAU_Master_Dataset WHERE market='UAE' AND tier IN ('Gold','Silver')",
+      "target_de_name": "Promo_Eid_UAE_GCC_150425_Entry"
+    }
+  },
+  "activities": [
+    { "id": "wait_1", "type": "wait_duration", "amount": 2, "unit": "days", "next": "split_1" },
+    {
+      "id": "split_1", "type": "decision_split",
+      "branches": [
+        { "label": "Gold", "condition": "tier == 'Gold'", "next": "send_gold" },
+        { "label": "Silver", "condition": "tier == 'Silver'", "next": "send_silver" }
+      ],
+      "default_next": null
+    },
+    { "id": "send_gold", "type": "email_send", "campaign_type": "product-offer-ecommerce", "email_shell_name": "Gold_Shell", "mc_email_id": null, "next": "wait_engage" },
+    { "id": "wait_engage", "type": "wait_until_event", "event": "email_opened", "target_activity": "send_gold", "timeout_hours": 120, "on_event_next": "engage_split", "on_timeout_next": null },
+    {
+      "id": "engage_split", "type": "engagement_split",
+      "send_activity_id": "send_gold", "metric": "opened",
+      "yes_next": "send_followup", "no_next": null
+    },
+    { "id": "send_followup", "type": "email_send", "campaign_type": "product-offer-ecommerce", "email_shell_name": "Followup_Shell", "mc_email_id": null, "next": null },
+    { "id": "send_silver", "type": "email_send", "campaign_type": "product-offer-ecommerce", "email_shell_name": "Silver_Shell", "mc_email_id": null, "next": null }
+  ]
+}
