@@ -65,6 +65,7 @@ export default function CampaignCalendarPage() {
   const [categories, setCategories] = useState(ALL_CATEGORIES);
   const [channels, setChannels] = useState(['email']);
   const [enriched, setEnriched] = useState([]);
+  const [freeformInsights, setFreeformInsights] = useState([]);
   const [degraded, setDegraded] = useState(false);
 
   const range = useMemo(() => rangeForScaleDate(scale, currentDate), [scale, currentDate]);
@@ -85,7 +86,7 @@ export default function CampaignCalendarPage() {
 
   useEffect(() => {
     let cancelled = false;
-    if (ruleHits.length === 0) { setEnriched([]); setDegraded(false); return; }
+    if (ruleHits.length === 0) { setEnriched([]); setFreeformInsights([]); setDegraded(false); return; }
     fetch(`${API_URL}/calendar/ai-insights`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -96,11 +97,13 @@ export default function CampaignCalendarPage() {
       .then(data => {
         if (cancelled) return;
         setEnriched(data.enriched || []);
+        setFreeformInsights(data.freeformInsights || []);
         setDegraded(!!data.degraded);
       })
       .catch(() => {
         if (cancelled) return;
         setEnriched([]);
+        setFreeformInsights([]);
         setDegraded(true);
       });
     return () => { cancelled = true; };
@@ -129,7 +132,6 @@ export default function CampaignCalendarPage() {
         scale={scale}
         onScaleChange={onScaleChange}
         healthScore={healthScore}
-        onToggleFilters={() => {}}
       />
       <CalendarFilterBar
         categories={categories}
@@ -150,6 +152,7 @@ export default function CampaignCalendarPage() {
         <AiIntelligencePanel
           hits={ruleHits}
           enriched={enriched}
+          freeformInsights={freeformInsights}
           degraded={degraded}
           selectedEvent={selectedEvent}
           onClearSelection={() => setSelectedEvent(null)}

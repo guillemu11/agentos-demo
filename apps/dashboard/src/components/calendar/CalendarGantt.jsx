@@ -122,7 +122,7 @@ export default function CalendarGantt({ rangeStart, rangeEnd, events, ruleHits, 
                       if (idx < 0 || idx >= totalDays) return null;
                       return <div key={cd} className="cal-conflict-line" style={{ left: pct(idx + 0.5) }} />;
                     })}
-                    {todayIdx >= 0 && todayIdx < totalDays && evs.some(e => e.flavor === 'always-on') && (
+                    {todayIdx >= 0 && todayIdx < totalDays && (
                       <div className="cal-today-line" style={{ left: pct(todayIdx + 0.5) }} />
                     )}
                   </div>

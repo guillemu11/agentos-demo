@@ -1,12 +1,12 @@
 import React from 'react';
-import { Calendar, ChevronLeft, ChevronRight, Filter } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 
 function monthLabel(date, lang) {
   return date.toLocaleString(lang === 'en' ? 'en-US' : 'es-ES', { month: 'long', year: 'numeric' });
 }
 
-export default function CalendarTopbar({ currentDate, onNavigate, scale, onScaleChange, onToggleFilters, healthScore }) {
+export default function CalendarTopbar({ currentDate, onNavigate, scale, onScaleChange, healthScore }) {
   const { t, lang } = useLanguage();
   const band = healthScore >= 80 ? 'good' : healthScore >= 60 ? 'warn' : 'crit';
 
@@ -34,10 +34,6 @@ export default function CalendarTopbar({ currentDate, onNavigate, scale, onScale
           </button>
         ))}
       </div>
-
-      <button className="cal-filter-btn" onClick={onToggleFilters}>
-        <Filter size={12} /> {t('calendar.filterBtn')}
-      </button>
 
       <div className="cal-spacer" />
 
