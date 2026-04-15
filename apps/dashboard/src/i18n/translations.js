@@ -19,6 +19,7 @@ export const translations = {
       knowledgeBase: 'Knowledge Base',
       autoResearch: 'AutoResearch',
       journeys: 'Journeys',
+      calendar: 'Calendario',
       settings: 'Configuracion',
       imageStudio: 'Image Studio',
       commandCenter: 'Centro de Comando',
@@ -1991,6 +1992,11 @@ export const translations = {
       emailPreview: 'Vista previa del email',
     },
 
+    calendar: {
+      pageTitle: 'Calendario de Campañas',
+      placeholder: 'Cargando…',
+    },
+
     journeys: {
       title: 'Journeys',
       newJourney: 'Nuevo Journey',
@@ -2045,6 +2051,7 @@ export const translations = {
       knowledgeBase: 'Knowledge Base',
       autoResearch: 'AutoResearch',
       journeys: 'Journeys',
+      calendar: 'Calendar',
       settings: 'Settings',
       imageStudio: 'Image Studio',
       commandCenter: 'Command Center',
@@ -3982,6 +3989,11 @@ export const translations = {
       retrievingEmail: 'Retrieving email from MC...',
       sendingTest: 'Sending test email...',
       emailPreview: 'Email preview',
+    },
+
+    calendar: {
+      pageTitle: 'Campaign Calendar',
+      placeholder: 'Loading…',
     },
 
     journeys: {

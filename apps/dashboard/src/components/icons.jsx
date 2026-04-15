@@ -47,6 +47,7 @@ export const NavIcons = {
   studio: <Layers size={20} />,
   knowledgeBase: <BookOpen size={20} />,
   projectManager: <ClipboardList size={20} />,
+  calendar: <Calendar size={20} />,
   panelLeft: <PanelLeft size={20} />,
   logout: <LogOut size={16} />,
   menu: <Menu size={20} />,
