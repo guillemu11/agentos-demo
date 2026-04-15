@@ -27,11 +27,17 @@ export function removeActivity(dsl, { id }) {
   return { ...dsl, activities };
 }
 
-export function setEntrySource(dsl, { master_de, sql, target_de_name }) {
+export function setEntrySource(dsl, { master_de, sql, target_de_name, description }) {
   return {
     ...dsl,
     entry: {
-      source: { type: 'master_de_query', master_de_key: master_de, sql, target_de_name },
+      source: {
+        type: 'master_de_query',
+        master_de_key: master_de,
+        sql,
+        target_de_name,
+        ...(description !== undefined && { description }),
+      },
     },
   };
 }

@@ -44,4 +44,19 @@ describe('setEntrySource', () => {
     expect(dsl.entry.source.master_de_key).toBe('M');
     expect(dsl.entry.source.target_de_name).toBe('T');
   });
+
+  it('includes description when provided', () => {
+    const dsl = setEntrySource(empty(), {
+      master_de: 'M',
+      sql: 'SELECT 1 FROM M',
+      target_de_name: 'T',
+      description: 'All active subscribers',
+    });
+    expect(dsl.entry.source.description).toBe('All active subscribers');
+  });
+
+  it('omits description key when not provided', () => {
+    const dsl = setEntrySource(empty(), { master_de: 'M', sql: 'SELECT 1 FROM M', target_de_name: 'T' });
+    expect(dsl.entry.source).not.toHaveProperty('description');
+  });
 });

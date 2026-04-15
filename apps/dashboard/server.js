@@ -8544,6 +8544,65 @@ app.delete('/api/journeys/:id', requireAuth, async (req, res) => {
     res.json({ ok: true });
 });
 
+// Generate plain-English description for the entry segmentation SQL
+app.post('/api/journeys/:id/entry/describe', requireAuth, async (req, res) => {
+    const { sql, master_de_key, target_de_name } = req.body || {};
+    if (!sql) return res.status(400).json({ error: 'sql required' });
+
+    const { rows } = await pool.query(
+        `SELECT id FROM journeys WHERE id = $1 AND user_id = $2`,
+        [req.params.id, req.session.userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'not found' });
+
+    try {
+        const msg = await anthropic.messages.create({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 256,
+            messages: [{
+                role: 'user',
+                content: `You are a marketing data analyst. Explain the following SQL segmentation in 2–3 sentences of plain English for a marketing manager. Focus on audience criteria: market, tiers, time-based filters, and any exclusions. Be concise and factual. Return only the description, no preamble.\n\nmaster_de_key: ${master_de_key || 'unknown'}\ntarget_de_name: ${target_de_name || 'unknown'}\n\nSQL:\n${sql}`,
+            }],
+        });
+        const description = msg.content[0].text.trim();
+        res.json({ description });
+    } catch (err) {
+        console.error('Entry describe error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Patch entry source description and/or SQL
+app.patch('/api/journeys/:id/entry', requireAuth, async (req, res) => {
+    const { description, sql } = req.body || {};
+    const { rows } = await pool.query(
+        `SELECT dsl_json FROM journeys WHERE id = $1 AND user_id = $2`,
+        [req.params.id, req.session.userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'not found' });
+
+    const currentDsl = rows[0].dsl_json;
+    const updatedDsl = {
+        ...currentDsl,
+        entry: {
+            source: {
+                ...currentDsl.entry?.source,
+                ...(sql !== undefined && { sql }),
+                ...(description !== undefined && { description }),
+            },
+        },
+    };
+
+    const { valid, errors } = validateDsl(updatedDsl);
+    if (!valid) return res.status(400).json({ errors });
+
+    await pool.query(
+        `UPDATE journeys SET dsl_json = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3`,
+        [JSON.stringify(updatedDsl), req.params.id, req.session.userId]
+    );
+    res.json({ dsl: updatedDsl });
+});
+
 // Patch a single DSL activity — used by email builder modal to write back mc_email_id
 app.patch('/api/journeys/:id/activities/:actId', requireAuth, async (req, res) => {
     const { id: journeyId, actId } = req.params;

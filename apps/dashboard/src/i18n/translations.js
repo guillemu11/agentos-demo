@@ -2081,7 +2081,18 @@ export const translations = {
         errorMCNotConfigured: 'Marketing Cloud no configurado',
         errorBuild: 'Error al generar el email',
         errorConfirm: 'Error al guardar en Marketing Cloud',
-      }
+      },
+      entryModal: {
+        title: 'Segmentaci\u00f3n de entrada',
+        tabDescription: 'Descripci\u00f3n',
+        tabSql: 'SQL',
+        generatingDescription: 'Generando descripci\u00f3n...',
+        saveBtn: 'Guardar',
+        close: 'Cerrar',
+        sqlWarning: 'El SQL debe comenzar con SELECT',
+        errorGenerate: 'Error al generar descripci\u00f3n',
+        errorSave: 'Error al guardar',
+      },
     },
   },
 
@@ -4133,7 +4144,18 @@ export const translations = {
         errorMCNotConfigured: 'Marketing Cloud not configured',
         errorBuild: 'Failed to generate email',
         errorConfirm: 'Failed to save to Marketing Cloud',
-      }
+      },
+      entryModal: {
+        title: 'Entry segmentation',
+        tabDescription: 'Description',
+        tabSql: 'SQL',
+        generatingDescription: 'Generating description...',
+        saveBtn: 'Save',
+        close: 'Close',
+        sqlWarning: 'SQL must start with SELECT',
+        errorGenerate: 'Error generating description',
+        errorSave: 'Error saving',
+      },
     },
   },
 };

@@ -4,6 +4,7 @@ import JourneyBuilderChat from '../components/journey/JourneyBuilderChat.jsx';
 import JourneyCanvas from '../components/journey/JourneyCanvas.jsx';
 import JourneyToolbar from '../components/journey/JourneyToolbar.jsx';
 import EmailBuilderModal from '../components/journey/EmailBuilderModal.jsx';
+import EntrySourceModal from '../components/journey/EntrySourceModal.jsx';
 
 const API = import.meta.env.VITE_API_URL || '/api';
 
@@ -17,6 +18,7 @@ export default function JourneyBuilderPage() {
   const [seedMessage, setSeedMessage] = useState(null);
   const [emailBuilderActivity, setEmailBuilderActivity] = useState(null);
   const [highlightActivityId, setHighlightActivityId] = useState(null);
+  const [entryModalOpen, setEntryModalOpen] = useState(false);
   const loadedRef = useRef(false);
 
   useEffect(() => {
@@ -36,6 +38,10 @@ export default function JourneyBuilderPage() {
   }, [id]);
 
   const handleNodeClick = (node) => {
+    if (node.type === 'entry') {
+      setEntryModalOpen(true);
+      return;
+    }
     if (node.data?.activity?.type === 'email_send' && !node.data.activity.mc_email_id) {
       setEmailBuilderActivity(node.data.activity);
     }
@@ -81,6 +87,13 @@ export default function JourneyBuilderPage() {
             setTimeout(() => setHighlightActivityId(null), 900);
           }
         }}
+      />
+      <EntrySourceModal
+        open={entryModalOpen && !!dsl?.entry?.source}
+        journeyId={id}
+        dsl={dsl}
+        onClose={() => setEntryModalOpen(false)}
+        onSaved={(newDsl) => { setDsl(newDsl); setEntryModalOpen(false); }}
       />
     </div>
   );
