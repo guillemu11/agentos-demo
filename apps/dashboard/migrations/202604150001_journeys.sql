@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS journeys (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES workspace_users(id) ON DELETE RESTRICT,
+  user_id INTEGER NOT NULL REFERENCES workspace_users(id) ON DELETE RESTRICT,
   name TEXT NOT NULL CHECK (length(name) > 0),
   dsl_json JSONB NOT NULL DEFAULT '{"version":1,"name":"","entry":null,"activities":[]}',
   status TEXT NOT NULL DEFAULT 'drafting'
