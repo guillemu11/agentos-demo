@@ -1,7 +1,6 @@
 // apps/dashboard/src/components/studio/MarketSelector.jsx
 import React from 'react';
-
-const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
+import { LangIcon } from '../icons.jsx';
 
 function marketStatus(marketKey, variants) {
   const FIELDS = ['subject', 'preheader', 'heroHeadline', 'bodyCopy', 'cta'];
@@ -38,7 +37,7 @@ export default function MarketSelector({ markets, activeMarket, variants, onSele
                   : 'var(--studio-text-subtle)',
               }}
             />
-            {MARKET_FLAGS[market] || '🌐'} {market.toUpperCase()}
+            <LangIcon lang={market} /> {market.toUpperCase()}
           </button>
         );
       })}

@@ -10,6 +10,7 @@ import EmailBlocksPanel from '../components/EmailBlocksPanel.jsx';
 import VariantPreviewModal from '../components/VariantPreviewModal.jsx';
 import { injectIntoSlot, mergeAiHtmlIntoTemplate, fetchEmailTemplate, splitIntoBlocks } from '../utils/emailTemplate.js';
 import { substituteForPreview } from '../utils/emailMockSubstitute.js';
+import { Pencil, FlaskConical, Star, Trash2 } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const AGENT_ID = 'html-developer';
@@ -100,7 +101,7 @@ function TemplateCard({ template, contentReady, contentVariants, projectId, dele
             className="email-template-btn email-template-btn--edit"
             onClick={() => onEdit(template)}
           >
-            ✏️ {t('studio.templateEdit')}
+            <Pencil size={13} style={{ verticalAlign: 'middle' }} /> {t('studio.templateEdit')}
           </button>
           <button
             className="email-template-btn email-template-btn--test"
@@ -108,11 +109,11 @@ function TemplateCard({ template, contentReady, contentVariants, projectId, dele
             disabled={!contentReady}
             title={!contentReady ? t('emailBuilder.waitingVariants') : t('emailBuilder.previewTest')}
           >
-            🧪 {t('emailBuilder.previewTest')}
+            <FlaskConical size={13} style={{ verticalAlign: 'middle' }} /> {t('emailBuilder.previewTest')}
           </button>
           {!isFinal ? (
             <button className="email-template-btn email-template-btn--use" onClick={setAsFinal}>
-              ⭐ {t('studio.templateUseThis')}
+              <Star size={13} style={{ verticalAlign: 'middle' }} /> {t('studio.templateUseThis')}
             </button>
           ) : (
             <span className="email-template-btn email-template-btn--chosen">✓ {t('studio.templateUseThis')}</span>
@@ -125,7 +126,7 @@ function TemplateCard({ template, contentReady, contentVariants, projectId, dele
             </>
           ) : (
             <button className="email-template-btn email-template-btn--delete" onClick={() => setDeletingId(template.id)}>
-              🗑
+              <Trash2 size={13} />
             </button>
           )}
         </div>

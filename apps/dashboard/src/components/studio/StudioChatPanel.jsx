@@ -1,6 +1,7 @@
 // apps/dashboard/src/components/studio/StudioChatPanel.jsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send } from 'lucide-react';
+import { Send, ClipboardList } from 'lucide-react';
+import { LangIcon } from '../icons.jsx';
 import renderMarkdown from '../../utils/renderMarkdown.js';
 
 import { IMAGE_SLOT_NAMES } from './studioConstants.js';
@@ -8,7 +9,6 @@ import { IMAGE_SLOT_NAMES } from './studioConstants.js';
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const BRIEF_UPDATE_RE = /\[BRIEF_UPDATE:(\{[\s\S]*?\})\]/g;
 const IMAGE_REQUEST_RE = /\b(imagen?|image|foto|photo|banner|hero|visual|picture|ilustra|generat|crea(?:r)?|diseña|design|make)\b.{0,80}\b(imagen?|image|foto|photo|banner|hero|avion|plane|aircraft|logo|background|fondo)\b/i;
-const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
 
 function parseBriefUpdates(chunk) {
   const briefUpdates = [];
@@ -19,6 +19,31 @@ function parseBriefUpdates(chunk) {
   }
   BRIEF_UPDATE_RE.lastIndex = 0;  // reset before replace to avoid stale lastIndex
   return { textChunk: chunk.replace(BRIEF_UPDATE_RE, '').trim(), briefUpdates };
+}
+
+// Fallback parser: when Claude outputs bullet lists instead of [BRIEF_UPDATE] tags,
+// extract "varname: value" lines and match against the known template variables.
+// expectedVars is the whitelist of valid variable names (from blockVarMap).
+function parseBulletFallback(chunk, variantKey, expectedVars) {
+  if (!chunk || !expectedVars || expectedVars.size === 0) return [];
+  const updates = [];
+  const seen = new Set();
+  const IMAGE_SKIP = /image|img|logo|_alias|_link|_url/i;
+  const lineRE = /^\s*(?:[*\-•]\s+)?(?:\*\*|`)?\s*@?([a-zA-Z][\w\\]*)\s*(?:\*\*|`)?\s*:\s*(.+?)\s*$/gm;
+  let m;
+  while ((m = lineRE.exec(chunk)) !== null) {
+    const varName = m[1].trim().replace(/\\/g, '');
+    let value = m[2].trim();
+    value = value.replace(/^["'`](.*)["'`]$/, '$1').trim();
+    if (!varName || !value) continue;
+    if (IMAGE_SKIP.test(varName)) continue;
+    if (seen.has(varName)) continue;
+    if (!expectedVars.has(varName)) continue;
+    if (value.startsWith('{') || value.startsWith('[')) continue;
+    updates.push({ variant: variantKey, block: varName, status: 'approved', value });
+    seen.add(varName);
+  }
+  return updates;
 }
 
 function detectSlotFromPrompt(prompt) {
@@ -178,7 +203,24 @@ export default function StudioChatPanel({
           if (data === '[DONE]') {
             streamDone = true;
             // Parse all BRIEF_UPDATE tags from the complete accumulated text at once
-            const { briefUpdates: allUpdates } = parseBriefUpdates(assistantText);
+            const { briefUpdates: tagUpdates } = parseBriefUpdates(assistantText);
+            let allUpdates = tagUpdates;
+            // Fallback: if Claude output bullets instead of [BRIEF_UPDATE] tags, rescue them.
+            // Build expected-var whitelist from blockVarMap for the active variant.
+            if (allUpdates.length === 0 && blockVarMap) {
+              const IMAGE_RE = /image|img|logo/i;
+              const SKIP_RE = /(_alias|_link|_url)$/i;
+              const expected = new Set(
+                [...new Set(Object.values(blockVarMap).flat())]
+                  .filter(v => !IMAGE_RE.test(v) && !SKIP_RE.test(v))
+              );
+              const variantKey = `${activeMarket}:${activeTier}`;
+              const rescued = parseBulletFallback(assistantText, variantKey, expected);
+              if (rescued.length > 0) {
+                console.log(`[StudioChat] Fallback rescued ${rescued.length} variables from bullet output`);
+                allUpdates = rescued;
+              }
+            }
             allUpdates.forEach(u => onBriefUpdate(u));
             if (allUpdates.length > 0) {
               setMessages(prev => {
@@ -262,7 +304,7 @@ export default function StudioChatPanel({
     return (
       <div className="studio-panel" style={{ alignItems: 'center', justifyContent: 'center' }}>
         <div className="studio-empty-state">
-          <div className="icon">📋</div>
+          <div className="icon"><ClipboardList size={24} /></div>
           <div style={{ fontWeight: 600 }}>No active ticket</div>
           <div style={{ fontSize: 11, lineHeight: 1.6 }}>Select a ticket to start working with Lucia</div>
         </div>
@@ -314,7 +356,7 @@ export default function StudioChatPanel({
                 {msg.briefUpdates?.map((u, j) => (
                   <div key={j} className="studio-brief-card">
                     <div className="studio-brief-card-label">
-                      {u.block} · {MARKET_FLAGS[u.variant?.split(':')[0]] || '🌐'} {u.variant?.toUpperCase().replace(':', ' / ')}
+                      {u.block} · <LangIcon lang={u.variant?.split(':')[0] || 'en'} /> {u.variant?.toUpperCase().replace(':', ' / ')}
                     </div>
                     <div className="studio-brief-card-value">{u.status === 'generating' ? '…' : u.value}</div>
                     {u.status === 'approved' && (

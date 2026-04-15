@@ -8,7 +8,7 @@ import MediaGalleryModal from '../components/studio/MediaGalleryModal.jsx';
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 const MODES = ['typographic', 'image', 'slideshow', 'veo'];
-const IMPLEMENTED_MODES = ['typographic', 'image'];
+const IMPLEMENTED_MODES = ['typographic', 'image', 'slideshow'];
 
 const MODE_ICONS = {
   typographic: Type,
@@ -36,6 +36,19 @@ const STEP_TRANSITIONS = {
     generating: { complete: ['planning', 'planReady'], active: 'generating' },
     persisting: { complete: ['planning', 'planReady', 'generating'], active: 'persisting' },
     done:       { complete: ['planning', 'planReady', 'generating', 'persisting', 'done'], active: null },
+  },
+  // Slideshow: frame_generating/frame_generated/composing all fold into the
+  // `rendering` timeline step since the right column only has 6 slots and the
+  // chat log already shows per-frame detail.
+  slideshow: {
+    planning:         { complete: [], active: 'planning' },
+    plan_ready:       { complete: ['planning'], active: 'planReady' },
+    frame_generating: { complete: ['planning', 'planReady'], active: 'rendering' },
+    frame_generated:  { complete: ['planning', 'planReady'], active: 'rendering' },
+    composing:        { complete: ['planning', 'planReady'], active: 'rendering' },
+    encoding:         { complete: ['planning', 'planReady', 'rendering'], active: 'encoding' },
+    persisting:       { complete: ['planning', 'planReady', 'rendering', 'encoding'], active: 'persisting' },
+    done:             { complete: ['planning', 'planReady', 'rendering', 'encoding', 'persisting', 'done'], active: null },
   },
 };
 
@@ -218,6 +231,7 @@ export default function ImageStudioPage() {
   const getPlaceholder = () => {
     if (activeMode === 'image') return t('imageStudio.chat.placeholderImage');
     if (activeMode === 'typographic') return t('imageStudio.chat.placeholderTypographic');
+    if (activeMode === 'slideshow') return t('imageStudio.chat.placeholderSlideshow');
     return t('imageStudio.chat.placeholder');
   };
 

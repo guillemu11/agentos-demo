@@ -1,8 +1,7 @@
 // apps/dashboard/src/components/studio/VariantPreviewModal.jsx
 import React, { useState } from 'react';
+import { LangIcon } from '../icons.jsx';
 import { substituteForPreview } from '../../utils/emailMockSubstitute.js';
-
-const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
 
 function buildPreviewHtml(baseHtml, market, tier, variants, imageSlots, ampVarValues) {
   if (!baseHtml) return '';
@@ -60,7 +59,7 @@ export default function VariantPreviewModal({ ticket, markets, activeTier, varia
               className={`studio-modal-tab ${activeMarket === market ? 'active' : ''}`}
               onClick={() => setActiveMarket(market)}
             >
-              {MARKET_FLAGS[market] || '🌐'} {market.toUpperCase()}
+              <LangIcon lang={market} /> {market.toUpperCase()}
             </button>
           ))}
         </div>

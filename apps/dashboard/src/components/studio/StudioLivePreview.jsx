@@ -1,14 +1,15 @@
 // apps/dashboard/src/components/studio/StudioLivePreview.jsx
 import React, { useState, useMemo } from 'react';
+import { Monitor, Smartphone, Mail } from 'lucide-react';
+import { LangIcon } from '../icons.jsx';
 import { substituteForPreview } from '../../utils/emailMockSubstitute.js';
 
-const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
 const TIER_SHORT = { economy: 'Eco', economy_premium: 'Eco+', business: 'Biz', first_class: '1st' };
 
 function variantLabel(key) {
   const [market, ...tierParts] = key.split(':');
   const tier = tierParts.join(':');
-  return `${MARKET_FLAGS[market] || market.toUpperCase()} ${TIER_SHORT[tier] || tier}`;
+  return <><LangIcon lang={market} /> {TIER_SHORT[tier] || tier}</>;
 }
 
 export default function StudioLivePreview({ liveHtml, baseHtml, variants, previewVariant, onVariantSelect, onShowModal }) {
@@ -52,7 +53,7 @@ export default function StudioLivePreview({ liveHtml, baseHtml, variants, previe
             style={{ padding: '2px 8px', fontSize: 10 }}
             onClick={() => setIsMobile(m => !m)}
           >
-            {isMobile ? '🖥 Desktop' : '📱 Mobile'}
+            {isMobile ? <><Monitor size={12} /> Desktop</> : <><Smartphone size={12} /> Mobile</>}
           </button>
         </div>
       </div>
@@ -74,7 +75,7 @@ export default function StudioLivePreview({ liveHtml, baseHtml, variants, previe
             />
           ) : (
             <div className="studio-empty-state" style={{ background: 'white', color: '#64748b' }}>
-              <div className="icon">📧</div>
+              <div className="icon"><Mail size={24} /></div>
               <div>No template available</div>
               <div style={{ fontSize: 11 }}>The HTML Developer needs to save a template first</div>
             </div>

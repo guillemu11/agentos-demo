@@ -6,6 +6,7 @@ import AgentChatSwitcher from '../components/agent-views/shared/AgentChatSwitche
 import EmailBuilderPreview from '../components/EmailBuilderPreview.jsx';
 import EmailBlocksPanel from '../components/EmailBlocksPanel.jsx';
 import { fetchEmailTemplate, injectIntoSlot, mergeAiHtmlIntoTemplate } from '../utils/emailTemplate.js';
+import { Plus, Pencil } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const AGENT_ID = 'html-developer';
@@ -292,7 +293,7 @@ export default function BlockStudioPage() {
                 <input
                   className="block-manager-search"
                   type="text"
-                  placeholder={`🔍 ${t('blockStudio.search')}`}
+                  placeholder={t('blockStudio.search')}
                   value={blockSearch}
                   onChange={e => setBlockSearch(e.target.value)}
                 />
@@ -375,14 +376,14 @@ export default function BlockStudioPage() {
                       className="block-manager-action-btn"
                       onClick={() => handleAddToCanvas(selectedBlock)}
                     >
-                      ➕ {t('blockStudio.addToCanvas')}
+                      <Plus size={13} style={{ verticalAlign: 'middle' }} /> {t('blockStudio.addToCanvas')}
                       <div className="block-manager-action-hint">{t('blockStudio.addToCanvasHint')}</div>
                     </button>
                     <button
                       className="block-manager-action-btn secondary"
                       onClick={() => handleUseAsBase(selectedBlock)}
                     >
-                      ✏️ {t('blockStudio.useAsBase')}
+                      <Pencil size={13} style={{ verticalAlign: 'middle' }} /> {t('blockStudio.useAsBase')}
                       <div className="block-manager-action-hint">{t('blockStudio.useAsBaseHint')}</div>
                     </button>
                   </div>
