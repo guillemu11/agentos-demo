@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, Mail, Send } from 'lucide-react';
+import { X, Mail, Send, Sparkles, MessageSquare, Info } from 'lucide-react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 
 const API = import.meta.env.VITE_API_URL || '/api';
@@ -11,6 +11,92 @@ const LANGUAGES = [
   { code: 'de', label: 'German' },
   { code: 'fr', label: 'French' },
 ];
+
+/** Infer market from email_shell_name or entry SQL */
+function inferMarket(dsl, activity) {
+  const name = (activity?.email_shell_name || '').toUpperCase();
+  for (const m of MARKETS) {
+    if (name.includes(m.toUpperCase())) return m;
+  }
+  const sql = dsl?.entry?.source?.sql || '';
+  const m = sql.match(/market\s*=\s*'([^']+)'/i);
+  return m ? m[1] : 'UAE';
+}
+
+/** Infer language from email_shell_name */
+function inferLanguage(activity) {
+  const name = (activity?.email_shell_name || '').toLowerCase();
+  if (name.includes('_ar') || name.includes('arabic')) return 'ar';
+  if (name.includes('_de') || name.includes('german'))  return 'de';
+  if (name.includes('_fr') || name.includes('french'))  return 'fr';
+  return 'en';
+}
+
+/** Build a contextual pre-filled brief from the journey DSL + activity */
+function buildAutoBrief(dsl, activity) {
+  if (!dsl || !activity) return '';
+  const lines = [];
+
+  // Journey name
+  const journeyName = dsl.name || 'this journey';
+  lines.push(`Email for the "${journeyName}" journey.`);
+
+  // Audience from SQL
+  const sql = dsl.entry?.source?.sql || '';
+  const audienceParts = [];
+  const mktMatch = sql.match(/market\s*=\s*'([^']+)'/i);
+  const tierMatch = sql.match(/tier\s+IN\s*\(([^)]+)\)/i);
+  const segMatch  = sql.match(/segment\s*=\s*'([^']+)'/i);
+  if (mktMatch)  audienceParts.push(mktMatch[1] + ' market');
+  if (tierMatch) audienceParts.push('tiers: ' + tierMatch[1].replace(/'/g, '').replace(/\s+/g, ''));
+  if (segMatch)  audienceParts.push(segMatch[1] + ' segment');
+  if (audienceParts.length) lines.push(`Audience: ${audienceParts.join(', ')}.`);
+
+  // Journey position & preceding context
+  const acts = dsl.activities || [];
+  const idx = acts.findIndex((a) => a.id === activity.id);
+  const contextHints = [];
+  if (idx > 0) {
+    for (let i = idx - 1; i >= 0 && i >= idx - 3; i--) {
+      const prev = acts[i];
+      if (prev.type === 'wait_duration') {
+        contextHints.push(`${prev.amount} ${prev.unit} after entry`);
+      } else if (prev.type === 'decision_split') {
+        const branch = prev.branches?.find((b) => {
+          // walk the chain to see if it reaches our activity
+          let cur = b.next;
+          for (let k = 0; k < 5 && cur; k++) {
+            if (cur === activity.id) return true;
+            const next = acts.find((a) => a.id === cur);
+            cur = next?.next || null;
+          }
+          return false;
+        });
+        if (branch) contextHints.push(`"${branch.label}" segment (${branch.condition})`);
+      } else if (prev.type === 'engagement_split') {
+        const outcome = prev.yes_next === activity.id ? 'engaged (opened/clicked)' : 'non-engaged';
+        contextHints.push(`${outcome} cohort`);
+      }
+    }
+  }
+  if (contextHints.length) lines.push(`Context: ${contextHints.join(', ')}.`);
+
+  // Campaign type tone guidance
+  const ct = activity.campaign_type || '';
+  const toneMap = {
+    'promotional':            'Promotional — highlight the offer, create urgency.',
+    'product-offer-ecommerce':'Ecommerce offer — lead with product, clear CTA, price emphasis.',
+    'transactional':          'Transactional — clear, concise, action-focused. No hard sell.',
+    'retention':              'Retention — warm, value-reminder, reduce churn framing.',
+    'reactivation':           'Reactivation — win-back tone, acknowledge absence, compelling incentive.',
+  };
+  const toneHint = toneMap[ct] || `Campaign type: ${ct}.`;
+  lines.push(toneHint);
+
+  lines.push('Emirates brand voice: professional, aspirational, premium.\nInclude: subject line, preview text, hero headline, body copy, CTA.');
+
+  return lines.join('\n');
+}
 
 // Parse SSE lines from a ReadableStream
 async function* readSSE(stream) {
@@ -31,7 +117,7 @@ async function* readSSE(stream) {
   }
 }
 
-export default function EmailBuilderModal({ open, journeyId, activity, onClose, onConfirmed }) {
+export default function EmailBuilderModal({ open, journeyId, activity, dsl, onClose, onConfirmed }) {
   const { t } = useLanguage();
   const [phase, setPhase] = useState(1);
   const [market, setMarket] = useState('UAE');
@@ -50,16 +136,18 @@ export default function EmailBuilderModal({ open, journeyId, activity, onClose, 
   const chatEndRef = useRef(null);
 
   useEffect(() => {
-    if (open) {
+    if (open && activity) {
       setPhase(1);
-      setBrief('');
+      setBrief(buildAutoBrief(dsl, activity));
+      setMarket(inferMarket(dsl, activity));
+      setLanguage(inferLanguage(activity));
       setHtml('');
       setEmailName('');
       setChatMessages([]);
       setError(null);
       setStatusMsg('');
     }
-  }, [open]);
+  }, [open, activity]);
 
   useEffect(() => {
     if (!open) return;
@@ -198,10 +286,11 @@ export default function EmailBuilderModal({ open, journeyId, activity, onClose, 
         <div className="ebm__header">
           <h2 id="ebm-title" className="ebm__title">
             <Mail size={15} strokeWidth={2} />
-            {t('journeys.emailBuilder.title')} — {activity.email_shell_name}
+            {t('journeys.emailBuilder.title')}
+            <span className="ebm__title-sub">— {activity.email_shell_name}</span>
           </h2>
           <button className="ebm__close" onClick={handleClose} aria-label={t('journeys.emailBuilder.close')}>
-            <X size={18} strokeWidth={2} />
+            <X size={16} strokeWidth={2} />
           </button>
         </div>
 
@@ -238,6 +327,12 @@ export default function EmailBuilderModal({ open, journeyId, activity, onClose, 
                   required
                 />
               </label>
+              {brief && (
+                <div className="ebm__brief-hint">
+                  <Info size={13} strokeWidth={2} />
+                  Pre-filled from journey context — edit freely before generating.
+                </div>
+              )}
               {error && <div className="ebm__error">{error}</div>}
             </div>
             <div className="ebm__footer-phase1">
@@ -245,6 +340,7 @@ export default function EmailBuilderModal({ open, journeyId, activity, onClose, 
                 {t('journeys.emailBuilder.close')}
               </button>
               <button type="submit" className="ebm__btn ebm__btn--primary" disabled={!brief.trim()}>
+                <Sparkles size={13} strokeWidth={2} />
                 {t('journeys.emailBuilder.generateBtn')}
               </button>
             </div>
@@ -255,20 +351,36 @@ export default function EmailBuilderModal({ open, journeyId, activity, onClose, 
           <>
             <div className="ebm__phase2">
               <div className="ebm__preview-pane">
-                {(generating || !html) ? (
+                {(generating || !html) && (
                   <div className="ebm__preview-loading">
-                    <span>{statusMsg || t('journeys.emailBuilder.generating')}</span>
+                    <div className="ebm__preview-loading__spinner" />
+                    <div className="ebm__preview-loading__text">
+                      {statusMsg || t('journeys.emailBuilder.generating')}
+                      <div className="ebm__preview-loading__dots">
+                        <span /><span /><span />
+                      </div>
+                    </div>
                   </div>
-                ) : (
-                  <iframe
-                    ref={iframeRef}
-                    sandbox="allow-same-origin"
-                    title="Email preview"
-                  />
                 )}
+                <iframe
+                  ref={iframeRef}
+                  sandbox="allow-same-origin"
+                  title="Email preview"
+                  style={{ display: html && !generating ? 'block' : 'none', width: '100%', height: '100%', border: 'none' }}
+                />
               </div>
               <div className="ebm__chat-pane">
+                <div className="ebm__chat-pane-header">
+                  <MessageSquare size={11} strokeWidth={2} />
+                  Refine
+                </div>
                 <div className="ebm__chat-messages">
+                  {chatMessages.length === 0 && html && (
+                    <div className="ebm__chat-empty">
+                      <Sparkles size={28} strokeWidth={1.5} />
+                      <p>Ask me to adjust copy, colors, layout, or tone</p>
+                    </div>
+                  )}
                   {chatMessages.map((m, i) => (
                     <div key={i} className={`ebm__chat-bubble ebm__chat-bubble--${m.role}`}>
                       {m.text}

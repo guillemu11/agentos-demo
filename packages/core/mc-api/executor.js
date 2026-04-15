@@ -578,29 +578,135 @@ function sanitizeForLog(input) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export async function createDataExtensionRaw(mc, { name, customerKey, description, fields, folderId, isSendable, sendableField }) {
-    const body = {
-        name,
-        customerKey: customerKey || `de-${Date.now()}`,
-        fields: fields.map((f) => ({
-            name: f.name,
-            fieldType: f.fieldType || f.type,
-            maxLength: (f.fieldType || f.type) === 'Text' ? (f.maxLength || 100) : undefined,
-            isPrimaryKey: f.isPrimaryKey || false,
-            isRequired: f.isRequired || false,
-            defaultValue: f.defaultValue || undefined,
-        })),
-    };
-    if (description) body.description = description;
-    if (folderId) body.categoryId = folderId;
+    // SFMC has no generic REST create-DE endpoint on most stacks — canonical path is SOAP Create
+    // (same approach used by packages/core/campaign-builder duplicateDE).
+    const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const ck = customerKey || `de-${Date.now()}`;
+
+    const fieldsXml = fields.map((f) => {
+        const type = f.fieldType || f.type;
+        let xml = `<Field><Name>${esc(f.name)}</Name><FieldType>${esc(type)}</FieldType>`;
+        if ((type === 'Text' || type === 'Decimal') && f.maxLength) xml += `<MaxLength>${f.maxLength}</MaxLength>`;
+        if (f.isPrimaryKey) xml += '<IsPrimaryKey>true</IsPrimaryKey>';
+        if (f.isRequired) xml += '<IsRequired>true</IsRequired>';
+        if (f.defaultValue) xml += `<DefaultValue>${esc(f.defaultValue)}</DefaultValue>`;
+        xml += '</Field>';
+        return xml;
+    }).join('');
+
+    let sendableXml = '';
     if (isSendable) {
-        body.isSendable = true;
-        body.sendableDataExtensionField = { name: sendableField || 'EmailAddress', fieldType: 'EmailAddress' };
-        body.sendableSubscriberField = { name: 'Subscriber Key' };
+        sendableXml = `<IsSendable>true</IsSendable><SendableDataExtensionField><Name>${esc(sendableField || 'EmailAddress')}</Name><FieldType>EmailAddress</FieldType></SendableDataExtensionField><SendableSubscriberField><Name>Subscriber Key</Name></SendableSubscriberField>`;
     }
-    const result = await mc.rest('POST', '/hub/v1/dataevents', body);
-    return { customerKey: body.customerKey, name, raw: result };
+
+    const inner = `<CreateRequest xmlns="http://exacttarget.com/wsdl/partnerAPI"><Objects xsi:type="DataExtension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><Name>${esc(name)}</Name><CustomerKey>${esc(ck)}</CustomerKey>${folderId ? `<CategoryID>${folderId}</CategoryID>` : ''}${description ? `<Description>${esc(description)}</Description>` : ''}${sendableXml}<Fields>${fieldsXml}</Fields></Objects></CreateRequest>`;
+
+    const soapResp = await mc.soap('Create', inner);
+    const raw = typeof soapResp === 'string' ? soapResp : JSON.stringify(soapResp);
+    const status = raw.match(/<StatusCode>([^<]+)/)?.[1];
+    const statusMsg = raw.match(/<StatusMessage>([^<]+)/)?.[1] || '';
+    if (status !== 'OK') {
+        throw new Error(`SOAP Create DE failed for "${name}": status=${status || '?'} msg="${statusMsg}"`);
+    }
+    return { customerKey: ck, name };
+}
+
+// Cache folder lookups — these rarely change in an MC instance.
+const folderRootCache = new Map();
+
+/**
+ * Find (or create) a named folder of a given contentType under the root.
+ * Returns the folder's numeric ID. Caches results across calls.
+ */
+export async function ensureQueryFolder(mc, folderName = 'Journey Builder') {
+    const cacheKey = `query:${folderName}`;
+    if (folderRootCache.has(cacheKey)) return folderRootCache.get(cacheKey);
+
+    // Step 1: find the root queryactivity folder (ParentFolder.ID = 0)
+    const rootXml = `<RetrieveRequestMsg xmlns="http://exacttarget.com/wsdl/partnerAPI">
+        <RetrieveRequest>
+            <ObjectType>DataFolder</ObjectType>
+            <Properties>ID</Properties><Properties>Name</Properties><Properties>ParentFolder.ID</Properties>
+            <Filter xsi:type="SimpleFilterPart" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+                <Property>ContentType</Property><SimpleOperator>equals</SimpleOperator><Value>queryactivity</Value>
+            </Filter>
+        </RetrieveRequest>
+    </RetrieveRequestMsg>`;
+    const rootResp = await mc.soap('Retrieve', rootXml);
+    const rootRaw = typeof rootResp === 'string' ? rootResp : JSON.stringify(rootResp);
+    const blocks = rootRaw.split(/<Results[^>]*>/).slice(1).map((b) => b.split('</Results>')[0]);
+    const folders = blocks.map((b) => ({
+        id: b.match(/<ID>([^<]+)<\/ID>/)?.[1],
+        name: b.match(/<Name>([^<]+)<\/Name>/)?.[1],
+        parent: b.match(/<ParentFolder>[\s\S]*?<ID>([^<]+)<\/ID>/)?.[1] || '0',
+    })).filter((f) => f.id);
+
+    const root = folders.find((f) => f.parent === '0');
+    if (!root) throw new Error('Could not locate queryactivity root folder');
+
+    // Step 2: look for our named subfolder under root
+    const existing = folders.find((f) => f.parent === root.id && f.name === folderName);
+    if (existing) {
+        folderRootCache.set(cacheKey, existing.id);
+        return existing.id;
+    }
+
+    // Step 3: create it
+    const createXml = `<CreateRequest xmlns="http://exacttarget.com/wsdl/partnerAPI">
+        <Objects xsi:type="DataFolder" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <Name>${folderName}</Name>
+            <Description>Queries created by AgentOS Journey Builder</Description>
+            <ContentType>queryactivity</ContentType>
+            <IsActive>true</IsActive>
+            <IsEditable>true</IsEditable>
+            <AllowChildren>true</AllowChildren>
+            <ParentFolder><ID>${root.id}</ID></ParentFolder>
+        </Objects>
+    </CreateRequest>`;
+    const createResp = await mc.soap('Create', createXml);
+    const createRaw = typeof createResp === 'string' ? createResp : JSON.stringify(createResp);
+    const newId = createRaw.match(/<NewID>([^<]+)<\/NewID>/)?.[1];
+    const status = createRaw.match(/<StatusCode>([^<]+)/)?.[1];
+    if (status !== 'OK' || !newId) {
+        const msg = createRaw.match(/<StatusMessage>([^<]+)/)?.[1] || 'unknown error';
+        throw new Error(`Failed to create queryactivity folder "${folderName}": ${msg}`);
+    }
+    folderRootCache.set(cacheKey, newId);
+    return newId;
+}
+
+/**
+ * Create a DE-based audience event definition for a Journey entry source.
+ * Returns the eventDefinitionKey (format: "DEAudience-{GUID}") needed by the
+ * EmailAudience trigger so JB canvas can display the correct DE name.
+ * On any error, returns null so the deploy can fallback to AutomationAudience.
+ */
+export async function createEventDefinition(mc, { name, dataExtensionKey }) {
+    try {
+        const body = {
+            name,
+            mode: 0,
+            type: 'Audience',
+            dataExtensionId: dataExtensionKey,
+            isVisibleInPicker: false,
+            isPlatformObject: false,
+            category: { id: 3 },
+        };
+        const result = await mc.rest('POST', '/interaction/v1/eventDefinitions', body);
+        return result.key || null; // "DEAudience-{GUID}"
+    } catch (err) {
+        console.warn('[journey deploy] eventDefinition creation failed (non-fatal):', err.message);
+        return null;
+    }
 }
 
 export async function createInteraction(mc, interactionJson) {
+    // Dump the exact payload to /tmp for post-mortem debugging of 400 errors.
+    try {
+        const fs = await import('fs');
+        const path = `/tmp/interaction-payload-${Date.now()}.json`;
+        fs.writeFileSync(path, JSON.stringify(interactionJson, null, 2));
+        console.log(`[journey deploy] interaction payload dumped to ${path}`);
+    } catch {}
     return mc.rest('POST', '/interaction/v1/interactions', interactionJson);
 }

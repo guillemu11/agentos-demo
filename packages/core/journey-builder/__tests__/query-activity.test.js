@@ -28,7 +28,7 @@ describe('createQueryActivity', () => {
     expect(res.queryDefinitionId).toBe('Q-123');
     expect(calls[0].body.queryText).toBe('SELECT * FROM BAU_Master_Dataset');
     expect(calls[0].body.targetKey).toBe('TGT-KEY');
-    expect(calls[0].body.targetUpdateTypeName).toBe('Overwrite');
+    expect(calls[0].body.targetUpdateTypeId).toBe(1); // Overwrite = 1
   });
 });
 

@@ -13,7 +13,7 @@ describe('compileDslToInteraction', () => {
     const out = compileDslToInteraction(dsl, { target_de_key: 'TGT-KEY' });
     expect(out.key).toMatch(/^journey-/);
     expect(out.name).toBe('Minimal');
-    expect(out.workflowApiVersion).toBe(1.0);
+    expect(out.workflowApiVersion).toBe(1); // integer, not float — MC deserializer is picky
     expect(out.triggers).toHaveLength(1);
     expect(out.triggers[0].type).toBe('AutomationAudience');
     expect(out.activities).toHaveLength(1);
@@ -21,26 +21,37 @@ describe('compileDslToInteraction', () => {
     expect(out.activities[0].configurationArguments.triggeredSend.emailId).toBe(99999);
   });
 
-  it('full: all 5 activity types compile to correct SFMC types', () => {
+  it('full: all 5 activity types compile with typed keys {TYPE}-{N}', () => {
     const dsl = load('dsl-full.json');
     dsl.activities.filter(a => a.type === 'email_send').forEach((a, i) => a.mc_email_id = 10000 + i);
     const out = compileDslToInteraction(dsl, { target_de_key: 'TGT-KEY' });
-    const typeMap = Object.fromEntries(out.activities.map(a => [a.key, a.type]));
-    expect(typeMap['wait_1']).toBe('WAITBYDURATION');
-    expect(typeMap['split_1']).toBe('MULTICRITERIADECISION');
-    expect(typeMap['send_gold']).toBe('EMAILV2');
-    expect(typeMap['wait_engage']).toBe('WAITBYEVENT');
-    expect(typeMap['engage_split']).toBe('ENGAGEMENTSPLIT');
+    const types = out.activities.map(a => a.type).sort();
+    expect(types).toContain('WAITBYDURATION');
+    expect(types).toContain('MULTICRITERIADECISION');
+    expect(types).toContain('EMAILV2');
+    expect(types).toContain('WAITBYEVENT');
+    expect(types).toContain('ENGAGEMENTSPLIT');
+    for (const a of out.activities) {
+      expect(a.key).toMatch(new RegExp(`^${a.type}-\\d+$`));
+    }
   });
 
-  it('decision_split branches become outcomes with keys matching next ids', () => {
+  it('decision_split outcomes translate DSL ids to typed keys', () => {
     const dsl = load('dsl-full.json');
     dsl.activities.filter(a => a.type === 'email_send').forEach((a, i) => a.mc_email_id = 10000 + i);
     const out = compileDslToInteraction(dsl, { target_de_key: 'TGT-KEY' });
-    const split = out.activities.find(a => a.key === 'split_1');
+    const split = out.activities.find(a => a.type === 'MULTICRITERIADECISION');
     expect(split.outcomes).toHaveLength(2);
-    expect(split.outcomes.map(o => o.next)).toContain('send_gold');
-    expect(split.outcomes.map(o => o.next)).toContain('send_silver');
+    for (const o of split.outcomes) {
+      expect(o.next).toMatch(/^(EMAILV2|WAITBYDURATION|MULTICRITERIADECISION|ENGAGEMENTSPLIT|WAITBYEVENT)-\d+$/);
+    }
+  });
+
+  it('every activity has metaData.isConfigured:true for MC UI', () => {
+    const dsl = load('dsl-full.json');
+    dsl.activities.filter(a => a.type === 'email_send').forEach((a, i) => a.mc_email_id = 10000 + i);
+    const out = compileDslToInteraction(dsl, { target_de_key: 'TGT-KEY' });
+    for (const a of out.activities) expect(a.metaData?.isConfigured).toBe(true);
   });
 
   it('email_send without mc_email_id throws', () => {

@@ -14,13 +14,12 @@ describe('deployJourney', () => {
       ensureFolderHierarchy: vi.fn().mockResolvedValue({ emailFolderId: 500, deFolderId: 600 }),
       createDataExtension: vi.fn().mockResolvedValue({ customerKey: 'TGT-KEY' }),
       createQueryActivity: vi.fn().mockResolvedValue({ queryDefinitionId: 'Q-1' }),
-      startQueryActivity: vi.fn().mockResolvedValue({}),
-      pollQueryActivity: vi.fn().mockResolvedValue({ status: 'Complete' }),
       createEmailShells: vi.fn().mockImplementation(async ({ dsl }) => ({
         ...dsl,
         activities: dsl.activities.map((a) => (a.type === 'email_send' ? { ...a, mc_email_id: 11000 } : a)),
       })),
       createInteractionDraft: vi.fn().mockResolvedValue({ id: 'INT-999' }),
+      ensureQueryFolder: vi.fn().mockResolvedValue(999),
     };
 
     const mc = {};
@@ -32,8 +31,6 @@ describe('deployJourney', () => {
       mc,
       expect.objectContaining({ sql: dsl.entry.source.sql, target_de_key: 'TGT-KEY' })
     );
-    expect(stubs.startQueryActivity).toHaveBeenCalledWith(mc, 'Q-1');
-    expect(stubs.pollQueryActivity).toHaveBeenCalled();
     expect(stubs.createEmailShells).toHaveBeenCalled();
     expect(stubs.createInteractionDraft).toHaveBeenCalled();
 
@@ -49,8 +46,6 @@ describe('deployJourney', () => {
       ensureFolderHierarchy: vi.fn(),
       createDataExtension: vi.fn(),
       createQueryActivity: vi.fn(),
-      startQueryActivity: vi.fn(),
-      pollQueryActivity: vi.fn(),
       createEmailShells: vi.fn(),
       createInteractionDraft: vi.fn(),
     };

@@ -42,10 +42,29 @@ export default function JourneyToolbar({ journey, dsl, onRename }) {
     }
   };
 
-  const validate = () => runCommand('run validate_journey and report', t('journeys.validationOk'), 'validate');
-  const deploy = () => {
+  const validate = () => runCommand('Run validate_journey and report the result concisely.', t('journeys.validationOk'), 'validate');
+
+  const deploy = async () => {
     if (!window.confirm(t('journeys.deployConfirm').replace('{name}', journey.name))) return;
-    runCommand('deploy_journey_draft now', t('journeys.deploySuccess'), 'deploy');
+    setBusy('deploy');
+    setBanner(null);
+    try {
+      const res = await fetch(`${API}/journeys/${journey.id}/deploy`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const failedStep = data.steps?.find((s) => s.status === 'error');
+        const detail = failedStep ? ` — failed at: ${failedStep.name} (${failedStep.error})` : '';
+        throw new Error(`${data.error || `HTTP ${res.status}`}${detail}`);
+      }
+      setBanner({ type: 'success', text: `${t('journeys.deploySuccess')} · ID ${(data.mc_interaction_id || '').slice(0, 12)}` });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (

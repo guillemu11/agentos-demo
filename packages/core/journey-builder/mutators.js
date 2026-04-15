@@ -1,10 +1,22 @@
 export function addActivity(dsl, { activity, after_id }) {
   const activities = [...dsl.activities, activity];
+
   if (after_id) {
     const idx = activities.findIndex((a) => a.id === after_id);
     if (idx >= 0) {
-      const prev = activities[idx];
-      activities[idx] = relinkNext(prev, null, activity.id);
+      activities[idx] = relinkNext(activities[idx], null, activity.id);
+    }
+    return { ...dsl, activities };
+  }
+
+  // Safety net: auto-link only for LINEAR previous types (wait_duration, email_send).
+  // Splits have multiple outbound paths that carry semantic meaning (yes/no, branches) —
+  // they must be wired explicitly by the agent, never guessed.
+  const prevIdx = activities.length - 2;
+  if (prevIdx >= 0) {
+    const prev = activities[prevIdx];
+    if ((prev.type === 'wait_duration' || prev.type === 'email_send') && prev.next == null) {
+      activities[prevIdx] = { ...prev, next: activity.id };
     }
   }
   return { ...dsl, activities };

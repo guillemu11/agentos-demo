@@ -7165,7 +7165,10 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
         if (isBuildFromBriefMsg) {
             ragQueryOverride = chatBriefBlocks.map(b => `${b.name}: ${b.guidance || ''}`).join('. ');
         }
-        const isBlockQuery = (isHtmlDev && (blockKeywords.test(message) || isBuildFromBriefMsg) && ragNamespaces.includes('email-blocks')) || isBriefQuery;
+        // Guard: when canvas already has content (hasCanvasContext), the user is editing an existing
+        // email — block-library searches would fill [RELEVANT KNOWLEDGE] with Emirates templates and
+        // trigger RULE 3 ("block assembly mode") instead of the expected PATCH behaviour.
+        const isBlockQuery = !hasCanvasContext && ((isHtmlDev && (blockKeywords.test(message) || isBuildFromBriefMsg) && ragNamespaces.includes('email-blocks')) || isBriefQuery);
         if (isBlockQuery && !isBriefQuery) ragNamespaces = ['email-blocks'];
         if (isBriefQuery) ragNamespaces = ['email-blocks', 'campaigns', 'kpis'];
         // "full email" requests want multiple blocks assembled together
@@ -7280,7 +7283,14 @@ The user currently has this email in the Email Studio canvas. When the user asks
 ${canvasHtmlForPrompt}
 \`\`\`
 
-If the user asks to rebrand, restyle, or modify this email, analyze the HTML above and respond surgically. Do NOT reference emails from the knowledge base as "the canvas email" — the canvas is the source of truth.`;
+If the user asks to rebrand, restyle, or modify this email, analyze the HTML above and respond surgically. Do NOT reference emails from the knowledge base as "the canvas email" — the canvas is the source of truth.
+
+When the user asks to FILL, POPULATE, or ADD CONTENT to the blocks in this email:
+- Output <!--PATCH:blockName--> for each block you are updating (use the exact data-block-name attribute values from the HTML above)
+- The block names available for PATCH are also listed in "## Current Canvas State" above
+- Do NOT use <!--NEW_BLOCK:--> markers — the structure already exists, only the content changes
+- Do NOT output <!DOCTYPE html> — do NOT reconstruct the full email from scratch
+- Do NOT import or reference blocks from the knowledge base — patch the existing structure`;
         }
         // Block assembly mode note will be injected after filteredPipelineHtml is computed (below)
 
@@ -7362,7 +7372,7 @@ When providing variable content, emit inline [BRIEF_UPDATE] tags per variable.`;
             filteredPipelineHtml = allPipelineHtml;
         }
         // Inject block assembly note now that filteredPipelineHtml is known
-        if (isBlockQuery && filteredPipelineHtml.length > 0) {
+        if (isBlockQuery && filteredPipelineHtml.length > 0 && !hasCanvasContext) {
             const blockTitles = filteredPipelineHtml.map(s => s.title || s.documentTitle).filter(Boolean).join(', ');
             systemPrompt += `\n\n## ⚠️ BLOCK ASSEMBLY MODE — MANDATORY\nThe canvas system has automatically placed these blocks: ${blockTitles}.\nYour text response MUST be plain text ONLY — absolutely NO HTML code, NO \`\`\`html blocks, NO raw tags.\nSimply acknowledge in 1-2 sentences which blocks were placed and ask what adjustments are needed.`;
         }
@@ -7381,6 +7391,13 @@ When providing variable content, emit inline [BRIEF_UPDATE] tags per variable.`;
                 if (idx > 0) insertAfterName = canvasBlockNames[idx - 1];
             }
             console.log(`[Pipeline:insert] keyword="${keyword}" beforeKeyword="${beforeKeyword}" insertAfterName="${insertAfterName}" canvasBlocks=${JSON.stringify(canvasBlockNames)}`);
+        }
+        // When the user is editing an existing email (canvas has content), do NOT push RAG
+        // blocks to the canvas via html_sources — that causes the "duplicate email below"
+        // bug. The canvas HTML is already injected in the system prompt for surgical edits.
+        // Explicit block additions still work via the <!--NEW_BLOCK:--> marker from Claude.
+        if (hasCanvasContext) {
+            filteredPipelineHtml = [];
         }
         // Only send html_sources to agents that can visually render them:
         // email builders (html-developer, lucia) and competitive-intel
@@ -7442,7 +7459,7 @@ When providing variable content, emit inline [BRIEF_UPDATE] tags per variable.`;
         }
 
         // When blocks were placed automatically, skip Claude and send a plain-text confirmation
-        if (isBlockQuery && filteredPipelineHtml.length > 0) {
+        if (isBlockQuery && filteredPipelineHtml.length > 0 && !hasCanvasContext) {
             const blockNames = filteredPipelineHtml.map(s => s.title || s.documentTitle).filter(Boolean);
             const missingCats = requestedBlockCategories.filter(c => !filteredPipelineHtml.some(s => s.category === c));
             let confirmText = `I've added ${blockNames.join(', ')} to the canvas.`;
@@ -8363,16 +8380,30 @@ app.post('/api/chat/unified-studio', requireAuth, async (req, res) => {
     try {
         const mc = await getEmailBuilderMCClient();
 
-        const variantCtx = activeVariant ? [
+        const variantCtxParts = activeVariant ? [
             `[ACTIVE VARIANT]`,
             `id=${activeVariant.id}`,
             `label=${activeVariant.label || '(unnamed)'}`,
             `market=${activeVariant.market} tier=${activeVariant.tier}`,
             `subject="${activeVariant.copy?.subject || ''}"`,
             `preheader="${activeVariant.copy?.preheader || ''}"`,
-            `blocks=${Object.keys(activeVariant.html?.blockHtmlMap || {}).length}`,
             `mcLinked=${activeVariant.mcLink?.emailId ? 'yes (' + activeVariant.mcLink.emailId + ')' : 'no'}`,
-        ].join('\n') : '[NO ACTIVE VARIANT — the user may want you to create one]';
+        ] : null;
+        if (variantCtxParts) {
+            const blockMap = activeVariant.html?.blockHtmlMap || {};
+            const blockEntries = Object.entries(blockMap);
+            if (blockEntries.length > 0) {
+                const blockSummaryLines = blockEntries.map(([bid, b]) => {
+                    const vars = extractAmpscriptVars(b.html || '');
+                    const varList = vars.length ? vars.map(v => v.replace('@', '')).join(', ') : '(no vars)';
+                    return `  ${bid} | ${b.label || bid} | vars: ${varList}`;
+                });
+                variantCtxParts.push(`canvas_blocks:\n${blockSummaryLines.join('\n')}`);
+            } else {
+                variantCtxParts.push('canvas_blocks: (empty)');
+            }
+        }
+        const variantCtx = variantCtxParts ? variantCtxParts.join('\n') : '[NO ACTIVE VARIANT — the user may want you to create one]';
 
         const apiMessages = [
             ...history.filter(m => m.role && m.content).map(m => ({ role: m.role, content: m.content })),
@@ -8403,7 +8434,8 @@ app.post('/api/chat/unified-studio', requireAuth, async (req, res) => {
             const toolResults = [];
             for (const tb of toolUseBlocks) {
                 send({ type: 'tool_start', id: tb.id, name: tb.name, input: tb.input });
-                const { text, patch } = await executeUnifiedStudioTool(tb.name, tb.input, { mc, pool, searchKnowledge });
+                const blockHtmlMap = activeVariant?.html?.blockHtmlMap || {};
+                const { text, patch } = await executeUnifiedStudioTool(tb.name, tb.input, { mc, pool, searchKnowledge, blockHtmlMap });
                 if (patch) send({ type: 'patch', op: patch.op, args: patch.args });
                 send({ type: 'tool_end', id: tb.id, name: tb.name });
                 toolResults.push({ type: 'tool_result', tool_use_id: tb.id, content: text });
@@ -8631,10 +8663,53 @@ app.patch('/api/journeys/:id/activities/:actId', requireAuth, async (req, res) =
     res.json({ ok: true, dsl: updatedDsl });
 });
 
-// Email builder — generate HTML preview for a journey email_send activity
+// ─── Journey Email Preview: block-based renderer ───────────────────────────
+// Reads real Emirates blocks from email_blocks/, substitutes AMPscript vars
+// with Claude-generated copy + Gemini-generated images, wraps in template shell.
+// ~800 input tokens to Claude vs 20k+ in the BAU pipeline.
+
+const _ebDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../email_blocks');
+
+function _ebReadBlock(name) {
+    const p = path.join(_ebDir, `${name}.html`);
+    return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
+}
+
+function _ebExtractVars(html) {
+    const vars = new Set();
+    const re = /%%=(?:v|TreatAsContent|RedirectTo)\(["']?@(\w+)["']?\)=%%/g;
+    let m;
+    while ((m = re.exec(html)) !== null) vars.add(m[1]);
+    return [...vars];
+}
+
+function _ebSubstitute(html, vals) {
+    return html
+        // text & content vars
+        .replace(/%%=(?:v|TreatAsContent)\(["']?@(\w+)["']?\)=%%/g, (_, v) => vals[v] ?? '')
+        // redirect links → #
+        .replace(/%%=RedirectTo\(["']?@(\w+)["']?\)=%%/g, '#')
+        // view in browser url
+        .replace(/%%view_email_url%%/g, '#')
+        // alias attributes → remove
+        .replace(/\salias="[^"]*"/g, '')
+        // AMPscript IF/ELSEIF/ELSE/ENDIF blocks → strip entirely
+        .replace(/%%\[[\s\S]*?\]%%/g, '');
+}
+
+// Blocks per campaign type (order = render order)
+const _ebBlockSets = {
+    'product-offer-skywards':   ['Ebase_header', 'Global_Hero_Image', 'Global_Header_Title_v2', 'Global_offer_area', 'Global_Body_Copy_CTA_red', 'Global_footer'],
+    'product-offer-ecommerce':  ['Ebase_header', 'Global_Hero_Image', 'Global_Header_Title_v2', 'Global_offer_area', 'Global_Body_Copy_CTA_red', 'Global_footer'],
+    'promotional':              ['Ebase_header', 'Global_Hero_Image', 'Global_Header_Title_v2', 'Global_Body_Copy_CTA_red', 'Global_footer'],
+    'retention':                ['Ebase_header', 'Global_Hero_Image', 'Global_Header_Title_v2', 'Global_body_copy', 'Global_Body_Copy_CTA_red', 'Global_footer'],
+    'reactivation':             ['Ebase_header', 'Global_Hero_Image', 'Global_Header_Title_v2', 'Global_Body_Copy_CTA_red', 'Global_footer'],
+    'transactional':            ['Ebase_header', 'Global_Header_Title_v2', 'Global_body_copy', 'Global_CTA_red', 'Global_footer'],
+};
+
 app.post('/api/journeys/:id/activities/:actId/email/build', requireAuth, async (req, res) => {
     const { id: journeyId, actId } = req.params;
-    const { language = 'en', brief = '' } = req.body || {};
+    const { language = 'en', market = 'UAE', brief = '' } = req.body || {};
 
     const { rows } = await pool.query(
         `SELECT dsl_json FROM journeys WHERE id = $1 AND user_id = $2`,
@@ -8645,39 +8720,114 @@ app.post('/api/journeys/:id/activities/:actId/email/build', requireAuth, async (
     const activity = (dsl.activities || []).find((a) => a.id === actId);
     if (!activity || activity.type !== 'email_send') return res.status(400).json({ error: 'activity not found or not email_send' });
 
-    const { CAMPAIGN_TYPES } = await import('../../packages/core/campaign-builder/index.js');
-    const typeDef = CAMPAIGN_TYPES[activity.campaign_type];
-    if (!typeDef) return res.status(400).json({ error: `Unknown campaign_type: ${activity.campaign_type}` });
-    const assetId = typeDef.templates.noCugoCode;
-
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
 
-    const mc = await getEmailBuilderMCClient();
-    if (!mc) {
-        sseSend(res, { type: 'error', message: 'Marketing Cloud not configured' });
-        return res.end();
-    }
-
-    const templateShell = getEmailBuilderShell();
+    const LANG_NAMES = { en: 'English', ar: 'Arabic', de: 'German', fr: 'French' };
+    const langName = LANG_NAMES[language] || 'English';
 
     try {
-        const { buildCampaignEmails } = await import('../../packages/core/email-builder/index.js');
-        const result = await buildCampaignEmails({
-            assetId,
-            mcClient: mc,
-            templateShell,
-            campaignHint: brief || activity.email_shell_name,
-            options: {
-                language,
-                onProgress: (phase, detail) => sseSend(res, { type: 'status', phase, message: String(detail || '') }),
-            },
+        // 1. Load template shell + blocks
+        sseSend(res, { type: 'status', message: 'Loading email blocks...' });
+        const templateShell = _ebReadBlock('template_style');
+        const blockNames = _ebBlockSets[activity.campaign_type] || _ebBlockSets['promotional'];
+        const blocksHtml = blockNames.map(_ebReadBlock).join('\n');
+
+        // 2. Classify variables
+        const allVars = _ebExtractVars(blocksHtml);
+        const imageVars = allVars.filter(v => /image|logo|masthead|banner/i.test(v));
+        const linkVars  = allVars.filter(v => /_link$/.test(v));
+        const aliasVars = allVars.filter(v => /_alias$/.test(v));
+        const textVars  = allVars.filter(v => !imageVars.includes(v) && !linkVars.includes(v) && !aliasVars.includes(v));
+
+        // 3. Claude generates all text copy as JSON
+        sseSend(res, { type: 'status', message: 'Generating email copy...' });
+        const varDescriptions = {
+            vawp_text: 'View as web page link text (~20 chars)',
+            join_skw_text: 'Join Skywards link text (~15 chars)',
+            main_header: 'Main headline (5-8 words, punchy, Emirates tone)',
+            main_subheader: 'Subheadline in ALL CAPS (3-5 words, eg: EXCLUSIVE BIRTHDAY OFFER)',
+            main_cta: 'CTA button text (3-5 words, action verb, eg: Book Your Birthday Flight)',
+            main_link_alias: 'CTA link label',
+            body_copy: 'Body paragraph (2-3 sentences, professional, aspirational tone)',
+            body_cta: 'Secondary CTA button text (3-4 words)',
+            body_link_alias: 'Body link label',
+            offer_area_header: 'Offer headline (eg: Double Miles on Your Birthday)',
+            offer_area_subheader: 'Offer category label in CAPS (eg: BIRTHDAY REWARD)',
+            offer_area_body: 'Short offer description (1-2 sentences)',
+            offer_area_alias: 'Offer link label',
+            unsub_text: 'Unsubscribe link text (eg: Unsubscribe)',
+            contactus_text: 'Contact us link text (eg: Contact Us)',
+            privacy_text: 'Privacy link text (eg: Privacy Policy)',
+            copywrite: 'Copyright line (eg: © 2026 Emirates. All rights reserved.)',
+        };
+        const wantedVars = textVars.filter(v => !aliasVars.includes(v));
+        const varList = wantedVars.map(v => `"${v}": "${varDescriptions[v] || v + ' text'}"`).join(',\n  ');
+
+        const copyMsg = await anthropic.messages.create({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 1024,
+            messages: [{
+                role: 'user',
+                content: `Generate Emirates email copy for this brief. Output ONLY valid JSON, no markdown.
+
+Brief: ${brief.trim()}
+Language: ${langName}. Market: ${market}.
+
+Fill these keys (all values must be plain text strings — no HTML tags except body_copy and offer_area_body which can have <strong>):
+{
+  ${varList}
+}`,
+            }],
         });
 
-        const variantHtml = Object.values(result.variants || {})[0] || '';
-        sseSend(res, { type: 'result', html: variantHtml, emailName: result.emailName || activity.email_shell_name });
+        let copyValues = {};
+        try {
+            const raw = copyMsg.content[0]?.text || '{}';
+            const match = raw.match(/\{[\s\S]*\}/);
+            copyValues = match ? JSON.parse(match[0]) : {};
+        } catch {}
+
+        // Add fixed values for link/alias vars
+        for (const v of linkVars)  copyValues[v] = '#';
+        for (const v of aliasVars) copyValues[v] = '';
+
+        // 4. Gemini Imagen: generate hero image as data URI
+        sseSend(res, { type: 'status', message: 'Generating hero image...' });
+        const vals = { ...copyValues };
+
+        // Emirates logo placeholder (red box, known dimensions)
+        const LOGO_PLACEHOLDER = 'data:image/svg+xml;base64,' + Buffer.from(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="82" height="60"><rect width="82" height="60" fill="#d10911"/><text x="41" y="38" font-family="Arial" font-size="9" font-weight="bold" fill="white" text-anchor="middle">EMIRATES</text></svg>'
+        ).toString('base64');
+
+        for (const v of imageVars) {
+            if (/logo/i.test(v)) {
+                vals[v] = LOGO_PLACEHOLDER;
+                continue;
+            }
+            // hero / masthead / banner → generate with Gemini Imagen
+            try {
+                const prompt = `Emirates Airlines email hero image. ${brief.trim().slice(0, 120)}. Premium aviation photography style, deep red and gold tones, aspirational luxury travel.`;
+                const b64 = await generateImage(prompt, { width: 642, height: 300 });
+                vals[v] = b64 ? `data:image/png;base64,${b64}` : LOGO_PLACEHOLDER;
+            } catch {
+                vals[v] = LOGO_PLACEHOLDER;
+            }
+        }
+
+        // 5. Substitute + inject into shell
+        const filledBlocks = _ebSubstitute(blocksHtml, vals);
+        const SLOT = '<div data-type="slot" data-key="2v65jtcb5dc" data-label="Drop blocks or content here"></div>';
+        const html = templateShell
+            .replace(SLOT, filledBlocks)
+            // strip remaining AMPscript language conditionals in template
+            .replace(/%%\[[\s\S]*?\]%%/g, '')
+            .replace(/%%=v\(@\w+\)=%%/g, '');
+
+        sseSend(res, { type: 'result', html, emailName: activity.email_shell_name });
     } catch (e) {
         sseSend(res, { type: 'error', message: e.message });
     }

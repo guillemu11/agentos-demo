@@ -58,11 +58,6 @@ export const JOURNEY_TOOLS = [
     description: 'Run validation and return human-readable errors without mutating.',
     input_schema: { type: 'object', properties: {} },
   },
-  {
-    name: 'deploy_journey_draft',
-    description: 'Deploy the journey to Marketing Cloud as a Draft. Runs: folder → target DE → SQL query → email shells → Interaction POST. Always Draft, never Active.',
-    input_schema: { type: 'object', properties: {} },
-  },
 ];
 
 export const CAMPAIGN_TYPE_KEYS = Object.keys(CAMPAIGN_TYPES);

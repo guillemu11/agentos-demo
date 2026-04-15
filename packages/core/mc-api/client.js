@@ -19,20 +19,43 @@ export function createMCClient(pool, decryptValue) {
 
     async function loadCredentials() {
         if (_creds) return _creds;
-        const res = await pool.query("SELECT value FROM workspace_config WHERE key = 'api_keys'");
-        if (res.rows.length === 0) return null;
-        const keys = res.rows[0].value;
-        const clientId = keys.mc_client_id ? decryptValue(keys.mc_client_id) : null;
-        const clientSecret = keys.mc_client_secret ? decryptValue(keys.mc_client_secret) : null;
-        const authUrl = keys.mc_auth_url ? decryptValue(keys.mc_auth_url) : null;
-        if (!clientId || !clientSecret || !authUrl) return null;
-        _creds = {
-            clientId,
-            clientSecret,
-            authUrl: authUrl.replace(/\/+$/, ''), // strip trailing slash
-            accountId: keys.mc_account_id ? decryptValue(keys.mc_account_id) : null,
-        };
-        return _creds;
+
+        // First try: encrypted DB-stored keys (production path)
+        try {
+            const res = await pool.query("SELECT value FROM workspace_config WHERE key = 'api_keys'");
+            if (res.rows.length > 0) {
+                const keys = res.rows[0].value;
+                const clientId = keys.mc_client_id ? decryptValue(keys.mc_client_id) : null;
+                const clientSecret = keys.mc_client_secret ? decryptValue(keys.mc_client_secret) : null;
+                const authUrl = keys.mc_auth_url ? decryptValue(keys.mc_auth_url) : null;
+                if (clientId && clientSecret && authUrl) {
+                    _creds = {
+                        clientId,
+                        clientSecret,
+                        authUrl: authUrl.replace(/\/+$/, ''),
+                        accountId: keys.mc_account_id ? decryptValue(keys.mc_account_id) : null,
+                    };
+                    return _creds;
+                }
+            }
+        } catch (err) {
+            console.warn('[mc-client] DB credential lookup failed, falling back to env:', err.message);
+        }
+
+        // Fallback: process.env (dev + local overrides, matches email-builder pattern)
+        const envId = process.env.MC_CLIENT_ID;
+        const envSecret = process.env.MC_CLIENT_SECRET;
+        const envAuth = process.env.MC_AUTH_URL;
+        if (envId && envSecret && envAuth) {
+            _creds = {
+                clientId: envId,
+                clientSecret: envSecret,
+                authUrl: envAuth.replace(/\/+$/, ''),
+                accountId: process.env.MC_ACCOUNT_ID || null,
+            };
+            return _creds;
+        }
+        return null;
     }
 
     async function authenticate() {
