@@ -130,10 +130,17 @@ describe('detectFrequencyAnomaly', () => {
 });
 
 describe('detectPerformanceOpportunity', () => {
-  it('surfaces historical high-performer with no counterpart planned', () => {
-    const events = [ev({ startDate: '2026-04-03' })];
+  it('surfaces high-performer tag when not present in events', () => {
+    const events = [ev({ campaignName: 'Unrelated campaign' })];
     const hits = detectPerformanceOpportunity(events, RANGE);
-    expect(Array.isArray(hits)).toBe(true);
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0].type).toBe('insight');
+    expect(hits[0].ruleId).toBe('performanceOpportunity');
+  });
+
+  it('does not fire when a matching high-performer is present', () => {
+    const events = [ev({ campaignName: 'Q2 Tier upgrade celebration email' })];
+    expect(detectPerformanceOpportunity(events, RANGE)).toEqual([]);
   });
 });
 

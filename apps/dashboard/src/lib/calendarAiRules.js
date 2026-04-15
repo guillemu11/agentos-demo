@@ -11,6 +11,10 @@ const TIER_SEGMENTS = ['Silver', 'Gold', 'Platinum', 'Premium Skywards'];
 const COVERAGE_GAP_DAYS = 10;
 const FREQUENCY_MULTIPLIER = 2;
 
+const HIGH_PERFORMERS = [
+  { tag: 'Tier upgrade celebration', openRate: 72, segment: 'Tier upgraded', group: 'loyalty-tiers' },
+];
+
 function daysBetween(isoA, isoB) {
   const a = new Date(isoA);
   const b = new Date(isoB);
@@ -62,8 +66,7 @@ export function detectBauLifecycleCollision(events, range) {
     for (const l of lifecycle) {
       if (!rangeOverlap(b.startDate, b.endDate, l.startDate, l.endDate)) continue;
       if (!b.segment || !l.segment) continue;
-      const shared = b.segment.toLowerCase().split(/\s+/).filter(w => w.length > 3 && l.segment.toLowerCase().includes(w));
-      if (shared.length === 0) continue;
+      if (b.segment.toLowerCase() !== l.segment.toLowerCase()) continue;
       hits.push({
         id: `bau-life-${b.id}-${l.campaignId}`,
         type: 'risk',
@@ -129,16 +132,17 @@ export function detectCoverageGap(events, range) {
       }
       prevDate = ev.endDate;
     }
-    if (daysBetween(prevDate, range.end) > COVERAGE_GAP_DAYS) {
+    const clippedPrev = prevDate > range.end ? range.end : prevDate;
+    if (daysBetween(clippedPrev, range.end) > COVERAGE_GAP_DAYS) {
       hits.push({
-        id: `gap-${tier}-${prevDate}-${range.end}`,
+        id: `gap-${tier}-${clippedPrev}-${range.end}`,
         type: 'opportunity',
         severity: 'medium',
         ruleId: 'coverageGap',
-        dateRange: { start: prevDate, end: range.end },
+        dateRange: { start: clippedPrev, end: range.end },
         campaignIds: [],
-        title: `${tier} segment has ${daysBetween(prevDate, range.end)}-day trailing gap`,
-        rawEvidence: { tier, gapDays: daysBetween(prevDate, range.end), from: prevDate, to: range.end },
+        title: `${tier} segment has ${daysBetween(clippedPrev, range.end)}-day trailing gap`,
+        rawEvidence: { tier, gapDays: daysBetween(clippedPrev, range.end), from: clippedPrev, to: range.end },
       });
     }
   }
@@ -162,7 +166,12 @@ export function detectHolidayWindowGap(events, range) {
         dateRange: { start: h.start, end: h.end },
         campaignIds: [],
         title: `${h.name} window has no offer campaign`,
-        rawEvidence: { holiday: h.name, window: `${h.start} → ${h.end}` },
+        rawEvidence: {
+          holiday: h.name,
+          window: `${h.start} → ${h.end}`,
+          offerGroups: h.offerGroups,
+          daysUntilHoliday: daysBetween(range.start, h.start),
+        },
       });
     }
   }
@@ -183,7 +192,12 @@ export function detectFrequencyAnomaly(events, range) {
         dateRange: range,
         campaignIds: [campaignId],
         title: `${list[0].campaignName}: ${list.length} sends in range (>2× historical)`,
-        rawEvidence: { campaign: list[0].campaignName, count: list.length },
+        rawEvidence: {
+          campaign: list[0].campaignName,
+          count: list.length,
+          threshold: FREQUENCY_MULTIPLIER * 4,
+          historicalMedian: 4,
+        },
       });
     }
   }
@@ -192,9 +206,6 @@ export function detectFrequencyAnomaly(events, range) {
 
 // ── Rule 7: Performance opportunity ──────────────────────────
 export function detectPerformanceOpportunity(events, range) {
-  const HIGH_PERFORMERS = [
-    { tag: 'Tier upgrade celebration', openRate: 72, segment: 'Tier upgraded', group: 'loyalty-tiers' },
-  ];
   const hits = [];
   for (const hp of HIGH_PERFORMERS) {
     const present = events.some(e => (e.campaignName || '').toLowerCase().includes(hp.tag.toLowerCase()));
