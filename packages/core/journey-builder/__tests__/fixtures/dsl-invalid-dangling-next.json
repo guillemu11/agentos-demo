@@ -1,0 +1,7 @@
+{
+  "version": 1, "name": "Dangling",
+  "entry": { "source": { "type": "master_de_query", "master_de_key": "M", "sql": "SELECT 1 FROM M", "target_de_name": "T" } },
+  "activities": [
+    { "id": "a", "type": "wait_duration", "amount": 1, "unit": "days", "next": "ghost" }
+  ]
+}

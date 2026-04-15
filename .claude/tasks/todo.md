@@ -85,6 +85,32 @@ PDR completo en `projects/001-knowledge-base-rag-voice-autoresearch.md`
 
 ---
 
+### Journey Builder MVP (branch `feat/journey-builder-mvp`)
+
+Plan: `docs/superpowers/plans/2026-04-15-journey-builder-mvp.md`. Worktree: `.worktrees/journey-builder-mvp`.
+
+- [x] Task 1: Migration `journeys` + `journey_chat_messages` — 2026-04-15
+- [x] Task 2: DSL schema validator + invariants + fixtures — 2026-04-15
+- [x] Task 3: Compiler DSL → SFMC Interactions JSON + snapshot — 2026-04-15
+- [x] Task 4: Query Activity helpers (create/start/poll) — 2026-04-15
+- [x] Task 5: Email shells via duplicateEmail reuse — 2026-04-15
+- [x] Task 6: Deploy orchestrator + mc-api raw helpers — 2026-04-15
+- [x] Task 7: DSL mutators + Claude tool definitions — 2026-04-15
+- [x] Task 8: CRUD `/api/journeys` endpoints — 2026-04-15
+- [x] Task 9: SSE `/api/chat/journey-builder/:id` with tool dispatch — 2026-04-15
+- [x] Task 10: Install `@xyflow/react` + `@dagrejs/dagre` + CSS tokens — 2026-04-15
+- [x] Task 11: Routes + i18n ES+EN + Layout nav — 2026-04-15
+- [x] Task 12: Chat panel with SSE streaming — 2026-04-15
+- [x] Task 13: ReactFlow canvas + dagre autoLayout + DSL→graph — 2026-04-15
+- [x] Task 14: 6 custom nodes + animated edge (shimmer/pulse/dash/spin) — 2026-04-15
+- [x] Task 15: JourneyToolbar Validate + Deploy — 2026-04-15
+- [x] Task 16+17: Polish + audit (reduced-motion, prod build 2678 modules) — 2026-04-15
+- [x] Task 18: Regression — 90/90 tests (journey 29 + email-builder 61) — 2026-04-15
+- [ ] Task 19: E2E browser golden path — **pending live MC verification**
+- [ ] Task 20: Merge worktree → master + PR
+
+**Commits:** 10 on branch. **Suite:** 90/90. **Build:** green.
+
 ## Backlog
 
 - [ ] Fase 3: Soft launch (ROADMAP.md)

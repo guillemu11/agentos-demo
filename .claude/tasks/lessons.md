@@ -108,3 +108,67 @@ Renderer prueba los candidatos antes de rendirse. Además populates `info_item{N
 - max_tokens 32000 es razonable para 10-20 bloques; output típico ~20-40KB.
 - Data URIs inline de Imagen (~2.5MB/imagen PNG) son OK para preview en iframe pero engordan el HTML persistido en Postgres. Si escala: mover a `/tmp` o CDN propio.
 - Push a MC (phase B) va a requerir otro approach: derivar rows MC desde el HTML aprobado + subir las imágenes generadas como assets. TBD.
+
+### 2026-04-15 — DB drift: una semana de divergencia Docker local ↔ Railway
+
+**Contexto:** `.env` quedó apuntando a Docker local (`localhost:5434`) durante ~1 semana. Todas las migrations nuevas (7 tablas: `bau_builds`, `campaign_*`, `experiment_*`, `meeting_sessions`, `research_sessions`) se aplicaron solo a Docker. Railway se quedó con el schema viejo mientras acumulaba datos reales (knowledge_chunks 198, tasks 71, etc.) desde otro contexto de ejecución. Resultado: 27 `bau_builds` en local que no existían en Railway, y 7 tablas completas faltantes en prod.
+
+**Raíz:** no existe runner de migrations versionado. Cada DDL se aplica a mano contra "la DB que está conectada en ese momento", lo que equivale a elegir entre los dos entornos de forma silenciosa. Además, el flag de switch (`DATABASE_URL` comentada vs descomentada en `.env`) es invisible en logs y fácil de dejar mal.
+
+**Fix aplicado (cutover 2026-04-15):**
+1. Aplicar las 7 tablas a Railway con `CREATE TABLE IF NOT EXISTS` + indexes + FKs + CHECKs (idempotente).
+2. Copiar `bau_builds` de local → Railway con `ON CONFLICT (id) DO NOTHING`. 4/27 fallaron por payloads grandes de `images_base64` (4-8MB); fix: `JSON.stringify` explícito + cast `$N::jsonb`.
+3. `.env` ahora apunta SOLO a Railway; línea local comentada como legacy.
+4. Docker `npm run db:up` deprecado (no borrar scripts por si acaso, pero no usar).
+
+**Reglas futuras:**
+- **DB = Railway siempre.** Dev y prod comparten DB. Sin Docker local, sin mirror bidi.
+- **Sin SSL** en `yamanote.proxy.rlwy.net:42145` (proxy público). `new Pool({ connectionString })` sin `ssl:`.
+- **JSONB grande (>4MB) vía pg driver:** `JSON.stringify` explícito + cast `::jsonb` en el SQL. Auto-serialización del driver falla con "invalid input syntax for type json" en payloads grandes.
+- **Bidi-sync entre dev y prod es anti-patrón** (colisiones de `SERIAL`, FKs huérfanas). Una sola DB = cero drift posible.
+- **Tech debt crítico:** falta un runner de migrations idempotente (`migrations/NNNN_*.sql` + `schema_migrations` table). Mientras no exista, cualquier DDL manual futuro puede repetir el drift. Priorizar antes del próximo feature que toque schema.
+- **`bau_builds.images_base64`** crece rápido (4-8MB/fila). A 200+ builds mover a Blob storage; a 1000+ es urgente.
+
+### 2026-04-15 — Journey Builder MVP: patrones reutilizables
+
+**Contexto:** construir un journey builder conversacional (chat + canvas) que deploya como Draft a SFMC Interactions API. El plan completo está en `docs/superpowers/plans/2026-04-15-journey-builder-mvp.md`.
+
+**Patrones que funcionaron:**
+1. **TDD estricto en módulos puros:** DSL validator, compiler, mutators — todos se implementaron con tests primero. Rojo → implementación → verde. Cero sorpresas al integrar. 90/90 tests pasan incluyendo email-builder sin regresiones.
+2. **Stubs por default + overrides en tests:** `deployJourney({ mc, dsl, config }, overrides = {})` — defaults son las funciones reales (importadas), overrides permiten mock total. Test stub toda la cadena MC, producción usa las reales. Evita dependency injection ceremonioso.
+3. **Snapshots deterministas:** normalizar timestamps (`.replace(/-\d+$/, '-TIMESTAMP')`) antes de `toMatchSnapshot()` — de lo contrario cada run reescribe `.snap` y el test pierde valor como guard rail.
+4. **Guardas tempranas en el orchestrator:** `validateDsl(dsl)` antes de tocar MC. El plan pedía invariante "hard-fails on invalid DSL without calling MC" — implementado + testeado. Fallar barato es clave cuando cada paso MC cuesta.
+5. **Worktree aislado:** la feature se desarrolló en `.worktrees/journey-builder-mvp` sobre branch `feat/journey-builder-mvp`. Ventaja: master queda intocado (tiene cambios WIP de Unified Studio) y el repo principal puede seguir trabajando sin merge conflicts.
+
+**Gotchas:**
+- Signatures reales divergen del plan: `duplicateEmail(mc, { sourceAssetId, newName, categoryId, attributes: {...} })` NO `{ templateId, name, folderId, attr1..5 }`. `CAMPAIGN_TYPES[x].templates.noCugoCode` NO `templateNoCugo`. Lesson: antes de escribir el test, **grep el export real en campaign-builder/index.js** y ajustar assertions.
+- `createDataExtension` en mc-api/executor.js es local (no exportada) y devuelve markdown, no objeto. Añadir `createDataExtensionRaw` + `createInteraction` como nuevos exports — menos fricción que refactorizar la firma markdown-returning usada por tool dispatch de MC Architect.
+- React Router: rutas dentro de `<Route path="/app/*">` son **relativas**. Para full-screen sin sidebar usar `path="/journeys/:id"` (no `/app/journeys/:id`) dentro del inner `<Routes>`.
+- Vite/Windows: `cd` entre Bash calls NO persiste — usa rutas absolutas o `cd ... && cmd` en una sola invocación.
+
+**Arquitectura del hot path (runtime):**
+- Frontend abre SSE a `/api/chat/journey-builder/:id` con `{ message }`.
+- Server loop: stream Claude → on tool_use → `dispatchJourneyTool` → mutator pure → `persistJourneyDsl` → emit `journey_state` event → feed tool_result back to Claude → repeat hasta `stop_reason !== 'tool_use'`.
+- Frontend reacciona a `journey_state` actualizando `dsl`, que re-computa `dslToGraph(dsl)` + auto-layout dagre → ReactFlow re-renderiza con animación `--newly-added` (shimmer 900ms en el primer id nuevo detectado).
+- Deploy = una tool call más (`deploy_journey_draft`) que llama a `deployJourney` que orquesta folder → DE → query → shells → compile → Interaction POST. Siempre Draft. Status persiste a `deployed_draft`.
+
+### 2026-04-15 — Railway migration: type mismatch + SSL gotcha
+
+**Contexto:** aplicar la migration `202604150001_journeys.sql` contra Railway. Dos falencias consecutivas.
+
+**Fallo 1:** `psql: command not found`. Solución: script Node con `pg` (ya en deps) — `scripts/run-journey-migration.mjs` lee el SQL, abre conexión con `DATABASE_URL`, corre en transacción.
+
+**Fallo 2:** `The server does not support SSL connections`. Railway **proxy público** (rlwy.net) no expone SSL. Memoria ya lo advertía (`project_database.md`). Fix: `ssl: false` en el pool, NO `{rejectUnauthorized: false}`.
+
+**Fallo 3:** `foreign key constraint "journeys_user_id_fkey" cannot be implemented`. El plan asumía `workspace_users.id UUID` pero el schema real es `INTEGER`. Fix: `user_id INTEGER NOT NULL REFERENCES workspace_users(id)`. CRUD handlers usan queries parametrizadas `$1` → cero cambios en app.
+
+**Verificación E2E contra Railway (`scripts/smoke-journeys.mjs`):**
+- insert journey + chat message ✅
+- trigger `set_updated_at` dispara en UPDATE ✅
+- CHECK constraint de `status` rechaza valores inválidos ✅
+- CASCADE DELETE de `journey_chat_messages` al borrar journey padre ✅
+
+**Reglas:**
+- Antes de escribir una migration que tenga FK a una tabla existente, **consultar `information_schema.columns` del destino** para ver los tipos reales. El plan puede tener assumptions obsoletas.
+- `ssl: false` siempre al proxy público de Railway. `ssl: { rejectUnauthorized: false }` es para endpoints con cert self-signed — aquí no hay SSL del todo.
+- Para smoke tests post-migration, siempre: insert → trigger check → constraint check → cascade delete → cleanup. Detecta problemas que el DDL solo no revela.

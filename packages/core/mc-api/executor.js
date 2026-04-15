@@ -572,3 +572,35 @@ function sanitizeForLog(input) {
     if (clean.rows && Array.isArray(clean.rows)) clean.rows = `(${clean.rows.length} rows)`;
     return clean;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Raw helpers (used by journey-builder — return response objects, not markdown)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export async function createDataExtensionRaw(mc, { name, customerKey, description, fields, folderId, isSendable, sendableField }) {
+    const body = {
+        name,
+        customerKey: customerKey || `de-${Date.now()}`,
+        fields: fields.map((f) => ({
+            name: f.name,
+            fieldType: f.fieldType || f.type,
+            maxLength: (f.fieldType || f.type) === 'Text' ? (f.maxLength || 100) : undefined,
+            isPrimaryKey: f.isPrimaryKey || false,
+            isRequired: f.isRequired || false,
+            defaultValue: f.defaultValue || undefined,
+        })),
+    };
+    if (description) body.description = description;
+    if (folderId) body.categoryId = folderId;
+    if (isSendable) {
+        body.isSendable = true;
+        body.sendableDataExtensionField = { name: sendableField || 'EmailAddress', fieldType: 'EmailAddress' };
+        body.sendableSubscriberField = { name: 'Subscriber Key' };
+    }
+    const result = await mc.rest('POST', '/hub/v1/dataevents', body);
+    return { customerKey: body.customerKey, name, raw: result };
+}
+
+export async function createInteraction(mc, interactionJson) {
+    return mc.rest('POST', '/interaction/v1/interactions', interactionJson);
+}

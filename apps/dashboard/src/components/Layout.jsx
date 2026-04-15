@@ -50,6 +50,7 @@ export default function Layout({ user, onLogout }) {
             label: t('layout.studios'),
             items: [
                 { to: '/app/studio', icon: icons.studio, label: t('layout.studio') },
+                { to: '/app/image-studio', icon: icons.imageStudio, label: t('layout.imageStudio') },
             ],
         },
         {
@@ -57,6 +58,7 @@ export default function Layout({ user, onLogout }) {
             items: [
                 { to: '/app/inbox', icon: icons.projectManager, label: t('layout.projectManager') },
                 { to: '/app/knowledge', icon: icons.knowledgeBase, label: t('layout.knowledgeBase') },
+                { to: '/app/journeys', icon: icons.workflows, label: t('layout.journeys') },
             ],
         },
     ];
