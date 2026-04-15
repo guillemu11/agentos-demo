@@ -131,3 +131,24 @@ Renderer prueba los candidatos antes de rendirse. Además populates `info_item{N
 - Server loop: stream Claude → on tool_use → `dispatchJourneyTool` → mutator pure → `persistJourneyDsl` → emit `journey_state` event → feed tool_result back to Claude → repeat hasta `stop_reason !== 'tool_use'`.
 - Frontend reacciona a `journey_state` actualizando `dsl`, que re-computa `dslToGraph(dsl)` + auto-layout dagre → ReactFlow re-renderiza con animación `--newly-added` (shimmer 900ms en el primer id nuevo detectado).
 - Deploy = una tool call más (`deploy_journey_draft`) que llama a `deployJourney` que orquesta folder → DE → query → shells → compile → Interaction POST. Siempre Draft. Status persiste a `deployed_draft`.
+
+### 2026-04-15 — Railway migration: type mismatch + SSL gotcha
+
+**Contexto:** aplicar la migration `202604150001_journeys.sql` contra Railway. Dos falencias consecutivas.
+
+**Fallo 1:** `psql: command not found`. Solución: script Node con `pg` (ya en deps) — `scripts/run-journey-migration.mjs` lee el SQL, abre conexión con `DATABASE_URL`, corre en transacción.
+
+**Fallo 2:** `The server does not support SSL connections`. Railway **proxy público** (rlwy.net) no expone SSL. Memoria ya lo advertía (`project_database.md`). Fix: `ssl: false` en el pool, NO `{rejectUnauthorized: false}`.
+
+**Fallo 3:** `foreign key constraint "journeys_user_id_fkey" cannot be implemented`. El plan asumía `workspace_users.id UUID` pero el schema real es `INTEGER`. Fix: `user_id INTEGER NOT NULL REFERENCES workspace_users(id)`. CRUD handlers usan queries parametrizadas `$1` → cero cambios en app.
+
+**Verificación E2E contra Railway (`scripts/smoke-journeys.mjs`):**
+- insert journey + chat message ✅
+- trigger `set_updated_at` dispara en UPDATE ✅
+- CHECK constraint de `status` rechaza valores inválidos ✅
+- CASCADE DELETE de `journey_chat_messages` al borrar journey padre ✅
+
+**Reglas:**
+- Antes de escribir una migration que tenga FK a una tabla existente, **consultar `information_schema.columns` del destino** para ver los tipos reales. El plan puede tener assumptions obsoletas.
+- `ssl: false` siempre al proxy público de Railway. `ssl: { rejectUnauthorized: false }` es para endpoints con cert self-signed — aquí no hay SSL del todo.
+- Para smoke tests post-migration, siempre: insert → trigger check → constraint check → cascade delete → cleanup. Detecta problemas que el DDL solo no revela.
