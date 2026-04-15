@@ -38,6 +38,15 @@ export const NavIcons = {
   reports: <BarChart3 size={20} />,
   settings: <Settings size={20} />,
   imageStudio: <Film size={20} />,
+  campaignCreation: <Rocket size={20} />,
+  previewTest: <TestTube size={20} />,
+  competitorAnalysis: <Eye size={20} />,
+  brandAudit: <Shield size={20} />,
+  emailStudio: <Code2 size={20} />,
+  contentStudio: <Pencil size={20} />,
+  studio: <Layers size={20} />,
+  knowledgeBase: <BookOpen size={20} />,
+  projectManager: <ClipboardList size={20} />,
   panelLeft: <PanelLeft size={20} />,
   logout: <LogOut size={16} />,
   menu: <Menu size={20} />,
@@ -398,6 +407,38 @@ export const AgentAvatarIcons = {
   'competitive-intel': <Eye size={M} />,
 };
 
+// ─── Homepage Icons ────────────────────────────────────────────────────────
+export const HomeIcons = {
+  // Problems section
+  speed: <Clock size={24} />,
+  visibility: <Eye size={24} />,
+  dependency: <Users size={24} />,
+  blindDecisions: <Target size={24} />,
+  coordination: <Link2 size={24} />,
+  // Org chart
+  pmAgent: <Brain size={28} />,
+  knowledgeBase: <BookOpen size={28} />,
+  strategyLayer: <Target size={M} />,
+  executionLayer: <Rocket size={M} />,
+  controlLayer: <Shield size={M} />,
+  // Evolution stages
+  copilot: <Handshake size={24} />,
+  automation: <Zap size={24} />,
+  agentic: <Sparkles size={24} />,
+  // Workflows
+  campaignCreation: <Rocket size={20} />,
+  abTesting: <TestTube size={20} />,
+  autoResearch: <Search size={20} />,
+  qaPrograms: <Shield size={20} />,
+  documentation: <BookOpen size={20} />,
+  technicalAnalysis: <BarChart2 size={20} />,
+  // Before/After
+  before: <CircleX size={14} />,
+  after: <CircleCheck size={14} />,
+  // Evolution arrow
+  arrow: <ArrowUpRight size={20} />,
+};
+
 // ─── BAU Category Icons ─────────────────────────────────────────────────────
 export const BauCategoryIcons = {
   broadcast: <Megaphone size={S} />,
@@ -407,6 +448,28 @@ export const BauCategoryIcons = {
   lifecycle: <RotateCw size={S} />,
   engagement: <BarChart2 size={S} />,
 };
+
+// ─── Agent Avatar Helper ────────────────────────────────────────────────────
+/** Renders the Lucide icon for an agent by id, falling back to <Bot>. */
+export function AgentAvatar({ agentId, size = 18 }) {
+  const map = {
+    'campaign-manager': <Medal size={size} />,
+    'crm-agent': <Gem size={size} />,
+    'cloud-architect': <HardDrive size={size} />,
+    'content-agent': <Pencil size={size} />,
+    'segmentation-agent': <Target size={size} />,
+    'automation-architect': <Cog size={size} />,
+    'calendar-agent': <Calendar size={size} />,
+    'html-developer': <Code2 size={size} />,
+    'brand-guardian': <Shield size={size} />,
+    'legal-agent': <Scale size={size} />,
+    'qa-agent': <Search size={size} />,
+    'analytics-agent': <BarChart2 size={size} />,
+    'doc-agent': <BookOpen size={size} />,
+    'competitive-intel': <Eye size={size} />,
+  };
+  return map[agentId] || <Bot size={size} />;
+}
 
 // ─── Page Header Icons ──────────────────────────────────────────────────────
 export const PageHeaderIcons = {

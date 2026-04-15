@@ -56,14 +56,14 @@ export function useStreamingChat({ endpoint, buildBody, onResponseHeaders, loadC
 
             const ragHeader = res.headers.get('X-RAG-Sources');
             if (ragHeader) {
-                try { setRagSources(JSON.parse(ragHeader)); } catch {}
+                try { setRagSources(JSON.parse(decodeURIComponent(ragHeader))); } catch {}
             }
             if (onResponseHeaders) onResponseHeaders(res.headers);
 
             // Parse inline media (images, PDFs) from response headers — email HTML comes via SSE event below
             let inlineMedia = [];
             const mediaHeader = res.headers.get('X-RAG-Media');
-            if (mediaHeader) { try { inlineMedia = JSON.parse(mediaHeader); } catch {} }
+            if (mediaHeader) { try { inlineMedia = JSON.parse(decodeURIComponent(mediaHeader)); } catch {} }
 
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
@@ -159,7 +159,7 @@ export function useStreamingChat({ endpoint, buildBody, onResponseHeaders, loadC
 
             const ragHeader = res.headers.get('X-RAG-Sources');
             if (ragHeader) {
-                try { setRagSources(JSON.parse(ragHeader)); } catch {}
+                try { setRagSources(JSON.parse(decodeURIComponent(ragHeader))); } catch {}
             }
             if (onResponseHeaders) onResponseHeaders(res.headers);
 

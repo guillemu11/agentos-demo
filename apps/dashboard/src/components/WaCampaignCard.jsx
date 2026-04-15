@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
+import { MessageSquare } from 'lucide-react';
 
 export default function WaCampaignCard({ campaign }) {
   const navigate = useNavigate();
@@ -76,7 +77,7 @@ export default function WaCampaignCard({ campaign }) {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: '0.85rem', flexShrink: 0, marginTop: 2,
         }}>
-          💬
+          <MessageSquare size={16} />
         </div>
         <div style={{
           background: 'var(--wa-bubble-in)',

@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { useGeminiLive } from '../hooks/useGeminiLive.js';
 import renderMarkdown from '../utils/renderMarkdown.js';
-import { Mic, MicOff, PhoneOff, Loader, Send, FileText } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, Loader, Send, FileText, Pencil } from 'lucide-react';
+import { AgentAvatar } from './icons.jsx';
 import EmailPreview from './EmailPreview.jsx';
 import { applyPatch } from '../utils/emailTemplate.js';
 
@@ -126,14 +127,14 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
 
             const ragHeader = res.headers.get('X-RAG-Sources');
             if (ragHeader) {
-                try { setRagSources(JSON.parse(ragHeader)); } catch { /* ignore */ }
+                try { setRagSources(JSON.parse(decodeURIComponent(ragHeader))); } catch { /* ignore */ }
             }
 
             // email HTML comes via SSE event (html_sources) — too large for HTTP headers
             let parsedMedia = [];
             const mediaHeader = res.headers.get('X-RAG-Media');
             if (mediaHeader) {
-                try { parsedMedia = JSON.parse(mediaHeader); } catch { /* ignore */ }
+                try { parsedMedia = JSON.parse(decodeURIComponent(mediaHeader)); } catch { /* ignore */ }
             }
 
             const reader = res.body.getReader();
@@ -265,7 +266,7 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
         <div className="chat-container">
             <div className="chat-header">
                 <span className="chat-header-title">
-                    {agentAvatar} {t('agentChat.chatWith')} {agentName}
+                    <AgentAvatar agentId={agentId} size={18} /> {t('agentChat.chatWith')} {agentName}
                 </span>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     {messages.length > 0 && !streaming && (
@@ -291,7 +292,7 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
             <div className="chat-messages">
                 {messages.length === 0 && !isVoiceConnected && (
                     <div className="chat-empty">
-                        <div className="chat-empty-icon">{agentAvatar}</div>
+                        <div className="chat-empty-icon"><AgentAvatar agentId={agentId} size={32} /></div>
                         <div className="chat-empty-text">
                             {t('agentChat.emptyState').replace('{name}', agentName)}
                         </div>
@@ -394,7 +395,7 @@ export default function AgentChat({ agentId, agentName, agentAvatar, externalInp
             {/* Active block indicator */}
             {activeBlock && (
                 <div className="chat-active-block-indicator">
-                    <span className="chat-active-block-label">✏️ {activeBlock}</span>
+                    <span className="chat-active-block-label"><Pencil size={13} style={{ verticalAlign: 'middle' }} /> {activeBlock}</span>
                     {onActiveBlockClear && (
                         <button className="chat-active-block-clear" onClick={onActiveBlockClear} title="Deseleccionar bloque">×</button>
                     )}

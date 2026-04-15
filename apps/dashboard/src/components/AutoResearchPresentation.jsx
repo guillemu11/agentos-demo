@@ -1,6 +1,6 @@
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Brain, Repeat, Target, BarChart3, BookOpen, ChevronRight } from 'lucide-react';
+import { Brain, Repeat, Target, BarChart3, BookOpen, ChevronRight, Mail, FileEdit, Clock } from 'lucide-react';
 
 const OUTCOME_DATA = [
     { month: 'M1', without: 24.5, with: 24.5 },
@@ -17,7 +17,7 @@ const OUTCOME_DATA = [
     { month: 'M12', without: 24.5, with: 36.5 },
 ];
 
-const USE_CASE_ICONS = ['✉️', '📝', '🕐', '🎯'];
+const USE_CASE_ICONS = [<Mail size={16} />, <FileEdit size={16} />, <Clock size={16} />, <Target size={16} />];
 
 export default function AutoResearchPresentation() {
     const { t } = useLanguage();

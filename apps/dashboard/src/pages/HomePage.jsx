@@ -1,41 +1,36 @@
-import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
-import { FeatureIcons, StepIcons } from '../components/icons.jsx';
-import WORKFLOWS from '../data/workflows.js';
+import { HomeIcons } from '../components/icons.jsx';
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
+const PROBLEMS = [
+  { key: 1, icon: HomeIcons.speed },
+  { key: 2, icon: HomeIcons.visibility },
+  { key: 3, icon: HomeIcons.dependency },
+  { key: 4, icon: HomeIcons.blindDecisions },
+  { key: 5, icon: HomeIcons.coordination },
+];
 
-const features = [
-  { key: 'Projects', icon: FeatureIcons.projects, to: '/app/projects', tTitle: 'featureProjectsTitle', tDesc: 'featureProjectsDesc' },
-  { key: 'Workspace', icon: FeatureIcons.workspace, to: '/app/workspace', tTitle: 'featureWorkspaceTitle', tDesc: 'featureWorkspaceDesc' },
-  { key: 'Standup', icon: FeatureIcons.standup, to: '/app/workspace', tTitle: 'featureStandupTitle', tDesc: 'featureStandupDesc' },
-  { key: 'Weekly', icon: FeatureIcons.weekly, to: '/app/workspace', tTitle: 'featureWeeklyTitle', tDesc: 'featureWeeklyDesc' },
-  { key: 'PmAgent', icon: FeatureIcons.pmAgent, to: '/app/inbox', tTitle: 'featurePmAgentTitle', tDesc: 'featurePmAgentDesc' },
-  { key: 'Workflows', icon: FeatureIcons.workflows, to: '/app/workflows', tTitle: 'featureWorkflowsTitle', tDesc: 'featureWorkflowsDesc' },
-  { key: 'Intelligence', icon: FeatureIcons.intelligence, to: '/app/workspace/intelligence', tTitle: 'featureIntelligenceTitle', tDesc: 'featureIntelligenceDesc' },
-  { key: 'Inbox', icon: FeatureIcons.inbox, to: '/app/campaigns', tTitle: 'featureInboxTitle', tDesc: 'featureInboxDesc' },
-  { key: 'Audit', icon: FeatureIcons.audit, to: '/app/workspace/audit', tTitle: 'featureAuditTitle', tDesc: 'featureAuditDesc' },
+const STRATEGY_AGENTS = ['orgAgentCampaign', 'orgAgentCrm', 'orgAgentAnalytics', 'orgAgentCompetitive'];
+const EXECUTION_AGENTS = ['orgAgentContent', 'orgAgentHtml', 'orgAgentSegmentation', 'orgAgentAutomation'];
+const CONTROL_AGENTS = ['orgAgentQa', 'orgAgentBrand', 'orgAgentLegal', 'orgAgentDoc'];
+
+const STAGES = [
+  { key: 1, icon: HomeIcons.copilot, color: 'var(--info, #74b9ff)' },
+  { key: 2, icon: HomeIcons.automation, color: 'var(--primary)' },
+  { key: 3, icon: HomeIcons.agentic, color: 'var(--success, #00b894)' },
+];
+
+const WORKFLOWS = [
+  { key: 1, icon: HomeIcons.campaignCreation },
+  { key: 2, icon: HomeIcons.abTesting },
+  { key: 3, icon: HomeIcons.autoResearch },
+  { key: 4, icon: HomeIcons.qaPrograms },
+  { key: 5, icon: HomeIcons.documentation },
+  { key: 6, icon: HomeIcons.technicalAnalysis },
 ];
 
 export default function HomePage() {
   const { t } = useLanguage();
-  const [stats, setStats] = useState({ agents: 0, projects: 0, workflows: WORKFLOWS.length, departments: 0 });
-
-  useEffect(() => {
-    Promise.all([
-      fetch(`${API_URL}/agents`).then(r => r.ok ? r.json() : []),
-      fetch(`${API_URL}/projects`).then(r => r.ok ? r.json() : []),
-      fetch(`${API_URL}/departments`).then(r => r.ok ? r.json() : []),
-    ]).then(([agents, projects, departments]) => {
-      setStats({
-        agents: agents.length,
-        projects: projects.length,
-        workflows: WORKFLOWS.length,
-        departments: departments.length,
-      });
-    }).catch(() => {});
-  }, []);
 
   return (
     <div className="dashboard-container animate-fade-in">
@@ -44,69 +39,141 @@ export default function HomePage() {
         <h1 className="home-hero-title">{t('home.heroTitle')}</h1>
         <p className="home-hero-subtitle">{t('home.heroSubtitle')}</p>
         <div className="home-hero-actions">
-          <Link to="/app/projects" className="back-button save-btn">{t('home.ctaProjects')}</Link>
-          <Link to="/app/workspace" className="back-button">{t('home.ctaWorkspace')}</Link>
+          <Link to="/app/projects" className="home-btn home-btn-primary">{t('home.ctaDemo')}</Link>
+          <Link to="/app/inbox" className="home-btn home-btn-outline">{t('home.ctaPmAgent')}</Link>
         </div>
       </header>
 
-      {/* ─── Stats ─── */}
-      <section className="workspace-stats-bar" style={{ marginBottom: 40 }}>
-        {[
-          { key: 'statsAgents', value: stats.agents },
-          { key: 'statsProjects', value: stats.projects },
-          { key: 'statsWorkflows', value: stats.workflows },
-          { key: 'statsDepartments', value: stats.departments },
-        ].map((s, i) => (
-          <div key={s.key} className={`stat-chip ${i === 0 ? 'stat-highlight' : ''}`}>
-            <span className="stat-value">{s.value}</span>
-            <span className="stat-label">{t(`home.${s.key}`)}</span>
-          </div>
-        ))}
-      </section>
-
-      {/* ─── Features ─── */}
-      <section style={{ marginBottom: 48 }}>
-        <h2 className="home-section-title">{t('home.featuresTitle')}</h2>
-        <div className="home-features-grid">
-          {features.map((f) => (
-            <Link key={f.key} to={f.to} className="card home-feature-card">
-              <span className="home-feature-icon">{f.icon}</span>
-              <h3>{t(`home.${f.tTitle}`)}</h3>
-              <p>{t(`home.${f.tDesc}`)}</p>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      {/* ─── How it works ─── */}
-      <section style={{ marginBottom: 48 }}>
-        <h2 className="home-section-title">{t('home.howItWorksTitle')}</h2>
-        <div className="home-steps-grid">
-          {[
-            { icon: StepIcons.setup, num: 1, tTitle: 'step1Title', tDesc: 'step1Desc' },
-            { icon: StepIcons.agents, num: 2, tTitle: 'step2Title', tDesc: 'step2Desc' },
-            { icon: StepIcons.dashboard, num: 3, tTitle: 'step3Title', tDesc: 'step3Desc' },
-          ].map((step) => (
-            <div key={step.num} className="card home-step-card">
-              <div className="home-step-num">{step.num}</div>
-              <span className="home-step-icon">{step.icon}</span>
-              <h3>{t(`home.${step.tTitle}`)}</h3>
-              <p>{t(`home.${step.tDesc}`)}</p>
+      {/* ─── Problems ─── */}
+      <section className="home-section">
+        <h2 className="home-section-title">{t('home.problemsTitle')}</h2>
+        <div className="home-problems-grid">
+          {PROBLEMS.map((p) => (
+            <div key={p.key} className={`home-problem-card${p.key === 5 ? ' home-problem-centered' : ''}`}>
+              <span className="home-problem-icon">{p.icon}</span>
+              <div>
+                <h3>{t(`home.problem${p.key}Title`)}</h3>
+                <p>{t(`home.problem${p.key}Desc`)}</p>
+              </div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* ─── PM Agent Callout ─── */}
-      <section className="card home-pm-callout">
-        <div className="home-pm-callout-content">
-          <span className="home-pm-callout-icon">{FeatureIcons.pmAgent}</span>
-          <div>
-            <h3>{t('home.pmCalloutTitle')}</h3>
-            <p>{t('home.pmCalloutDesc')}</p>
+      {/* ─── Solution + Org Chart ─── */}
+      <section className="home-section">
+        <h2 className="home-section-title">{t('home.solutionTitle')}</h2>
+        <p className="home-section-subtitle">{t('home.solutionSubtitle')}</p>
+
+        <div className="home-org-chart">
+          {/* Top row: PM Agent ━━ Knowledge Base */}
+          <div className="home-org-top">
+            <div className="home-org-node home-org-node-pm">
+              <span className="home-org-node-icon">{HomeIcons.pmAgent}</span>
+              <div>
+                <strong>{t('home.orgPmAgent')}</strong>
+                <span className="home-org-node-role">{t('home.orgPmRole')}</span>
+              </div>
+            </div>
+            <div className="home-org-line" />
+            <div className="home-org-node home-org-node-kb">
+              <span className="home-org-node-icon">{HomeIcons.knowledgeBase}</span>
+              <div>
+                <strong>{t('home.orgKb')}</strong>
+                <span className="home-org-node-role">{t('home.orgKbRole')}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Connector */}
+          <div className="home-org-connector">
+            <div className="home-org-vline" />
+            <div className="home-org-hline" />
+          </div>
+
+          {/* Agent layers */}
+          <div className="home-org-layers">
+            <div className="home-org-layer">
+              <span className="home-org-layer-label home-org-label-strategy">{t('home.orgStrategy')}</span>
+              {STRATEGY_AGENTS.map((a) => (
+                <div key={a} className="home-org-agent">{t(`home.${a}`)}</div>
+              ))}
+            </div>
+            <div className="home-org-layer">
+              <span className="home-org-layer-label home-org-label-execution">{t('home.orgExecution')}</span>
+              {EXECUTION_AGENTS.map((a) => (
+                <div key={a} className="home-org-agent">{t(`home.${a}`)}</div>
+              ))}
+            </div>
+            <div className="home-org-layer">
+              <span className="home-org-layer-label home-org-label-control">{t('home.orgControl')}</span>
+              {CONTROL_AGENTS.map((a) => (
+                <div key={a} className="home-org-agent">{t(`home.${a}`)}</div>
+              ))}
+            </div>
           </div>
         </div>
-        <Link to="/app/inbox" className="back-button save-btn">{t('home.pmCalloutCta')}</Link>
+      </section>
+
+      {/* ─── Evolution Timeline ─── */}
+      <section className="home-section">
+        <h2 className="home-section-title">{t('home.evolutionTitle')}</h2>
+        <p className="home-section-subtitle">{t('home.evolutionSubtitle')}</p>
+
+        <div className="home-evolution-timeline">
+          {STAGES.map((s, i) => (
+            <div key={s.key} className="home-evolution-stage-wrapper">
+              <div className={`home-evolution-stage home-stage-${s.key}`}>
+                <span className="home-evolution-label" style={{ color: s.color }}>
+                  {t(`home.stage${s.key}Label`)}
+                </span>
+                <div className="home-evolution-title-row">
+                  <span className="home-evolution-icon" style={{ color: s.color }}>{s.icon}</span>
+                  <h3>{t(`home.stage${s.key}Title`)}</h3>
+                </div>
+                <p>{t(`home.stage${s.key}Desc`)}</p>
+              </div>
+              {i < STAGES.length - 1 && (
+                <div className="home-evolution-arrow">→</div>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ─── Workflows ─── */}
+      <section className="home-section">
+        <h2 className="home-section-title">{t('home.workflowsTitle')}</h2>
+        <p className="home-section-subtitle">{t('home.workflowsSubtitle')}</p>
+
+        <div className="home-workflows-grid">
+          {WORKFLOWS.map((wf) => (
+            <div key={wf.key} className="home-workflow-card">
+              <div className="home-wf-header">
+                <span className="home-wf-icon">{wf.icon}</span>
+                <h3>{t(`home.wf${wf.key}Title`)}</h3>
+              </div>
+              <div className="home-wf-before">
+                {HomeIcons.before}
+                <span>{t(`home.wf${wf.key}Before`)}</span>
+              </div>
+              <div className="home-wf-after">
+                {HomeIcons.after}
+                <span>{t(`home.wf${wf.key}After`)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ─── CTA Final ─── */}
+      <section className="home-cta-final">
+        <h2>{t('home.ctaFinalTitle')}</h2>
+        <p>{t('home.ctaFinalSubtitle')}</p>
+        <div className="home-hero-actions">
+          <Link to="/app/inbox" className="home-btn home-btn-primary">{t('home.ctaStart')}</Link>
+          <Link to="/app/workflows" className="home-btn home-btn-outline">{t('home.ctaViewWorkflows')}</Link>
+        </div>
       </section>
     </div>
   );

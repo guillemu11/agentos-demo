@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
-import { Monitor, Smartphone, Mail, Maximize2, Save, ChevronDown, FlaskConical, X } from 'lucide-react';
+import { Monitor, Smartphone, Mail, Maximize2, Save, ChevronDown, FlaskConical, X, Bot } from 'lucide-react';
 import { substituteVariants, countApproved, FIELDS_PER_VARIANT } from '../utils/emailVariants.js';
 import { substituteForPreview } from '../utils/emailMockSubstitute.js';
 import VariantPreviewModal from './VariantPreviewModal.jsx';
@@ -284,7 +284,7 @@ export default function EmailBuilderPreview({ html, saveHtml, blocks, templateHt
             </div>
           ) : (
             <div className="email-preview-empty">
-              <span style={{ fontSize: '2rem' }}>🤖</span>
+              <Bot size={32} />
               <span>{t('emailSpec.noPreview')}</span>
             </div>
           )
@@ -298,7 +298,7 @@ export default function EmailBuilderPreview({ html, saveHtml, blocks, templateHt
           />
         ) : (
           <div className="email-preview-empty">
-            <span style={{ fontSize: '2rem' }}>✉️</span>
+            <Mail size={32} />
             <span>{t('emailBuilder.noEmailYet')}</span>
           </div>
         )}

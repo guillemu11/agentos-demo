@@ -6,7 +6,8 @@ import ProjectAgentChat from './ProjectAgentChat.jsx';
 import WorkLogTab from './WorkLogTab.jsx';
 import HandoffModal from './HandoffModal.jsx';
 import PipelineSelector from './PipelineSelector.jsx';
-import { X } from 'lucide-react';
+import { X, MessageSquare } from 'lucide-react';
+import { AgentAvatar } from './icons.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -106,7 +107,7 @@ export default function ProjectPipelineView({ projectId }) {
                     className="pipeline-open-chat-btn"
                     onClick={() => setIsChatOpen(true)}
                 >
-                    💬 {t('agentChat.tab')}
+                    <MessageSquare size={14} /> {t('agentChat.tab')}
                 </button>
             )}
 
@@ -117,7 +118,7 @@ export default function ProjectPipelineView({ projectId }) {
                     <div className="chat-fullscreen-overlay" role="dialog" aria-modal="true">
                         <div className="chat-fullscreen-header">
                             <div className="chat-fullscreen-agent-info">
-                                <span className="chat-fullscreen-avatar">{activeAgent?.avatar || '🤖'}</span>
+                                <span className="chat-fullscreen-avatar"><AgentAvatar agentId={activeAgent?.id} size={20} /></span>
                                 <div>
                                     <div className="chat-fullscreen-agent-name">{activeAgent?.name || activeStage?.name}</div>
                                     <div className="chat-fullscreen-context">{activeStage?.name}</div>

@@ -150,7 +150,7 @@ export default function KBChat({ defaultNamespace = '', fixedNamespace = false, 
             // Extract RAG sources
             const ragHeader = res.headers.get('X-RAG-Sources');
             if (ragHeader) {
-                try { setLastSources(JSON.parse(ragHeader)); } catch { /* ignore */ }
+                try { setLastSources(JSON.parse(decodeURIComponent(ragHeader))); } catch { /* ignore */ }
             } else {
                 setLastSources([]);
             }
@@ -158,7 +158,7 @@ export default function KBChat({ defaultNamespace = '', fixedNamespace = false, 
             let parsedMedia = [];
             const mediaHeader = res.headers.get('X-RAG-Media');
             if (mediaHeader) {
-                try { parsedMedia = JSON.parse(mediaHeader); } catch { /* ignore */ }
+                try { parsedMedia = JSON.parse(decodeURIComponent(mediaHeader)); } catch { /* ignore */ }
             }
 
             const reader = res.body.getReader();

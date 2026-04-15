@@ -8,15 +8,15 @@ import AgentTicketsPanel from './shared/AgentTicketsPanel.jsx';
 import AgentChatSwitcher from './shared/AgentChatSwitcher.jsx';
 import HandoffModal from '../HandoffModal.jsx';
 import StatusBadge from './shared/StatusBadge.jsx';
-import { AgentTabIcons, CalendarIcons, StatusIcons } from '../icons.jsx';
+import { AgentTabIcons, CalendarIcons, StatusIcons, BauCategoryIcons } from '../icons.jsx';
 import AgentSettingsPanel from './AgentSettingsPanel.jsx';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Mail, Smartphone, MessageSquare, RotateCw } from 'lucide-react';
 
 const typeIcons = {
-  email: '✉️',
-  push: '📱',
-  sms: '💬',
-  journey: '🔄',
+  email: <Mail size={14} />,
+  push: <Smartphone size={14} />,
+  sms: <MessageSquare size={14} />,
+  journey: <RotateCw size={14} />,
 };
 
 export default function CalendarAgentView({ agent, activeTab: activeTabProp, onTabChange }) {
@@ -189,7 +189,7 @@ export default function CalendarAgentView({ agent, activeTab: activeTabProp, onT
                           <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', flexWrap: 'wrap' }}>
                             <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: ev.color, flexShrink: 0 }} />
                             <span style={{ fontWeight: 600 }}>{ev.campaign}</span>
-                            {bt && cat && <span style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '0.6rem', fontWeight: 600, background: `${cat.color}15`, color: cat.color }}>{cat.icon} {bt.name}</span>}
+                            {bt && cat && <span style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '0.6rem', fontWeight: 600, background: `${cat.color}15`, color: cat.color, display: 'inline-flex', alignItems: 'center', gap: 3 }}>{BauCategoryIcons[cat.id] || cat.icon} {bt.name}</span>}
                             <span style={{ color: 'var(--text-muted)' }}>{typeIcons[ev.type]} {ev.segment}</span>
                           </div>
                         );

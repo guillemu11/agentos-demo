@@ -26,6 +26,14 @@ import multer from 'multer';
 import { generateEodReport } from '../../packages/core/workspace-skills/eod-generator.js';
 import { getAgentProfile } from '../../packages/core/agents/profiles.js';
 import nodemailer from 'nodemailer';
+import { createMCClient } from '../../packages/core/mc-api/client.js';
+import { MC_MVP_TOOLS } from '../../packages/core/mc-api/tools.js';
+import { executeMCTool } from '../../packages/core/mc-api/executor.js';
+import { UNIFIED_STUDIO_TOOLS, executeUnifiedStudioTool, UNIFIED_STUDIO_SYSTEM_PROMPT } from '../../packages/core/unified-studio/tools.js';
+import { buildCampaignEmails, cleanTemplateShell } from '../../packages/core/email-builder/index.js';
+import { prepareCampaign as bauPrepareCampaign } from '../../packages/core/campaign-builder/phase-a-prepare.js';
+import { pushToMC as bauPushToMC } from '../../packages/core/campaign-builder/phase-b-push.js';
+import { CAMPAIGN_TYPES as BAU_CAMPAIGN_TYPES } from '../../packages/core/campaign-builder/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -342,6 +350,14 @@ function requireOwnerOrAdmin(req, res, next) {
 }
 
 // app.use('/api', requireAuth); // TODO: re-enable auth when ready
+
+// ─── HTTP Header Helpers ─────────────────────────────────────────────────────
+
+// HTTP headers must be Latin-1 safe. RAG sources can contain accents, emoji,
+// smart quotes, or CJK characters that break res.setHeader. Encode to ASCII.
+function setJsonHeader(res, name, value) {
+    res.setHeader(name, encodeURIComponent(JSON.stringify(value)));
+}
 
 // ─── Email Template Helpers ──────────────────────────────────────────────────
 
@@ -2552,7 +2568,7 @@ app.post('/api/chat/pm-agent', async (req, res) => {
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Inbox-Item-Id', item.id.toString());
         if (ragResult.sources.length > 0) {
-            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources.map(({ htmlSource, ...s }) => s)));
+            setJsonHeader(res, 'X-RAG-Sources', ragResult.sources.map(({ htmlSource, ...s }) => s));
         }
         res.flushHeaders();
 
@@ -2957,6 +2973,20 @@ Each user message includes a [VARIABLE_STATUS] block showing which variables are
 When generating content, emit one [BRIEF_UPDATE] tag per variable on its own line:
 [BRIEF_UPDATE:{"variant":"en:economy","block":"main_header","status":"approved","value":"Your content here"}]
 
+⚠️ OUTPUT FORMAT — STRICTLY ENFORCED (frontend parser depends on this):
+
+✅ CORRECT (ALWAYS use this):
+[BRIEF_UPDATE:{"variant":"en:economy","block":"vawp_text","status":"approved","value":"View as Web Page"}]
+[BRIEF_UPDATE:{"variant":"en:economy","block":"main_header","status":"approved","value":"Welcome Back"}]
+
+❌ WRONG — NEVER output bullet lists, markdown lists, or prose like these:
+* vawp_text: View as Web Page
+- main_header: Welcome Back
+vawp_text: "View as Web Page"
+Here are the variables:
+
+If you output bullets or prose instead of [BRIEF_UPDATE] tags, the variants panel stays EMPTY and the user sees nothing. This is a hard failure.
+
 Critical rules:
 1. Use the EXACT variable name from the PENDING list as the "block" value — do NOT invent names.
 2. Use the EXACT variant key from [VARIABLE_STATUS] as the "variant" value (e.g. "en:economy").
@@ -2964,6 +2994,7 @@ Critical rules:
 4. Each tag must be on its own line, NOT embedded inside sentences or paragraphs.
 5. Do NOT generate image variables (ending in _image or _logo), link aliases (ending in _alias or _link), or URL variables.
 6. Generate ALL pending text variables in one response unless the user asks for specific ones.
+7. Your response may start with ONE short confirmation sentence, then ALL tags. No bullet summaries, no recaps.
 Available tiers: economy, economy_premium, business, first_class.
 
 ## Image Generation Capability
@@ -3043,7 +3074,7 @@ No explanation before or after.` : '');
         if (isEmailBuilder && blockKeywords.test(message) && ragNamespaces.includes('email-blocks')) {
             ragNamespaces = ['email-blocks'];
         }
-        const visualKeywords = /\b(show|display|ver|mostrar|look like|see|visualiz|email|imagen|image|picture|inline)\b/i;
+        const visualKeywords = /\b(show|display|ver|mostrar|look like|see|visualiz|email|imagen|image|picture|inline|whatsapp|wa|sms|screenshot|captura|foto|photo|banner)\b/i;
         const isVisualQuery = visualKeywords.test(message);
         console.log(`[RAG] agent=${agentId} isEmailBuilder=${isEmailBuilder} namespaces=${JSON.stringify(ragNamespaces)} visualQuery=${isVisualQuery}`);
         const ragResult = isKBReady()
@@ -3119,12 +3150,12 @@ THIS OVERRIDES ALL OTHER INSTRUCTIONS including "keep responses concise and acti
         if (ragResult.sources.length > 0) {
             // Strip htmlSource from the header — it's too large for HTTP headers; sent as SSE event below
             const sourcesForHeader = ragResult.sources.map(({ htmlSource, ...s }) => s);
-            res.setHeader('X-RAG-Sources', JSON.stringify(sourcesForHeader));
+            setJsonHeader(res, 'X-RAG-Sources', sourcesForHeader);
         }
         if (ragResult.mediaResults?.length > 0) {
             // Strip htmlSource from header — too large; email_html sent as SSE event below
             const mediaForHeader = ragResult.mediaResults.filter(m => m.mediaType !== 'email_html').map(({ htmlSource, ...m }) => m);
-            if (mediaForHeader.length > 0) res.setHeader('X-RAG-Media', JSON.stringify(mediaForHeader));
+            if (mediaForHeader.length > 0) setJsonHeader(res, 'X-RAG-Media', mediaForHeader);
         }
         res.flushHeaders();
 
@@ -3136,6 +3167,120 @@ THIS OVERRIDES ALL OTHER INSTRUCTIONS including "keep responses concise and acti
             res.write(`data: ${JSON.stringify({ html_sources: allHtmlItems.map(s => ({ htmlSource: s.htmlSource, title: s.title || s.documentTitle, filePath: s.filePath })) })}\n\n`);
         }
 
+        // ─── MC Architect: Agentic tool-use loop ──────────────────────────────
+        if (agentId === 'mc-architect') {
+            const mcClient = createMCClient(pool, decryptValue);
+            const mcConfigured = await mcClient.isConfigured();
+            if (!mcConfigured) {
+                res.write(`data: ${JSON.stringify({ text: 'Marketing Cloud credentials are not configured. Go to Settings > API Keys to add your MC client ID, secret, and auth URL.' })}\n\n`);
+                res.write('data: [DONE]\n\n');
+                res.end();
+                return;
+            }
+
+            const MAX_TOOL_ROUNDS = 10;
+            let currentMessages = [...apiMessages];
+            let fullResponse = '';
+            let nodemailerTransporter = null; // lazy-init for test sends
+
+            for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+                const response = await anthropic.messages.create({
+                    model: process.env.LLM_MODEL || 'claude-sonnet-4-6',
+                    max_tokens: 4096,
+                    system: finalSystemPrompt,
+                    messages: currentMessages,
+                    tools: MC_MVP_TOOLS,
+                });
+
+                // Stream any text blocks to the client
+                for (const block of response.content) {
+                    if (block.type === 'text' && block.text) {
+                        fullResponse += block.text;
+                        res.write(`data: ${JSON.stringify({ text: block.text })}\n\n`);
+                    }
+                }
+
+                // Check if Claude wants to use tools
+                const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
+                if (toolUseBlocks.length === 0 || response.stop_reason === 'end_turn') {
+                    break; // Claude is done
+                }
+
+                // Notify frontend of tool execution
+                res.write(`data: ${JSON.stringify({
+                    mc_tool_calls: toolUseBlocks.map(t => ({ name: t.name, input: t.input }))
+                })}\n\n`);
+
+                // Execute all tool calls
+                const toolResults = [];
+                for (const toolBlock of toolUseBlocks) {
+                    let result = await executeMCTool(toolBlock.name, toolBlock.input, mcClient, pool);
+
+                    // Handle structured results that need special processing
+                    try {
+                        const parsed = JSON.parse(result);
+
+                        // Email HTML: send as SSE event for frontend preview
+                        if (parsed._type === 'email_html') {
+                            res.write(`data: ${JSON.stringify({ mc_email_html: parsed })}\n\n`);
+                            result = `Email "${parsed.name}" retrieved successfully (${parsed.html.length} chars). Subject: "${parsed.subject}". The email HTML is now displayed in the preview panel for the user to see.`;
+                        }
+
+                        // Test send: use nodemailer to actually send
+                        if (parsed._type === 'test_send') {
+                            try {
+                                if (!nodemailerTransporter) {
+                                    nodemailerTransporter = nodemailer.createTransport({
+                                        host: process.env.SMTP_HOST,
+                                        port: parseInt(process.env.SMTP_PORT || '587'),
+                                        secure: process.env.SMTP_SECURE === 'true',
+                                        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+                                    });
+                                }
+                                if (process.env.SMTP_HOST) {
+                                    for (const recipient of parsed.to) {
+                                        await nodemailerTransporter.sendMail({
+                                            from: process.env.SMTP_FROM || process.env.SMTP_USER,
+                                            to: recipient,
+                                            subject: parsed.subject,
+                                            html: parsed.html,
+                                        });
+                                    }
+                                    result = `Test email "${parsed.emailName}" sent successfully to: ${parsed.to.join(', ')}. Subject: "${parsed.subject}".`;
+                                } else {
+                                    result = `SMTP not configured. To send test emails, add SMTP_HOST, SMTP_USER, and SMTP_PASS to your environment variables. Email details: to=${parsed.to.join(', ')}, subject="${parsed.subject}".`;
+                                }
+                            } catch (sendErr) {
+                                result = `Failed to send test email: ${sendErr.message}`;
+                            }
+                        }
+                    } catch { /* not JSON — plain text result, use as-is */ }
+
+                    toolResults.push({
+                        type: 'tool_result',
+                        tool_use_id: toolBlock.id,
+                        content: typeof result === 'string' ? result : JSON.stringify(result),
+                    });
+                }
+
+                // Append assistant response + tool results for next round
+                currentMessages.push({ role: 'assistant', content: response.content });
+                currentMessages.push({ role: 'user', content: toolResults });
+            }
+
+            // Persist conversation
+            messages.push({ role: 'assistant', content: fullResponse });
+            await pool.query(
+                'UPDATE agent_conversations SET messages = $1, updated_at = NOW() WHERE agent_id = $2',
+                [JSON.stringify(messages), agentId]
+            );
+
+            res.write('data: [DONE]\n\n');
+            res.end();
+            return;
+        }
+
+        // ─── Standard streaming path (all other agents) ──────────────────────
         // Stream response via chatWithPMAgent with systemPromptOverride
         let fullResponse = '';
         const stream = await chatWithPMAgent(apiMessages, {
@@ -3360,7 +3505,7 @@ app.post('/api/chat/campaign/:campaignId', async (req, res) => {
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         if (ragResult.sources.length > 0) {
-            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources.map(({ htmlSource, ...s }) => s)));
+            setJsonHeader(res, 'X-RAG-Sources', ragResult.sources.map(({ htmlSource, ...s }) => s));
         }
         res.flushHeaders();
 
@@ -3648,7 +3793,7 @@ app.get('/api/settings/api-keys', requireOwnerOrAdmin, async (req, res) => {
 
 app.put('/api/settings/api-keys', requireOwnerOrAdmin, async (req, res) => {
     try {
-        const allowedKeys = ['anthropic', 'gemini', 'pinecone_api_key', 'pinecone_environment', 'pinecone_index', 'confluence_url', 'confluence_token', 'jira_url', 'jira_email', 'jira_token', 'jira_project_key'];
+        const allowedKeys = ['anthropic', 'gemini', 'pinecone_api_key', 'pinecone_environment', 'pinecone_index', 'confluence_url', 'confluence_token', 'jira_url', 'jira_email', 'jira_token', 'jira_project_key', 'mc_client_id', 'mc_client_secret', 'mc_auth_url', 'mc_account_id'];
         // Load existing encrypted keys to merge
         const existing = {};
         const prev = await pool.query("SELECT value FROM workspace_config WHERE key = 'api_keys'");
@@ -4508,6 +4653,256 @@ app.post('/api/campaigns/:campaignId/emails/:id/duplicate', requireAuth, async (
     }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// BAU CAMPAIGN BUILDER — Phase A (build & preview) + Phase B (push to MC)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// GET /api/campaigns/bau/types — campaign types available for the form selector
+app.get('/api/campaigns/bau/types', requireAuth, (req, res) => {
+    const types = Object.entries(BAU_CAMPAIGN_TYPES).map(([key, def]) => ({
+        key,
+        name: def.name,
+        code: def.code,
+    }));
+    res.json({ types });
+});
+
+// GET /api/campaigns/bau — list builds for current user
+app.get('/api/campaigns/bau', requireAuth, async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            `SELECT id, campaign_type, campaign_name, campaign_date, market, variant_strategy,
+                    languages, status, created_at, updated_at, pushed_at
+             FROM bau_builds WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`,
+            [req.session.userId]
+        );
+        res.json({ builds: rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/campaigns/bau/:buildId — full build state (resume drafts)
+app.get('/api/campaigns/bau/:buildId', requireAuth, async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            'SELECT * FROM bau_builds WHERE id = $1 AND user_id = $2',
+            [req.params.buildId, req.session.userId]
+        );
+        if (!rows.length) return res.status(404).json({ error: 'Build not found' });
+        res.json({ build: rows[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/campaigns/bau/build — Phase A: form+brief → variantes con preview (SSE)
+app.post('/api/campaigns/bau/build', requireAuth, async (req, res) => {
+    const {
+        campaignType,
+        campaignName,
+        campaignDate,
+        market,
+        variantStrategy,
+        direction = 'in',
+        languages = ['en'],
+        cugoCode = false,
+        brief = '',
+    } = req.body;
+
+    if (!campaignType || !campaignName || !campaignDate || !market) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+    if (!BAU_CAMPAIGN_TYPES[campaignType]) {
+        return res.status(400).json({ error: `Unknown campaign type: ${campaignType}` });
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const send = (phase, payload = {}) => {
+        res.write(`data: ${JSON.stringify({ phase, ...payload })}\n\n`);
+    };
+
+    let buildId = null;
+    try {
+        const inserted = await pool.query(
+            `INSERT INTO bau_builds
+               (user_id, campaign_type, campaign_name, campaign_date, market,
+                variant_strategy, direction, languages, cugo_code, brief, status)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'building')
+             RETURNING id`,
+            [req.session.userId, campaignType, campaignName, campaignDate, market,
+             variantStrategy, direction, languages, cugoCode, brief]
+        );
+        buildId = inserted.rows[0].id;
+        send('init', { buildId });
+
+        const mc = await getEmailBuilderMCClient();
+        if (!mc) throw new Error('Marketing Cloud credentials not configured (DB nor env)');
+
+        const dateObj = new Date(campaignDate);
+        const dd = String(dateObj.getUTCDate()).padStart(2, '0');
+        const mm = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+        const yy = String(dateObj.getUTCFullYear()).slice(-2);
+        const dateDDMMYY = `${dd}${mm}${yy}`;
+
+        const variantArg = variantStrategy === 'skywards' ? 'Skywards' : 'Ecommerce';
+
+        const result = await bauPrepareCampaign({
+            mc,
+            campaignType,
+            campaignName,
+            dateDDMMYY,
+            market,
+            variant: variantArg,
+            languages,
+            cugoCode,
+            brief,
+            templateShell: getEmailBuilderShell(),
+            onProgress: (phase, payload) => send(phase, payload || {}),
+        });
+
+        await pool.query(
+            `UPDATE bau_builds
+                SET slot_map = $1, variants = $2, rows = $3, images_base64 = $4,
+                    status = 'preview-ready', updated_at = NOW()
+              WHERE id = $5`,
+            [
+                JSON.stringify(result.slotMap),
+                JSON.stringify(result.variants),
+                JSON.stringify(result.rows || []),
+                JSON.stringify(result.imagesBase64 || {}),
+                buildId,
+            ]
+        );
+
+        send('complete', {
+            buildId,
+            variants: result.variants,
+            slotMap: result.slotMap,
+            sourceAssetId: result.sourceAssetId,
+            emailName: result.emailName,
+        });
+        res.write('data: [DONE]\n\n');
+        res.end();
+    } catch (err) {
+        console.error('[bau/build] error:', err);
+        if (buildId) {
+            await pool.query(
+                `UPDATE bau_builds SET status='failed', error_log=$1, updated_at=NOW() WHERE id=$2`,
+                [JSON.stringify({ phase: 'phase-a', message: err.message }), buildId]
+            ).catch(() => {});
+        }
+        if (!res.headersSent) {
+            return res.status(500).json({ error: err.message });
+        }
+        send('error', { message: err.message });
+        res.end();
+    }
+});
+
+// PATCH /api/campaigns/bau/:buildId/variant/:variantKey — update variant html / approve flag
+app.patch('/api/campaigns/bau/:buildId/variant/:variantKey', requireAuth, async (req, res) => {
+    try {
+        const { buildId, variantKey } = req.params;
+        const { html, blocks, approved } = req.body;
+
+        const cur = await pool.query(
+            'SELECT variants FROM bau_builds WHERE id = $1 AND user_id = $2',
+            [buildId, req.session.userId]
+        );
+        if (!cur.rows.length) return res.status(404).json({ error: 'Build not found' });
+
+        const variants = cur.rows[0].variants || {};
+        const v = variants[variantKey] || {};
+        if (typeof html === 'string') v.html = html;
+        if (Array.isArray(blocks)) v.blocks = blocks;
+        if (typeof approved === 'boolean') {
+            v.approved = approved;
+            v.approved_at = approved ? new Date().toISOString() : null;
+        }
+        variants[variantKey] = v;
+
+        await pool.query(
+            `UPDATE bau_builds SET variants=$1, status='refining', updated_at=NOW() WHERE id=$2`,
+            [JSON.stringify(variants), buildId]
+        );
+        res.json({ ok: true, variant: v });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/campaigns/bau/:buildId/push — Phase B: push approved variants to MC (SSE)
+app.post('/api/campaigns/bau/:buildId/push', requireAuth, async (req, res) => {
+    const { buildId } = req.params;
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const send = (phase, payload = {}) =>
+        res.write(`data: ${JSON.stringify({ phase, ...payload })}\n\n`);
+
+    try {
+        const { rows } = await pool.query(
+            'SELECT * FROM bau_builds WHERE id = $1 AND user_id = $2',
+            [buildId, req.session.userId]
+        );
+        if (!rows.length) {
+            send('error', { message: 'Build not found' });
+            return res.end();
+        }
+        const build = rows[0];
+
+        await pool.query(`UPDATE bau_builds SET status='pushing', updated_at=NOW() WHERE id=$1`, [buildId]);
+
+        const mc = await getEmailBuilderMCClient();
+        if (!mc) throw new Error('Marketing Cloud credentials not configured (DB nor env)');
+        const result = await bauPushToMC({
+            mc,
+            build,
+            onProgress: (phase, payload) => send(phase, payload || {}),
+        });
+
+        await pool.query(
+            `UPDATE bau_builds
+                SET status='published',
+                    mc_email_asset_id=$1,
+                    mc_de_keys=$2,
+                    mc_folder_path=$3,
+                    pushed_at=NOW(),
+                    updated_at=NOW()
+              WHERE id=$4`,
+            [
+                result.email?.assetId || null,
+                result.des?.map(d => d.customerKey) || [],
+                result.folders?.cbCategoryPath || null,
+                buildId,
+            ]
+        );
+
+        send('complete', {
+            emailAssetId: result.email?.assetId,
+            deKeys: result.des?.map(d => d.customerKey) || [],
+        });
+        res.write('data: [DONE]\n\n');
+        res.end();
+    } catch (err) {
+        console.error('[bau/push] error:', err);
+        await pool.query(
+            `UPDATE bau_builds SET status='failed', error_log=$1, updated_at=NOW() WHERE id=$2`,
+            [JSON.stringify({ phase: 'phase-b', message: err.message }), buildId]
+        ).catch(() => {});
+        send('error', { message: err.message });
+        res.end();
+    }
+});
+
 // POST /api/emails/send-test — Send HTML email to a test address
 app.post('/api/emails/send-test', requireAuth, async (req, res) => {
     try {
@@ -4929,11 +5324,11 @@ The user is asking for a visual, diagram, or email block/template. You MUST:
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         if (ragResult.sources.length > 0) {
-            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources.map(({ htmlSource, ...s }) => s)));
+            setJsonHeader(res, 'X-RAG-Sources', ragResult.sources.map(({ htmlSource, ...s }) => s));
         }
         if (ragResult.mediaResults && ragResult.mediaResults.length > 0) {
             const mediaForHeader = ragResult.mediaResults.filter(m => m.mediaType !== 'email_html').map(({ htmlSource, ...m }) => m);
-            if (mediaForHeader.length > 0) res.setHeader('X-RAG-Media', JSON.stringify(mediaForHeader));
+            if (mediaForHeader.length > 0) setJsonHeader(res, 'X-RAG-Media', mediaForHeader);
         }
         res.flushHeaders();
 
@@ -6612,7 +7007,7 @@ Keep it concise (3-4 paragraphs max). Be warm but professional.`;
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         if (ragResult.sources.length > 0) {
-            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources.map(({ htmlSource, ...s }) => s)));
+            setJsonHeader(res, 'X-RAG-Sources', ragResult.sources.map(({ htmlSource, ...s }) => s));
         }
         res.flushHeaders();
 
@@ -6768,7 +7163,7 @@ app.post('/api/projects/:id/sessions/:sessionId/chat', requireAuth, async (req, 
         const isFullEmailQuery = isBlockQuery && (/\b(completo|complete|full|entero|todos|all|email|correo)\b/i.test(message) || isBuildFromBriefMsg);
         // "insertion" requests: user wants to add/insert at a specific position — let AI handle via NEW_BLOCK marker
         const isInsertionQuery = isBlockQuery && /\b(add|insert|añade|agrega|inserta|between|after|before|entre|después|despues|antes|encima|debajo)\b/i.test(message);
-        const visualKeywords = /\b(show|display|ver|mostrar|look like|see|visualiz|email|imagen|image|picture|inline)\b/i;
+        const visualKeywords = /\b(show|display|ver|mostrar|look like|see|visualiz|email|imagen|image|picture|inline|whatsapp|wa|sms|screenshot|captura|foto|photo|banner)\b/i;
         const isVisualQuery = visualKeywords.test(message);
 
         // Parse which specific block types the user requested (for full email queries)
@@ -6921,11 +7316,11 @@ When providing variable content, emit inline [BRIEF_UPDATE] tags per variable.`;
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         if (ragResult.sources?.length > 0) {
-            res.setHeader('X-RAG-Sources', JSON.stringify(ragResult.sources.map(({ htmlSource, ...s }) => s)));
+            setJsonHeader(res, 'X-RAG-Sources', ragResult.sources.map(({ htmlSource, ...s }) => s));
         }
         if (ragResult.mediaResults?.length > 0) {
             const otherMedia = ragResult.mediaResults.filter(m => m.mediaType !== 'email_html').map(({ htmlSource, ...m }) => m);
-            if (otherMedia.length > 0) res.setHeader('X-RAG-Media', JSON.stringify(otherMedia));
+            if (otherMedia.length > 0) setJsonHeader(res, 'X-RAG-Media', otherMedia);
         }
         res.flushHeaders();
 
@@ -7114,12 +7509,23 @@ When providing variable content, emit inline [BRIEF_UPDATE] tags per variable.`;
             }
         }
 
-        // Fallback: for Lucia sessions, parse any "* varname: value" bullet lines that
+        // Fallback: for Lucia/content sessions, parse any "* varname: value" bullet lines that
         // didn't get a [BRIEF_UPDATE] tag, and emit them as brief_update events now.
+        // Matches agent_id 'lucia', any role/name containing 'lucia', or content-related roles.
+        // Also triggers when the message had a [VARIABLE_STATUS] block (definitive signal this
+        // was a content-gen request) or when the system prompt contained the BRIEF_UPDATE protocol.
+        const agentRoleLc = (session.agent_role || '').toLowerCase();
+        const agentNameLc = (session.agent_name || '').toLowerCase();
+        const hadVariableStatus = /\[VARIABLE_STATUS variant="([^"]+)"\]/.test(message);
         const isLuciaFallback = session.agent_id === 'lucia'
-            || (session.agent_role || '').toLowerCase().includes('content agent')
-            || (session.agent_role || '').toLowerCase().includes('content strategist')
-            || (session.agent_role || '').toLowerCase().includes('content creator');
+            || agentNameLc.includes('lucia')
+            || agentNameLc.includes('lucía')
+            || agentRoleLc.includes('content agent')
+            || agentRoleLc.includes('content strategist')
+            || agentRoleLc.includes('content creator')
+            || agentRoleLc.includes('content writer')
+            || agentRoleLc.includes('copywriter')
+            || hadVariableStatus;
         if (isLuciaFallback) {
             // Vars already emitted via [BRIEF_UPDATE] in the stream
             const emittedVars = new Set();
@@ -7129,20 +7535,44 @@ When providing variable content, emit inline [BRIEF_UPDATE] tags per variable.`;
             // Extract variant from VARIABLE_STATUS block in the user message
             const variantMatch = message.match(/\[VARIABLE_STATUS variant="([^"]+)"\]/);
             const fallbackVariant = variantMatch?.[1] || 'en:economy';
-            // Parse bullet lines: "* varname: value" or "* var\_name: value" (markdown escapes)
+            // Build whitelist of expected variable names from the PENDING list in VARIABLE_STATUS.
+            // This lets us parse plain "varname: value" lines without needing a bullet marker,
+            // because we only accept names that are legit template variables.
+            const pendingMatch = message.match(/PENDING[^:]*:\s*([^\n]+)/);
+            const expectedVars = new Set();
+            if (pendingMatch) {
+                for (const v of pendingMatch[1].split(/[,\s]+/)) {
+                    const clean = v.trim().replace(/\\/g, '');
+                    if (clean) expectedVars.add(clean);
+                }
+            }
+            // Parse lines like "* varname: value", "- varname: value", "varname: value",
+            // "**varname**: value", "`varname`: value". Also tolerate markdown escapes var\_name.
             const IMAGE_SKIP = /image|img|logo|_alias|_link|_url/i;
-            const bulletRE = /^\*?\s*([\w\\]+)\s*:\s*(.+)$/gm;
+            const bulletRE = /^\s*(?:[*\-•]\s+)?(?:\*\*|`)?\s*@?([a-zA-Z][\w\\]*)\s*(?:\*\*|`)?\s*:\s*(.+?)\s*$/gm;
             let bMatch;
             while ((bMatch = bulletRE.exec(fullResponse)) !== null) {
                 // Normalize markdown escapes: var\_name → var_name
                 const varName = bMatch[1].trim().replace(/\\/g, '');
-                const value = bMatch[2].replace(/\[BRIEF_UPDATE[^\]]*\]/g, '').replace(/\\/g, '').trim();
+                let value = bMatch[2].replace(/\[BRIEF_UPDATE[^\]]*\]/g, '').replace(/\\/g, '').trim();
+                // Strip surrounding quotes the model sometimes adds
+                value = value.replace(/^["'`](.*)["'`]$/, '$1').trim();
                 if (!varName || !value) continue;
                 if (IMAGE_SKIP.test(varName)) continue;
                 if (emittedVars.has(varName)) continue;
                 if (value.startsWith('{') || value.startsWith('[')) continue; // skip JSON
+                // If we have an expected-vars whitelist, require the name to be in it.
+                // Otherwise, fall back to the old heuristic: must contain an underscore OR be
+                // one of the common known vars, to avoid matching prose sentences.
+                const KNOWN_SINGLE_WORD_VARS = /^(subject|preheader|copywrite|unsub|headline|cta|body)$/i;
+                if (expectedVars.size > 0) {
+                    if (!expectedVars.has(varName)) continue;
+                } else if (!varName.includes('_') && !KNOWN_SINGLE_WORD_VARS.test(varName)) {
+                    continue;
+                }
                 // Emit as brief_update so frontend can pick it up
                 res.write(`data: ${JSON.stringify({ brief_update: { variant: fallbackVariant, block: varName, status: 'approved', value } })}\n\n`);
+                console.log(`[Pipeline:fallback] emit brief_update var=${varName} variant=${fallbackVariant}`);
                 emittedVars.add(varName);
             }
         }
@@ -7350,6 +7780,691 @@ if (process.env.NODE_ENV === 'production') {
         res.sendFile(path.join(__dirname, 'dist', 'index.html'));
     });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EMAIL BUILDER — Preview & Test tab (hybrid Claude + engine pipeline)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Flow:
+//   1. Client POSTs { input, language } → server starts Claude loop with 2 tools
+//   2. If input is numeric, Claude calls build_email directly
+//   3. If input is text, Claude calls search_asset → server emits `confirm` event
+//      with top 5 candidates; Claude stops and client shows cards
+//   4. On card click, client POSTs { assetId, language, cacheKey } → server calls
+//      build_email directly (no Claude round-trip needed)
+//   5. build_email runs packages/core/email-builder → streams phase/progress/
+//      variant_ready events via SSE. Rendered HTML stored in-memory per cacheKey.
+//   6. GET /api/email-builder/variant/:cacheKey/:variantKey serves HTML to iframe.
+
+const emailBuilderSessions = new Map(); // cacheKey → { variants, emailName, createdAt, expiresAt }
+const EMAIL_BUILDER_TTL_MS = 60 * 60 * 1000; // 1h
+
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, v] of emailBuilderSessions) {
+        if (v.expiresAt < now) emailBuilderSessions.delete(key);
+    }
+}, 5 * 60 * 1000).unref?.();
+
+// Fallback MC client built from process.env — used when DB creds aren't configured
+// (e.g., local dev with MC_CLIENT_ID in .env). Same shape as createMCClient().
+function createMCClientFromEnv() {
+    const clientId = process.env.MC_CLIENT_ID;
+    const clientSecret = process.env.MC_CLIENT_SECRET;
+    const authUrl = (process.env.MC_AUTH_URL || '').replace(/\/+$/, '');
+    const accountId = process.env.MC_ACCOUNT_ID || null;
+    if (!clientId || !clientSecret || !authUrl) return null;
+
+    let tokenCache = null;
+    async function authenticate() {
+        if (tokenCache && Date.now() < tokenCache.expiresAt) return tokenCache;
+        const body = { grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret };
+        if (accountId) body.account_id = accountId;
+        const resp = await fetch(`${authUrl}/v2/token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!resp.ok) throw new Error(`MC auth failed (${resp.status}): ${await resp.text()}`);
+        const data = await resp.json();
+        tokenCache = {
+            accessToken: data.access_token,
+            expiresAt: Date.now() + (data.expires_in - 60) * 1000,
+            restUrl: (data.rest_instance_url || '').replace(/\/+$/, ''),
+            soapUrl: (data.soap_instance_url || '').replace(/\/+$/, ''),
+        };
+        return tokenCache;
+    }
+    async function rest(method, reqPath, body = null, retried = false) {
+        const t = await authenticate();
+        const url = `${t.restUrl}${reqPath.startsWith('/') ? '' : '/'}${reqPath}`;
+        const opts = { method, headers: { Authorization: `Bearer ${t.accessToken}`, 'Content-Type': 'application/json' } };
+        if (body && method !== 'GET') opts.body = JSON.stringify(body);
+        const resp = await fetch(url, opts);
+        if (resp.status === 401 && !retried) { tokenCache = null; return rest(method, reqPath, body, true); }
+        if (resp.status === 429 && !retried) {
+            const wait = parseInt(resp.headers.get('retry-after') || '2', 10);
+            await new Promise(r => setTimeout(r, wait * 1000));
+            return rest(method, reqPath, body, true);
+        }
+        const text = await resp.text();
+        let result; try { result = JSON.parse(text); } catch { result = text; }
+        if (!resp.ok) {
+            const msg = typeof result === 'object' ? (result.message || result.errorMessage || JSON.stringify(result)) : text;
+            const err = new Error(`MC REST ${resp.status}: ${msg}`);
+            err.status = resp.status;
+            throw err;
+        }
+        return result;
+    }
+    async function soap(action, innerXml) {
+        const t = await authenticate();
+        const envelope = `<?xml version="1.0" encoding="UTF-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:a="http://schemas.xmlsoap.org/ws/2004/08/addressing"><s:Header><a:Action s:mustUnderstand="1">${action}</a:Action><a:To s:mustUnderstand="1">${t.soapUrl}/Service.asmx</a:To><fueloauth xmlns="http://exacttarget.com">${t.accessToken}</fueloauth></s:Header><s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">${innerXml}</s:Body></s:Envelope>`;
+        const resp = await fetch(`${t.soapUrl}/Service.asmx`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': action },
+            body: envelope,
+        });
+        const text = await resp.text();
+        if (!resp.ok) throw new Error(`MC SOAP ${resp.status}: ${text.substring(0, 500)}`);
+        return text;
+    }
+    return {
+        async isConfigured() { return true; },
+        async getToken() { return authenticate(); },
+        rest,
+        soap,
+        clearCache() { tokenCache = null; },
+    };
+}
+
+async function getEmailBuilderMCClient() {
+    const dbClient = createMCClient(pool, decryptValue);
+    try {
+        if (await dbClient.isConfigured()) return dbClient;
+    } catch {}
+    const envClient = createMCClientFromEnv();
+    if (envClient) {
+        console.log('[email-builder] using MC credentials from process.env');
+        return envClient;
+    }
+    return null;
+}
+
+let _emailBuilderShellCache = null;
+function getEmailBuilderShell() {
+    if (_emailBuilderShellCache) return _emailBuilderShellCache;
+    const shellPath = path.join(__dirname, '..', '..', 'email_blocks', 'template_style.html');
+    let shell = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>{{CONTENT}}</body></html>';
+    try {
+        if (fs.existsSync(shellPath)) {
+            const raw = fs.readFileSync(shellPath, 'utf8');
+            const cleaned = cleanTemplateShell(raw);
+            const slotMarker = '<div data-type="slot" data-key="2v65jtcb5dc" data-label="Drop blocks or content here"></div>';
+            shell = cleaned.includes(slotMarker) ? cleaned.replace(slotMarker, '{{CONTENT}}') : cleaned;
+        }
+    } catch (e) {
+        console.warn('[email-builder] template shell read failed:', e.message);
+    }
+    _emailBuilderShellCache = shell;
+    return shell;
+}
+
+function sseSend(res, payload) {
+    if (res.writableEnded) return;
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+}
+
+const EMAIL_BUILDER_TOOLS = [
+    {
+        name: 'search_asset',
+        description: 'Search Marketing Cloud Content Builder for email assets by partial name match. Returns up to 5 candidates. Call this when the user provides a campaign name or description rather than a numeric asset ID.',
+        input_schema: {
+            type: 'object',
+            properties: { query: { type: 'string', description: 'Partial asset name to search for' } },
+            required: ['query'],
+        },
+    },
+    {
+        name: 'build_email',
+        description: 'Build all HTML variants for an email campaign. Runs the full Resolve → Analyze → Fetch → Render pipeline. Only call when you have a confirmed numeric asset ID.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                assetId: { type: 'number', description: 'Marketing Cloud asset ID' },
+                campaignHint: { type: 'string', description: 'Optional campaign name hint for BAU DE discovery' },
+            },
+            required: ['assetId'],
+        },
+    },
+];
+
+// Map the engine's fine-grained phase names to the 4 UI phases.
+const PHASE_BUCKETS = {
+    resolve: 'resolve', 'resolve-error': 'resolve',
+    analyze: 'analyze', detect: 'analyze',
+    blocks: 'fetch', block: 'fetch', 'block-error': 'fetch',
+    des: 'fetch', de: 'fetch', 'de-error': 'fetch',
+    vawp: 'fetch', 'vawp-error': 'fetch',
+    images: 'fetch', fetch: 'fetch',
+    render: 'render',
+};
+
+async function runEmailBuild({ assetId, campaignHint, language, cacheKey, mcClient, res, aborted }) {
+    const shell = getEmailBuilderShell();
+    const phaseTimers = {};
+    let lastPhase = null;
+
+    const closePhase = (phase) => {
+        if (phase && phaseTimers[phase]) {
+            sseSend(res, { type: 'phase', phase, status: 'done', durationMs: Date.now() - phaseTimers[phase] });
+        }
+    };
+
+    const onProgress = (rawPhase, detail) => {
+        if (aborted?.value || res.writableEnded) return;
+        const phase = PHASE_BUCKETS[rawPhase] || rawPhase;
+        if (phase !== lastPhase) {
+            if (lastPhase) closePhase(lastPhase);
+            phaseTimers[phase] = Date.now();
+            sseSend(res, { type: 'phase', phase, status: 'start' });
+            lastPhase = phase;
+        }
+        sseSend(res, { type: 'progress', phase, detail: String(detail || '') });
+    };
+
+    const result = await buildCampaignEmails({
+        assetId,
+        mcClient,
+        templateShell: shell,
+        campaignHint,
+        options: { language, onProgress },
+    });
+
+    closePhase(lastPhase);
+
+    const session = emailBuilderSessions.get(cacheKey) || {};
+    session.variants = result.variants || {};
+    session.emailName = result.emailName || null;
+    session.createdAt = session.createdAt || Date.now();
+    session.expiresAt = Date.now() + EMAIL_BUILDER_TTL_MS;
+    emailBuilderSessions.set(cacheKey, session);
+
+    for (const [filename, html] of Object.entries(result.variants || {})) {
+        sseSend(res, {
+            type: 'variant_ready',
+            key: filename,
+            filename,
+            url: `/api/email-builder/variant/${cacheKey}/${encodeURIComponent(filename)}`,
+            sizeKb: Math.round(html.length / 1024),
+        });
+    }
+
+    return {
+        emailName: result.emailName,
+        variantCount: Object.keys(result.variants || {}).length,
+        variantKeys: Object.keys(result.variants || {}),
+    };
+}
+
+async function executeEmailBuilderTool(name, input, ctx) {
+    if (name === 'search_asset') {
+        const q = String(input.query || '').trim();
+        if (!q) return JSON.stringify({ error: 'query required' });
+        const safe = q.replace(/'/g, "''");
+        // Search across templatebasedemail (207/209) and htmlemail (208) without hard-filtering types
+        const filter = encodeURIComponent(`name like '%${safe}%'`);
+        let items = [];
+        try {
+            const result = await ctx.mcClient.rest('GET', `/asset/v1/content/assets?$pageSize=5&$filter=${filter}&$orderBy=modifiedDate desc`);
+            items = (result.items || []).slice(0, 5).map(a => ({
+                assetId: a.id,
+                name: a.name,
+                customerKey: a.customerKey,
+                assetType: a.assetType?.name || null,
+                modified: a.modifiedDate?.split('T')[0] || null,
+            }));
+        } catch (e) {
+            return JSON.stringify({ error: e.message });
+        }
+        if (items.length > 0) {
+            sseSend(ctx.res, { type: 'confirm', options: items });
+        }
+        return JSON.stringify({ count: items.length, items });
+    }
+
+    if (name === 'build_email') {
+        try {
+            const summary = await runEmailBuild({
+                assetId: input.assetId,
+                campaignHint: input.campaignHint,
+                language: ctx.language,
+                cacheKey: ctx.cacheKey,
+                mcClient: ctx.mcClient,
+                res: ctx.res,
+                aborted: ctx.aborted,
+            });
+            return JSON.stringify(summary);
+        } catch (e) {
+            sseSend(ctx.res, { type: 'error', message: e.message, phase: 'build' });
+            return JSON.stringify({ error: e.message });
+        }
+    }
+
+    return JSON.stringify({ error: `Unknown tool: ${name}` });
+}
+
+app.post('/api/email-builder/stream', requireAuth, async (req, res) => {
+    const { input, language = 'en', assetId: directAssetId, cacheKey: clientCacheKey } = req.body || {};
+    if (!input && !directAssetId) return res.status(400).json({ error: 'input or assetId required' });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const cacheKey = clientCacheKey || crypto.randomUUID();
+    if (!emailBuilderSessions.has(cacheKey)) {
+        emailBuilderSessions.set(cacheKey, { variants: {}, createdAt: Date.now(), expiresAt: Date.now() + EMAIL_BUILDER_TTL_MS });
+    }
+    sseSend(res, { type: 'session', cacheKey });
+
+    const aborted = { value: false };
+    req.on('close', () => { aborted.value = true; });
+
+    const mcClient = await getEmailBuilderMCClient();
+    if (!mcClient) {
+        sseSend(res, { type: 'error', message: 'Marketing Cloud credentials not found. Configure them in Settings > API Keys or set MC_CLIENT_ID / MC_CLIENT_SECRET / MC_AUTH_URL in your .env file.' });
+        sseSend(res, { type: 'done', cacheKey, variantCount: 0 });
+        return res.end();
+    }
+
+    // Fast-path: if input is a pure numeric asset ID, skip Claude entirely.
+    const numericInput = input && /^\s*\d+\s*$/.test(String(input)) ? Number(String(input).trim()) : null;
+    const effectiveAssetId = directAssetId || numericInput;
+
+    // Direct build path: client already knows the assetId (post-confirm click or numeric input)
+    if (effectiveAssetId) {
+        try {
+            await runEmailBuild({
+                assetId: Number(effectiveAssetId),
+                language,
+                cacheKey,
+                mcClient,
+                res,
+                aborted,
+            });
+            const vc = Object.keys(emailBuilderSessions.get(cacheKey)?.variants || {}).length;
+            sseSend(res, { type: 'done', cacheKey, variantCount: vc });
+        } catch (e) {
+            console.error('[email-builder] direct build error:', e);
+            sseSend(res, { type: 'error', message: e.message });
+            sseSend(res, { type: 'done', cacheKey, variantCount: 0 });
+        }
+        return res.end();
+    }
+
+    // Claude-driven path (ambiguous input / natural language)
+    const systemPrompt = `You are the Emirates Email Builder assistant for AgentOS Preview & Test.
+
+Rules:
+1. If the user input is a pure numeric asset ID → call build_email({ assetId }) directly.
+2. If the user input is a name or description → call search_asset({ query }) ONCE. After it returns, STOP calling tools. Reply with a short sentence asking the user to pick one from the shown cards. Do NOT call build_email on your own — the user selects.
+3. Keep replies concise (1-2 sentences). Narrate briefly between actions; the UI already shows tool calls and phases.
+
+Pipeline capabilities (do NOT re-explain unless asked — but know them):
+- Auto-detects BAU vs non-BAU templates (\`isBAUTemplate\`). PaidLounge / Churn / Lounge-style shortlink templates run the standard path.
+- Resolves slot-based \`templatebasedemail\` assets (AMPscript is in \`views.html.slots.*.blocks.*.content\`, not the shell).
+- Resolves language-branching logic blocks (level 1 → level 2 sub-block per language).
+- Resolves header dual-branch blocks (skw/ebase) for \`@headerver\` logic.
+- Auto-populates VAWP variables (@FlightNo, @PNR, @DeptAirport, @Deptdate, @first_name, …) from a language+tier matching sample subscriber row. MC REST lowercases DE fields; the renderer aliases FName → first_name with ProperCase.
+- Interpolates \`{FlightNo}\`-style runtime tokens in DE body copy against vars (case-insensitive).
+- Prepends salutation when the template concats it send-time (\`concat(@body_copy_salutation, @body_copy)\`).
+- Handles both name-based stories DEs (Stories_Ref_Table) and row-based layouts (Emirates_Exp_Lounge_shortlink style: story1_image/story2_image on one row per language).
+- Resolves Skw_Plus info block via \`FeaturedItems_Ref_Table_shortlink\` lookup by \`fsitem1\`.
+- Fetches up to 20k rows for large reference DEs (FeaturedItems, centralized_products, impression).
+- Always wraps output in \`email_blocks/template_style.html\` shell (DOCTYPE + responsive CSS + RTL/LTR).
+
+Reply language: ${language === 'es' ? 'Spanish' : 'English'}.`;
+
+    let messages = [{ role: 'user', content: String(input) }];
+    const MAX_ROUNDS = 3;
+
+    try {
+        for (let round = 0; round < MAX_ROUNDS; round++) {
+            if (aborted.value) break;
+
+            const resp = await anthropic.messages.create({
+                model: process.env.LLM_MODEL || 'claude-sonnet-4-6',
+                max_tokens: 1024,
+                system: systemPrompt,
+                messages,
+                tools: EMAIL_BUILDER_TOOLS,
+            });
+
+            for (const block of resp.content) {
+                if (block.type === 'text' && block.text) {
+                    sseSend(res, { type: 'text', delta: block.text });
+                }
+            }
+
+            const toolBlocks = resp.content.filter(b => b.type === 'tool_use');
+            if (toolBlocks.length === 0 || resp.stop_reason === 'end_turn') break;
+
+            const toolResults = [];
+            let sawSearch = false;
+            for (const tb of toolBlocks) {
+                sseSend(res, { type: 'tool_use', id: tb.id, name: tb.name, input: tb.input });
+                const result = await executeEmailBuilderTool(tb.name, tb.input, {
+                    mcClient, cacheKey, language, res, aborted,
+                });
+                let ok = true;
+                try { ok = !JSON.parse(result).error; } catch {}
+                sseSend(res, { type: 'tool_result', id: tb.id, ok, summary: result.slice(0, 400) });
+                toolResults.push({ type: 'tool_result', tool_use_id: tb.id, content: result });
+                if (tb.name === 'search_asset') sawSearch = true;
+            }
+
+            messages.push({ role: 'assistant', content: resp.content });
+            messages.push({ role: 'user', content: toolResults });
+
+            if (sawSearch) break; // wait for user confirm
+        }
+
+        const vc = Object.keys(emailBuilderSessions.get(cacheKey)?.variants || {}).length;
+        sseSend(res, { type: 'done', cacheKey, variantCount: vc });
+    } catch (e) {
+        console.error('[email-builder] stream error:', e);
+        sseSend(res, { type: 'error', message: e.message });
+        sseSend(res, { type: 'done', cacheKey, variantCount: 0 });
+    } finally {
+        res.end();
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Unified Studio — MC bidirectional endpoints (F3 read + F4 write)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const UNIFIED_STUDIO_ASSET_TYPES = {
+    htmlemail: 208,
+    templatebasedemail: 209,
+    template: 4,
+    contentblock: 220,
+    textblock: 196,
+    htmlblock: 197,
+    freeformblock: 195,
+};
+
+function hashHtml(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+    return h.toString(36);
+}
+
+function extractAssetHtml(asset) {
+    return asset?.views?.html?.content
+        || asset?.content
+        || asset?.views?.subjectline?.content
+        || '';
+}
+
+async function listMcAssetsSingleType(mc, { assetTypeId, searchTerm, folderId, page = 1, pageSize = 50 }) {
+    const size = Math.min(pageSize, 100);
+    let path = `/asset/v1/content/assets?$pageSize=${size}&$page=${page}&$orderBy=modifiedDate%20desc`;
+    const filters = [`assetType.id eq ${assetTypeId}`];
+    if (folderId) filters.push(`category.id eq ${folderId}`);
+    // MC rejects combined $filter with `name like` + OR type chains on large tenants
+    // ("all shards failed"). Use $search param instead when a term is provided.
+    if (searchTerm) path += `&$search=${encodeURIComponent(searchTerm)}`;
+    path += `&$filter=${encodeURIComponent(filters.join(' and '))}`;
+    try {
+        return await mc.rest('GET', path);
+    } catch (err) {
+        // Fallback: drop $search and retry, then client-side filter
+        if (searchTerm && /400|shards/i.test(String(err.message))) {
+            const fallbackPath = `/asset/v1/content/assets?$pageSize=${size}&$page=${page}&$orderBy=modifiedDate%20desc&$filter=${encodeURIComponent(filters.join(' and '))}`;
+            const r = await mc.rest('GET', fallbackPath);
+            const needle = searchTerm.toLowerCase();
+            r.items = (r.items || []).filter(a => (a.name || '').toLowerCase().includes(needle));
+            return r;
+        }
+        throw err;
+    }
+}
+
+async function listMcAssets(mc, { assetTypeIds, searchTerm, folderId, page = 1, pageSize = 50 }) {
+    const ids = assetTypeIds?.length ? assetTypeIds : [null];
+    const results = await Promise.all(ids.map(id =>
+        listMcAssetsSingleType(mc, { assetTypeId: id, searchTerm, folderId, page, pageSize })
+            .catch(err => ({ items: [], count: 0, error: err.message }))
+    ));
+    const merged = [];
+    const seen = new Set();
+    for (const r of results) {
+        for (const a of (r.items || [])) {
+            if (seen.has(a.id)) continue;
+            seen.add(a.id);
+            merged.push(a);
+        }
+    }
+    merged.sort((a, b) => (b.modifiedDate || '').localeCompare(a.modifiedDate || ''));
+    const items = merged.slice(0, Math.min(pageSize, 100)).map(a => ({
+        id: a.id,
+        name: a.name,
+        assetType: a.assetType?.name,
+        modifiedDate: a.modifiedDate,
+        categoryId: a.category?.id,
+    }));
+    const firstError = results.find(r => r.error)?.error;
+    return { items, count: merged.length, page, pageSize, ...(items.length === 0 && firstError ? { error: firstError } : {}) };
+}
+
+app.get('/api/mc/content-blocks', requireAuth, async (req, res) => {
+    try {
+        const mc = await getEmailBuilderMCClient();
+        if (!mc) return res.status(503).json({ error: 'MC client not configured' });
+        const { q, folderId, page = '1', pageSize = '50' } = req.query;
+        const data = await listMcAssets(mc, {
+            assetTypeIds: [
+                UNIFIED_STUDIO_ASSET_TYPES.contentblock,
+                UNIFIED_STUDIO_ASSET_TYPES.textblock,
+                UNIFIED_STUDIO_ASSET_TYPES.htmlblock,
+                UNIFIED_STUDIO_ASSET_TYPES.freeformblock,
+            ],
+            searchTerm: q,
+            folderId: folderId ? parseInt(folderId, 10) : undefined,
+            page: parseInt(page, 10),
+            pageSize: parseInt(pageSize, 10),
+        });
+        res.json(data);
+    } catch (err) {
+        console.error('[mc/content-blocks] error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/mc/templates', requireAuth, async (req, res) => {
+    try {
+        const mc = await getEmailBuilderMCClient();
+        if (!mc) return res.status(503).json({ error: 'MC client not configured' });
+        const { q, page = '1', pageSize = '50' } = req.query;
+        const data = await listMcAssets(mc, {
+            assetTypeIds: [UNIFIED_STUDIO_ASSET_TYPES.template],
+            searchTerm: q,
+            page: parseInt(page, 10),
+            pageSize: parseInt(pageSize, 10),
+        });
+        res.json(data);
+    } catch (err) {
+        console.error('[mc/templates] error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/mc/emails', requireAuth, async (req, res) => {
+    try {
+        const mc = await getEmailBuilderMCClient();
+        if (!mc) return res.status(503).json({ error: 'MC client not configured' });
+        const { q, page = '1', pageSize = '50' } = req.query;
+        const data = await listMcAssets(mc, {
+            assetTypeIds: [UNIFIED_STUDIO_ASSET_TYPES.htmlemail, UNIFIED_STUDIO_ASSET_TYPES.templatebasedemail],
+            searchTerm: q,
+            page: parseInt(page, 10),
+            pageSize: parseInt(pageSize, 10),
+        });
+        res.json(data);
+    } catch (err) {
+        console.error('[mc/emails] error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/mc/assets/:id', requireAuth, async (req, res) => {
+    try {
+        const mc = await getEmailBuilderMCClient();
+        if (!mc) return res.status(503).json({ error: 'MC client not configured' });
+        const asset = await mc.rest('GET', `/asset/v1/content/assets/${req.params.id}`);
+        const html = extractAssetHtml(asset);
+        res.json({
+            id: asset.id,
+            name: asset.name,
+            assetType: asset.assetType?.name,
+            subject: asset.views?.subjectline?.content || '',
+            html,
+            modifiedDate: asset.modifiedDate,
+            etag: hashHtml(html),
+        });
+    } catch (err) {
+        console.error('[mc/assets/:id] error:', err.message);
+        res.status(err.status === 404 ? 404 : 500).json({ error: err.message });
+    }
+});
+
+app.post('/api/chat/unified-studio', requireAuth, async (req, res) => {
+    const { message, history = [], activeVariant } = req.body || {};
+    if (!message) return res.status(400).json({ error: 'message required' });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+    const send = (evt) => res.write(`data: ${JSON.stringify(evt)}\n\n`);
+
+    try {
+        const mc = await getEmailBuilderMCClient();
+
+        const variantCtx = activeVariant ? [
+            `[ACTIVE VARIANT]`,
+            `id=${activeVariant.id}`,
+            `label=${activeVariant.label || '(unnamed)'}`,
+            `market=${activeVariant.market} tier=${activeVariant.tier}`,
+            `subject="${activeVariant.copy?.subject || ''}"`,
+            `preheader="${activeVariant.copy?.preheader || ''}"`,
+            `blocks=${Object.keys(activeVariant.html?.blockHtmlMap || {}).length}`,
+            `mcLinked=${activeVariant.mcLink?.emailId ? 'yes (' + activeVariant.mcLink.emailId + ')' : 'no'}`,
+        ].join('\n') : '[NO ACTIVE VARIANT — the user may want you to create one]';
+
+        const apiMessages = [
+            ...history.filter(m => m.role && m.content).map(m => ({ role: m.role, content: m.content })),
+            { role: 'user', content: `${variantCtx}\n\n${message}` },
+        ];
+
+        const MAX_ROUNDS = 8;
+        for (let round = 0; round < MAX_ROUNDS; round++) {
+            const response = await anthropic.messages.create({
+                model: process.env.LLM_MODEL || 'claude-sonnet-4-6',
+                max_tokens: 4096,
+                system: UNIFIED_STUDIO_SYSTEM_PROMPT,
+                messages: apiMessages,
+                tools: UNIFIED_STUDIO_TOOLS.map(({ name, description, input_schema }) => ({ name, description, input_schema })),
+            });
+
+            for (const block of response.content) {
+                if (block.type === 'text' && block.text) {
+                    send({ type: 'text', text: block.text });
+                }
+            }
+
+            const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
+            if (toolUseBlocks.length === 0 || response.stop_reason === 'end_turn') break;
+
+            apiMessages.push({ role: 'assistant', content: response.content });
+
+            const toolResults = [];
+            for (const tb of toolUseBlocks) {
+                send({ type: 'tool_start', id: tb.id, name: tb.name, input: tb.input });
+                const { text, patch } = await executeUnifiedStudioTool(tb.name, tb.input, { mc });
+                if (patch) send({ type: 'patch', op: patch.op, args: patch.args });
+                send({ type: 'tool_end', id: tb.id, name: tb.name });
+                toolResults.push({ type: 'tool_result', tool_use_id: tb.id, content: text });
+            }
+            apiMessages.push({ role: 'user', content: toolResults });
+        }
+
+        send({ type: 'done' });
+    } catch (err) {
+        console.error('[chat/unified-studio] error:', err);
+        send({ type: 'error', message: err.message });
+    } finally {
+        res.write('data: [DONE]\n\n');
+        res.end();
+    }
+});
+
+app.patch('/api/mc/assets/:id', requireAuth, async (req, res) => {
+    try {
+        const mc = await getEmailBuilderMCClient();
+        if (!mc) return res.status(503).json({ error: 'MC client not configured' });
+        const { html, etag, force } = req.body || {};
+        if (typeof html !== 'string') return res.status(400).json({ error: 'html (string) required' });
+
+        // Conflict detection: re-GET remote, compare hash to provided etag
+        const current = await mc.rest('GET', `/asset/v1/content/assets/${req.params.id}`);
+        const currentHtml = extractAssetHtml(current);
+        const currentEtag = hashHtml(currentHtml);
+        if (etag && currentEtag !== etag && !force) {
+            return res.status(409).json({
+                error: 'Conflict: remote asset changed since last fetch',
+                currentEtag,
+                remoteHtml: currentHtml,
+            });
+        }
+
+        // Build PATCH payload preserving asset structure
+        const payload = {
+            views: {
+                ...(current.views || {}),
+                html: { ...(current.views?.html || {}), content: html },
+            },
+        };
+        if (current.content !== undefined) payload.content = html;
+
+        const updated = await mc.rest('PATCH', `/asset/v1/content/assets/${req.params.id}`, payload);
+        const updatedHtml = extractAssetHtml(updated);
+        res.json({
+            id: updated.id,
+            name: updated.name,
+            html: updatedHtml,
+            modifiedDate: updated.modifiedDate,
+            etag: hashHtml(updatedHtml),
+        });
+    } catch (err) {
+        console.error('[mc/assets/:id PATCH] error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/email-builder/variant/:cacheKey/:variantKey', requireAuth, (req, res) => {
+    const { cacheKey, variantKey } = req.params;
+    const session = emailBuilderSessions.get(cacheKey);
+    if (!session) return res.status(404).send('Session expired or not found');
+    const html = session.variants?.[decodeURIComponent(variantKey)];
+    if (!html) return res.status(404).send('Variant not found');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(html);
+});
 
 process.on('uncaughtException', (err) => {
     console.error('[Server] Uncaught exception (keeping process alive):', err.message);

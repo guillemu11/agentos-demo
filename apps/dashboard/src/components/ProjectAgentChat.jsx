@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Layers, BookOpen } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { useStreamingChat } from '../hooks/useStreamingChat.js';
 import renderMarkdown from '../utils/renderMarkdown.js';
@@ -211,7 +212,7 @@ export default function ProjectAgentChat({ projectId, session, completedSessions
                                 ))
                                 : (
                                     <div style={{ marginTop: 6, fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                                        <span>🧱</span>
+                                        <Layers size={14} />
                                         <span>{msg.media.filter(m => m.mediaType === 'email_html').length} {msg.media.filter(m => m.mediaType === 'email_html').length === 1 ? 'bloque añadido' : 'bloques añadidos'} al canvas</span>
                                     </div>
                                 )
@@ -222,7 +223,7 @@ export default function ProjectAgentChat({ projectId, session, completedSessions
                     <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', margin: '8px 0' }}>
                         {ragSources.map((src, i) => (
                             <span key={i} className="pipeline-context-pill" style={{ fontSize: '0.7rem' }}>
-                                📚 {src.namespace || src.title || `Source ${i + 1}`}
+                                <BookOpen size={11} style={{ verticalAlign: 'middle' }} /> {src.namespace || src.title || `Source ${i + 1}`}
                             </span>
                         ))}
                     </div>

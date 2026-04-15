@@ -29,6 +29,11 @@ import ContentStudioPage from './pages/ContentStudioPage.jsx';
 import ImageStudioPage from './pages/ImageStudioPage.jsx';
 import EmailStudioPage from './pages/EmailStudioPage.jsx';
 import BlockStudioPage from './pages/BlockStudioPage.jsx';
+import UnifiedStudioPage from './pages/UnifiedStudioPage.jsx';
+import CampaignCreationPage from './pages/CampaignCreationPage.jsx';
+import PreviewTestPage from './pages/PreviewTestPage.jsx';
+import CompetitorAnalysisPage from './pages/CompetitorAnalysisPage.jsx';
+import BrandAuditPage from './pages/BrandAuditPage.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -120,7 +125,14 @@ createRoot(document.getElementById('root')).render(
                       <Route path="/knowledge" element={<KnowledgeBase />} />
                       <Route path="/research" element={<AutoResearch />} />
                       <Route path="/research/:sessionId" element={<AutoResearch />} />
+                      <Route path="/studio" element={<UnifiedStudioPage />} />
                       <Route path="/image-studio" element={<ImageStudioPage />} />
+                      <Route path="/email-studio" element={<EmailStudioPage />} />
+                      <Route path="/content-studio" element={<ContentStudioPage />} />
+                      <Route path="/campaign-creation" element={<CampaignCreationPage />} />
+                      <Route path="/preview-test" element={<PreviewTestPage />} />
+                      <Route path="/competitor-analysis" element={<CompetitorAnalysisPage />} />
+                      <Route path="/brand-audit" element={<BrandAuditPage />} />
                       <Route path="/settings" element={<SettingsPage />} />
                     </Route>
                     {/* Studio routes — full-screen, no sidebar */}

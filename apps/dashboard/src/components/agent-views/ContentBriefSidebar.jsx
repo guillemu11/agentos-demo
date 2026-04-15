@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
+import { LangIcon } from '../icons.jsx';
 
-const MARKET_FLAGS  = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺', de: '🇩🇪', fr: '🇫🇷', it: '🇮🇹', zh: '🇨🇳', ja: '🇯🇵', pt: '🇧🇷' };
 const MARKET_LABELS = { en: 'EN', es: 'ES', ar: 'AR', ru: 'RU', de: 'DE', fr: 'FR', it: 'IT', zh: 'ZH', ja: 'JA', pt: 'PT' };
 const TIER_LABELS   = { economy: 'Economy', economy_premium: 'Eco Premium', business: 'Business', first_class: 'First Class' };
 const BLOCK_KEYS    = ['subject', 'preheader', 'heroHeadline', 'bodyCopy', 'cta'];
@@ -93,7 +93,7 @@ export default function ContentBriefSidebar({
                   className={`brief-variant-tag${activeVariant === vk ? ' active' : ''}`}
                   onClick={() => onSelectVariant(vk)}
                 >
-                  {MARKET_FLAGS[market] || '🌐'} {variantTagLabel(vk)}
+                  <LangIcon lang={market} /> {variantTagLabel(vk)}
                   <span className="brief-variant-tag-progress">{done}/{BLOCK_KEYS.length}</span>
                 </button>
               );
@@ -116,7 +116,7 @@ export default function ContentBriefSidebar({
             <option value="">{t('contentAgent.selectMarket') || 'Market'}</option>
             {(availableMarkets || []).map(m => (
               <option key={m} value={m}>
-                {MARKET_FLAGS[m] || '🌐'} {MARKET_LABELS[m] || m.toUpperCase()}
+                {MARKET_LABELS[m] || m.toUpperCase()} {MARKET_LABELS[m] || m.toUpperCase()}
               </option>
             ))}
           </select>
@@ -148,7 +148,7 @@ export default function ContentBriefSidebar({
         {activeBlocks ? (
           <>
             <div className="brief-active-variant-label">
-              {MARKET_FLAGS[parseVariantKey(activeVariant).market] || '🌐'} {variantTagLabel(activeVariant)}
+              <LangIcon lang={parseVariantKey(activeVariant).market || 'en'} /> {variantTagLabel(activeVariant)}
             </div>
             {BLOCK_KEYS.map(key => {
               const block = activeBlocks[key] || { status: 'pending', value: null };
@@ -169,7 +169,7 @@ export default function ContentBriefSidebar({
                         className="brief-block-edit-btn"
                         onClick={() => onBriefUpdate({ variant: activeVariant, block: key, status: 'pending', value: null })}
                       >
-                        {t('contentAgent.editBlock') || 'Editar'} ✏️
+                        {t('contentAgent.editBlock') || 'Editar'}
                       </button>
                     </>
                   )}
@@ -188,7 +188,7 @@ export default function ContentBriefSidebar({
       {chatImages.length > 0 && (
         <div className="brief-images-section">
           <div className="brief-images-header">
-            <span>🖼️ {t('contentAgent.imagesGenerated') || 'Imágenes generadas'}</span>
+            <span>{t('contentAgent.imagesGenerated') || 'Imágenes generadas'}</span>
             <span className="brief-images-count">{chatImages.length}</span>
           </div>
           <div className="brief-images-list">

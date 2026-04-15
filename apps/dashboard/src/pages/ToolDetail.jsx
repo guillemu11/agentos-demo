@@ -1,6 +1,8 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { getToolById, getAgentsForTool } from '../data/mockData.js';
+import { ToolIcons, AgentAvatarIcons, CapabilityIcons } from '../components/icons.jsx';
+import { Bot } from 'lucide-react';
 
 export default function ToolDetail() {
     const { toolId } = useParams();
@@ -37,7 +39,7 @@ export default function ToolDetail() {
             {/* Tool Profile Header */}
             <section className="tool-detail-header">
                 <div className="tool-detail-left">
-                    <span className="tool-detail-icon">{tool.icon}</span>
+                    <span className="tool-detail-icon">{ToolIcons[tool.id] || tool.icon}</span>
                     <div className="tool-detail-info">
                         <h1>{tool.name}</h1>
                         <p className="tool-detail-description">{tool.description}</p>
@@ -61,7 +63,7 @@ export default function ToolDetail() {
                 <div className="tool-capabilities-grid">
                     {(tool.capabilities || []).map((cap) => (
                         <div key={cap.id} className="card tool-capability-card animate-fade-in">
-                            <span className="tool-capability-icon">{cap.icon}</span>
+                            <span className="tool-capability-icon">{CapabilityIcons[cap.id] || cap.icon}</span>
                             <h4 className="tool-capability-name">{cap.name}</h4>
                             <p className="tool-capability-desc">{cap.description}</p>
                         </div>
@@ -83,7 +85,7 @@ export default function ToolDetail() {
                                 onClick={() => navigate(`/app/workspace/agent/${agent.id}`)}
                                 style={{ cursor: 'pointer' }}
                             >
-                                <span className="tool-agent-avatar">{agent.avatar}</span>
+                                <span className="tool-agent-avatar">{AgentAvatarIcons[agent.id] || <Bot size={18} />}</span>
                                 <div>
                                     <h4 className="tool-agent-name">{agent.name}</h4>
                                     <p className="tool-agent-role">{agent.role}</p>

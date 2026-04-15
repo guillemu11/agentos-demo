@@ -1,44 +1,62 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { NavIcons, LangIcon } from './icons.jsx';
-import { LogOut, Menu, X } from 'lucide-react';
+import { LogOut, Menu, X, Settings as SettingsIcon } from 'lucide-react';
 
 const icons = NavIcons;
+
+const gearRoutes = ['/app/settings', '/app/workspace/audit', '/app/workspace/intelligence', '/app/pm-reports', '/app/workflows'];
 
 export default function Layout({ user, onLogout }) {
     const [collapsed, setCollapsed] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
+    const [gearOpen, setGearOpen] = useState(false);
     const location = useLocation();
     const { lang, setLang, t } = useLanguage();
 
+    const isGearRouteActive = gearRoutes.some(r => location.pathname.startsWith(r));
+
+    useEffect(() => {
+        if (!gearOpen) return;
+        const handler = (e) => {
+            if (!e.target.closest('.settings-gear-wrapper')) setGearOpen(false);
+        };
+        document.addEventListener('click', handler);
+        return () => document.removeEventListener('click', handler);
+    }, [gearOpen]);
+
     const navGroups = [
         {
-            label: 'Main',
+            label: null,
             items: [
                 { to: '/app', icon: icons.home, label: t('layout.home') },
-                { to: '/app/projects', icon: icons.dashboard, label: t('layout.dashboard') },
-                { to: '/app/workspace', icon: icons.workspace, label: t('layout.workspace') },
+                { to: '/app/projects', icon: icons.dashboard, label: t('layout.commandCenter') },
+                { to: '/app/workspace', icon: icons.workspace, label: t('layout.agentTeams') },
                 { to: '/app/campaigns', icon: icons.campaigns, label: t('layout.campaigns') },
-                { to: '/app/image-studio', icon: icons.imageStudio, label: t('layout.imageStudio') },
             ],
         },
         {
-            label: 'Operations',
+            label: t('layout.actions'),
             items: [
-                { to: '/app/workflows', icon: icons.workflows, label: t('layout.workflows') },
+                { to: '/app/campaign-creation', icon: icons.campaignCreation, label: t('layout.campaignCreation') },
+                { to: '/app/preview-test', icon: icons.previewTest, label: t('layout.previewTest') },
+                { to: '/app/competitor-analysis', icon: icons.competitorAnalysis, label: t('layout.competitorAnalysis') },
+                { to: '/app/brand-audit', icon: icons.brandAudit, label: t('layout.brandAudit') },
                 { to: '/app/research', icon: icons.intelligence, label: t('layout.autoResearch') },
-                { to: '/app/inbox', icon: icons.agent, label: t('layout.projectManager') },
-                { to: '/app/pm-reports', icon: icons.reports, label: t('layout.pmReports') },
             ],
         },
         {
-            label: 'Control',
+            label: t('layout.studios'),
             items: [
-                { to: '/app/knowledge', icon: icons.intelligence, label: t('layout.knowledgeBase') },
-                { to: '/app/workspace/intelligence', icon: icons.intelligence, label: t('layout.intelligence') },
-                { to: '/app/workspace/audit', icon: icons.audit, label: t('layout.auditLog') },
-                { to: '/app/settings', icon: icons.settings, label: t('layout.settings') },
+                { to: '/app/studio', icon: icons.studio, label: t('layout.studio') },
+            ],
+        },
+        {
+            label: t('layout.control'),
+            items: [
+                { to: '/app/inbox', icon: icons.projectManager, label: t('layout.projectManager') },
+                { to: '/app/knowledge', icon: icons.knowledgeBase, label: t('layout.knowledgeBase') },
             ],
         },
     ];
@@ -82,16 +100,16 @@ export default function Layout({ user, onLogout }) {
                 </div>
 
                 <nav className="sidebar-nav">
-                    {navGroups.map((group) => (
-                        <div key={group.label} className="sidebar-group">
-                            {!collapsed && <div className="sidebar-group-label">{group.label}</div>}
+                    {navGroups.map((group, gi) => (
+                        <div key={group.label || gi} className="sidebar-group">
+                            {group.label && !collapsed && <div className="sidebar-group-label">{group.label}</div>}
                             {group.items.map((item) => (
                                 <NavLink
                                     key={item.to}
                                     to={item.to}
                                     end={item.to === '/app' || item.to === '/app/workspace'}
                                     className={({ isActive }) => {
-                                        const isWorkspaceBase = item.to === '/app/workspace' && location.pathname.startsWith('/app/workspace') && !location.pathname.includes('/audit') && !location.pathname.includes('/intelligence');
+                                        const isWorkspaceBase = item.to === '/app/workspace' && location.pathname.startsWith('/app/workspace') && !location.pathname.includes('/audit') && !location.pathname.includes('/intelligence') && !location.pathname.includes('/agent/') && !location.pathname.includes('/tool/');
                                         const isCampaignsBase = item.to === '/app/campaigns' && location.pathname.startsWith('/app/campaigns');
                                         return `sidebar-link ${isActive || isWorkspaceBase || isCampaignsBase ? 'active' : ''}`;
                                     }}
@@ -106,7 +124,7 @@ export default function Layout({ user, onLogout }) {
                 </nav>
 
                 <div className="sidebar-footer">
-                    {/* User indicator */}
+                    {/* User indicator + gear */}
                     {user && (
                         <div className="sidebar-user">
                             {!collapsed ? (
@@ -115,14 +133,80 @@ export default function Layout({ user, onLogout }) {
                                         <span className="sidebar-user-name">{user.name || 'Guillermo Muñoz'}</span>
                                         <span className="sidebar-user-role">{user.role || 'owner'}</span>
                                     </div>
+                                    <div className="settings-gear-wrapper">
+                                        <button
+                                            className={`settings-gear-btn ${gearOpen || isGearRouteActive ? 'active' : ''}`}
+                                            onClick={(e) => { e.stopPropagation(); setGearOpen(!gearOpen); }}
+                                        >
+                                            <SettingsIcon size={18} />
+                                        </button>
+                                        {gearOpen && (
+                                            <div className="settings-gear-popover">
+                                                <NavLink to="/app/settings" className="sidebar-link" onClick={() => { setGearOpen(false); setMobileOpen(false); }}>
+                                                    <span className="sidebar-icon">{icons.settings}</span>
+                                                    <span className="sidebar-label">{t('layout.settings')}</span>
+                                                </NavLink>
+                                                <NavLink to="/app/workspace/audit" className="sidebar-link" onClick={() => { setGearOpen(false); setMobileOpen(false); }}>
+                                                    <span className="sidebar-icon">{icons.audit}</span>
+                                                    <span className="sidebar-label">{t('layout.auditLog')}</span>
+                                                </NavLink>
+                                                <NavLink to="/app/workspace/intelligence" className="sidebar-link" onClick={() => { setGearOpen(false); setMobileOpen(false); }}>
+                                                    <span className="sidebar-icon">{icons.intelligence}</span>
+                                                    <span className="sidebar-label">{t('layout.intelligence')}</span>
+                                                </NavLink>
+                                                <NavLink to="/app/pm-reports" className="sidebar-link" onClick={() => { setGearOpen(false); setMobileOpen(false); }}>
+                                                    <span className="sidebar-icon">{icons.reports}</span>
+                                                    <span className="sidebar-label">{t('layout.pmReports')}</span>
+                                                </NavLink>
+                                                <NavLink to="/app/workflows" className="sidebar-link" onClick={() => { setGearOpen(false); setMobileOpen(false); }}>
+                                                    <span className="sidebar-icon">{icons.workflows}</span>
+                                                    <span className="sidebar-label">{t('layout.workflows')}</span>
+                                                </NavLink>
+                                            </div>
+                                        )}
+                                    </div>
                                     <button className="sidebar-logout-btn" onClick={onLogout} title={t('auth.logout')}>
                                         <LogOut size={16} />
                                     </button>
                                 </>
                             ) : (
-                                <button className="sidebar-logout-btn" onClick={onLogout} title={t('auth.logout')}>
-                                    <LogOut size={16} />
-                                </button>
+                                <>
+                                    <div className="settings-gear-wrapper">
+                                        <button
+                                            className={`settings-gear-btn ${gearOpen || isGearRouteActive ? 'active' : ''}`}
+                                            onClick={(e) => { e.stopPropagation(); setGearOpen(!gearOpen); }}
+                                        >
+                                            <SettingsIcon size={18} />
+                                        </button>
+                                        {gearOpen && (
+                                            <div className="settings-gear-popover">
+                                                <NavLink to="/app/settings" className="sidebar-link" onClick={() => { setGearOpen(false); setMobileOpen(false); }}>
+                                                    <span className="sidebar-icon">{icons.settings}</span>
+                                                    <span className="sidebar-label">{t('layout.settings')}</span>
+                                                </NavLink>
+                                                <NavLink to="/app/workspace/audit" className="sidebar-link" onClick={() => { setGearOpen(false); setMobileOpen(false); }}>
+                                                    <span className="sidebar-icon">{icons.audit}</span>
+                                                    <span className="sidebar-label">{t('layout.auditLog')}</span>
+                                                </NavLink>
+                                                <NavLink to="/app/workspace/intelligence" className="sidebar-link" onClick={() => { setGearOpen(false); setMobileOpen(false); }}>
+                                                    <span className="sidebar-icon">{icons.intelligence}</span>
+                                                    <span className="sidebar-label">{t('layout.intelligence')}</span>
+                                                </NavLink>
+                                                <NavLink to="/app/pm-reports" className="sidebar-link" onClick={() => { setGearOpen(false); setMobileOpen(false); }}>
+                                                    <span className="sidebar-icon">{icons.reports}</span>
+                                                    <span className="sidebar-label">{t('layout.pmReports')}</span>
+                                                </NavLink>
+                                                <NavLink to="/app/workflows" className="sidebar-link" onClick={() => { setGearOpen(false); setMobileOpen(false); }}>
+                                                    <span className="sidebar-icon">{icons.workflows}</span>
+                                                    <span className="sidebar-label">{t('layout.workflows')}</span>
+                                                </NavLink>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <button className="sidebar-logout-btn" onClick={onLogout} title={t('auth.logout')}>
+                                        <LogOut size={16} />
+                                    </button>
+                                </>
                             )}
                         </div>
                     )}

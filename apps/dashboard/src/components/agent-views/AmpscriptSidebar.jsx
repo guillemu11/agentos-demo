@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Image, Pencil } from 'lucide-react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
 
 // Variables que son imágenes (no texto)
@@ -15,7 +16,6 @@ function varType(varName) {
     return 'text';
 }
 
-const MARKET_FLAGS = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
 const MARKET_LABELS = { en: 'EN', es: 'ES', ar: 'AR', ru: 'RU' };
 const TIER_LABELS = { economy: 'Economy', economy_premium: 'Eco Premium', business: 'Business', first_class: 'First' };
 
@@ -64,7 +64,7 @@ export default function AmpscriptSidebar({
                 >
                     <option value="">{t('contentAgent.selectMarket') || 'Market'}</option>
                     {(availableMarkets || []).map(m => (
-                        <option key={m} value={m}>{MARKET_FLAGS[m] || '🌐'} {MARKET_LABELS[m] || m.toUpperCase()}</option>
+                        <option key={m} value={m}>{MARKET_LABELS[m] || m.toUpperCase()}</option>
                     ))}
                 </select>
                 <select
@@ -117,7 +117,7 @@ export default function AmpscriptSidebar({
                                     return (
                                         <div key={varName} className={`ampscript-var-row ${value ? 'filled' : 'empty'}`}>
                                             <span className="ampscript-var-type-icon">
-                                                {type === 'image' ? '🖼️' : '✍️'}
+                                                {type === 'image' ? <Image size={13} /> : <Pencil size={13} />}
                                             </span>
                                             <span className="ampscript-var-name">@{varName}</span>
                                             {value && (

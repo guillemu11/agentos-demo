@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
-import { FileText, Package, Zap, HelpCircle, ArrowRight, MessageSquare, ChevronDown, ChevronRight } from 'lucide-react';
+import { FileText, Package, Zap, HelpCircle, ArrowRight, MessageSquare, ChevronDown, ChevronRight, User, Bot } from 'lucide-react';
+import { AgentAvatar } from './icons.jsx';
 import renderMarkdown from '../utils/renderMarkdown.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
@@ -193,7 +194,7 @@ export default function WorkLogTab({ projectId, pipeline: pipelineProp, sessions
                                     onClick={() => isClickable && handleSelectAgent(stage.stage_order)}
                                 >
                                     <span className="worklog-agent-avatar">
-                                        {agent?.avatar || '🤖'}
+                                        <AgentAvatar agentId={agent?.id} size={18} />
                                     </span>
                                     <div className="worklog-agent-info">
                                         <span className="worklog-agent-name">
@@ -224,7 +225,7 @@ export default function WorkLogTab({ projectId, pipeline: pipelineProp, sessions
                         <div className="worklog-panel-header">
                             <div className="worklog-panel-title">
                                 <span className="worklog-panel-avatar">
-                                    {selectedAgentData?.avatar || '🤖'}
+                                    <AgentAvatar agentId={selectedAgentData?.id} size={20} />
                                 </span>
                                 <div>
                                     <h3>{selectedAgentData?.name || selectedStage?.agent_id}</h3>
@@ -387,7 +388,7 @@ export default function WorkLogTab({ projectId, pipeline: pipelineProp, sessions
                                                     className={`worklog-message ${msg.role || 'user'}`}
                                                 >
                                                     <span className="worklog-message-role">
-                                                        {msg.role === 'assistant' ? (selectedAgentData?.avatar || '🤖') : '👤'}
+                                                        {msg.role === 'assistant' ? <AgentAvatar agentId={selectedAgentData?.id} size={16} /> : <User size={16} />}
                                                     </span>
                                                     <div className="worklog-message-content">
                                                         {msg.role === 'assistant' ? (

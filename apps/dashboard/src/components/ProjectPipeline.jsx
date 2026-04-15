@@ -1,4 +1,5 @@
 import React from 'react';
+import { Lock } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 
 function timeAgo(dateStr) {
@@ -51,7 +52,7 @@ export default function ProjectPipeline({ pipeline, sessions, stages, agents, se
                                     <span className="pipeline-stage-agent"> — {agent?.name || stage.agent_id}</span>
                                 </div>
                                 <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                                    {stage.gate_type === 'human_approval' && <span className="gate-badge">🔒</span>}
+                                    {stage.gate_type === 'human_approval' && <span className="gate-badge"><Lock size={12} /></span>}
                                     <span className={`pipeline-status-badge ${status}`}>
                                         {t(`pipeline.${status}`) || status}
                                     </span>

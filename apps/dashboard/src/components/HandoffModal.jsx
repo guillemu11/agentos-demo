@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Lock } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
@@ -99,7 +100,7 @@ export default function HandoffModal({ projectId, session, stages, agents, onClo
 
                         {requiresGateApproval && (
                             <div style={{ padding: '10px 14px', background: '#F59E0B15', border: '1px solid #F59E0B40', borderRadius: '10px', marginBottom: '12px', fontSize: '0.85rem' }}>
-                                🔒 {t('pipeline.gateApproval')}
+                                <Lock size={14} style={{ verticalAlign: 'middle' }} /> {t('pipeline.gateApproval')}
                             </div>
                         )}
 

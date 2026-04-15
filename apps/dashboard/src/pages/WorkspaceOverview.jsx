@@ -1,25 +1,22 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { tools as TOOLS } from '../data/mockData.js';
-import { Mail, Search, FlaskConical, CheckCircle } from 'lucide-react';
+import { Mail, Search, FlaskConical, ChevronDown } from 'lucide-react';
+import { DeptIcons, AgentAvatarIcons } from '../components/icons.jsx';
+import { Bot } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
-
-const healthColors = {
-    good: '#10b981',
-    warning: '#f59e0b',
-    critical: '#ef4444',
-};
 
 export default function WorkspaceOverview() {
     const navigate = useNavigate();
     const { t } = useLanguage();
 
-    const healthLabels = {
-        good: t('health.good'),
-        warning: t('health.warning'),
-        critical: t('health.critical'),
+    const statusConfig = {
+        active: { color: '#10b981', label: t('status.active'), bg: '#ecfdf5' },
+        idle: { color: '#f59e0b', label: t('status.idle'), bg: '#fffbeb' },
+        offline: { color: '#94a3b8', label: t('status.offline'), bg: '#f1f5f9' },
+        error: { color: '#ef4444', label: t('status.error'), bg: '#fef2f2' },
     };
 
     const [agents, setAgents] = useState([]);
@@ -28,6 +25,11 @@ export default function WorkspaceOverview() {
     const [error, setError] = useState(null);
     const [pipelineCounts, setPipelineCounts] = useState({});
     const [activities, setActivities] = useState([]);
+    const [weeklyDropdownOpen, setWeeklyDropdownOpen] = useState(false);
+    const [standupDropdownOpen, setStandupDropdownOpen] = useState(false);
+
+    const weeklyRef = useRef(null);
+    const standupRef = useRef(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -65,24 +67,53 @@ export default function WorkspaceOverview() {
 
         fetchData();
 
-        // Load pipeline counts + activity feed
         fetch(`${API_URL}/pipeline/counts`, { credentials: 'include' })
             .then(r => r.ok ? r.json() : {}).then(d => { if (!cancelled) setPipelineCounts(d); }).catch(() => {});
         fetch(`${API_URL}/activity/recent?limit=8`, { credentials: 'include' })
             .then(r => r.ok ? r.json() : { activities: [] }).then(d => { if (!cancelled) setActivities(d.activities || []); }).catch(() => {});
 
-        return () => {
-            cancelled = true;
-        };
+        return () => { cancelled = true; };
     }, []);
 
-    // Estadisticas globales derivadas de los datos de la API
+    // Close dropdowns on outside click
+    useEffect(() => {
+        function handleClickOutside(e) {
+            if (weeklyRef.current && !weeklyRef.current.contains(e.target)) setWeeklyDropdownOpen(false);
+            if (standupRef.current && !standupRef.current.contains(e.target)) setStandupDropdownOpen(false);
+        }
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const handleStatusUpdate = async (e, agentId, newStatus) => {
+        e.stopPropagation();
+        try {
+            const res = await fetch(`${API_URL}/agents/${agentId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus }),
+            });
+            if (!res.ok) throw new Error(t('deptDetail.errorUpdating'));
+            setAgents(agents.map(a => a.id === agentId ? { ...a, status: newStatus } : a));
+        } catch (err) {
+            alert(err.message);
+        }
+    };
+
+    // Derived stats
     const globalStats = {
         totalAgents: agents.length,
-        activeAgents: agents.filter((a) => a.status === 'active').length,
-        totalSkills: new Set(agents.flatMap((a) => a.skills || [])).size,
-        totalTools: TOOLS.filter((t) => t.status === 'connected').length,
+        activeAgents: agents.filter(a => a.status === 'active').length,
+        totalSkills: new Set(agents.flatMap(a => a.skills || [])).size,
+        totalTools: TOOLS.filter(t => t.status === 'connected').length,
     };
+
+    // Group agents by department
+    const agentsByDept = {};
+    for (const agent of agents) {
+        if (!agentsByDept[agent.department]) agentsByDept[agent.department] = [];
+        agentsByDept[agent.department].push(agent);
+    }
 
     if (loading) {
         return (
@@ -121,11 +152,62 @@ export default function WorkspaceOverview() {
 
     return (
         <div className="dashboard-container animate-fade-in">
-            {/* Header */}
-            <header>
+            {/* Header with global dropdown buttons */}
+            <header className="workspace-header-row">
                 <div>
                     <h1>{t('workspace.title')}</h1>
                     <p className="subtitle">{t('workspace.subtitle')}</p>
+                </div>
+                <div className="workspace-header-actions">
+                    {/* Weekly Brainstorm dropdown */}
+                    <div className="workspace-dropdown-wrapper" ref={weeklyRef}>
+                        <button
+                            className="workspace-dropdown-btn"
+                            onClick={() => { setWeeklyDropdownOpen(!weeklyDropdownOpen); setStandupDropdownOpen(false); }}
+                        >
+                            {t('workspace.weeklyBrainstorm')}
+                            <ChevronDown size={14} />
+                        </button>
+                        {weeklyDropdownOpen && (
+                            <div className="workspace-dropdown">
+                                {departments.map(dept => (
+                                    <button
+                                        key={dept.id}
+                                        className="workspace-dropdown-item"
+                                        onClick={() => { navigate(`/app/workspace/${dept.id}/weekly`); setWeeklyDropdownOpen(false); }}
+                                    >
+                                        <span className="workspace-dropdown-item-icon">{DeptIcons[dept.id] || dept.emoji}</span>
+                                        <span>{dept.name}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Daily Standup dropdown */}
+                    <div className="workspace-dropdown-wrapper" ref={standupRef}>
+                        <button
+                            className="workspace-dropdown-btn"
+                            onClick={() => { setStandupDropdownOpen(!standupDropdownOpen); setWeeklyDropdownOpen(false); }}
+                        >
+                            {t('workspace.dailyStandup')}
+                            <ChevronDown size={14} />
+                        </button>
+                        {standupDropdownOpen && (
+                            <div className="workspace-dropdown">
+                                {departments.map(dept => (
+                                    <button
+                                        key={dept.id}
+                                        className="workspace-dropdown-item"
+                                        onClick={() => { navigate(`/app/workspace/${dept.id}/daily`); setStandupDropdownOpen(false); }}
+                                    >
+                                        <span className="workspace-dropdown-item-icon">{DeptIcons[dept.id] || dept.emoji}</span>
+                                        <span>{dept.name}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
             </header>
 
@@ -149,7 +231,7 @@ export default function WorkspaceOverview() {
                 </div>
             </section>
 
-            {/* Active Items — Command Center */}
+            {/* Active Items */}
             {(pipelineCounts.research_active > 0 || pipelineCounts.emails_active > 0 || pipelineCounts.experiments_active > 0) && (
                 <section style={{ marginBottom: 32 }}>
                     <h2 style={{ fontSize: '1.1rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '16px', color: 'var(--text-muted)' }}>
@@ -182,7 +264,7 @@ export default function WorkspaceOverview() {
             {activities.length > 0 && (
                 <section style={{ marginBottom: 32 }}>
                     <h2 style={{ fontSize: '1.1rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '16px', color: 'var(--text-muted)' }}>
-                        Recent Activity
+                        {t('workspace.recentActivity')}
                     </h2>
                     <div className="card" style={{ padding: 16 }}>
                         {activities.map((a, i) => (
@@ -196,53 +278,88 @@ export default function WorkspaceOverview() {
                 </section>
             )}
 
-            {/* Department Grid */}
-            <section style={{ marginBottom: '48px' }}>
-                <h2 style={{ fontSize: '1.1rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '20px', color: 'var(--text-muted)' }}>
-                    {t('workspace.departments')}
-                </h2>
-                <div className="workspace-dept-grid">
-                    {departments.map((dept) => (
-                        <div
-                            key={dept.id}
-                            className="workspace-dept-card card animate-fade-in"
-                            onClick={() => navigate(`/app/workspace/${dept.id}`)}
-                            style={{ '--dept-color': dept.color }}
-                        >
-                            <div className="dept-card-header">
-                                <div className="dept-card-emoji">{dept.emoji}</div>
-                                <div
-                                    className="dept-health-dot"
-                                    style={{ background: healthColors[dept.health] || healthColors.good }}
-                                    title={healthLabels[dept.health] || t('health.unknown')}
-                                ></div>
-                            </div>
+            {/* Layer Sections with Agent Cards */}
+            {departments.map(dept => {
+                const deptAgents = agentsByDept[dept.id] || [];
+                const activeCount = deptAgents.filter(a => a.status === 'active').length;
 
-                            <h3 className="dept-card-name">{dept.name}</h3>
-                            <p className="dept-card-desc">{dept.description}</p>
-
-                            <div className="dept-card-stats">
-                                <div className="dept-stat">
-                                    <span className="dept-stat-value">{dept.agentCount ?? 0}</span>
-                                    <span className="dept-stat-label">{t('workspace.agents')}</span>
-                                </div>
-                                <div className="dept-stat">
-                                    <span className="dept-stat-value">{dept.activeCount ?? 0}</span>
-                                    <span className="dept-stat-label">{t('workspace.active')}</span>
-                                </div>
+                return (
+                    <section key={dept.id} className="layer-section">
+                        <div className="layer-header" style={{ '--layer-color': dept.color }}>
+                            <div className="layer-header-info">
+                                <span className="layer-header-icon">{DeptIcons[dept.id] || dept.emoji}</span>
+                                <span className="layer-header-name">{dept.name}</span>
+                                <span className="layer-header-count">{deptAgents.length} {t('workspace.agents').toLowerCase()} · {activeCount} {t('workspace.active').toLowerCase()}</span>
                             </div>
                         </div>
-                    ))}
-                </div>
-            </section>
+
+                        <div className="agent-cards-grid">
+                            {deptAgents.map(agent => {
+                                const st = statusConfig[agent.status] || statusConfig.offline;
+
+                                return (
+                                    <div
+                                        key={agent.id}
+                                        className="card agent-card animate-fade-in"
+                                        style={{ '--layer-color': dept.color }}
+                                        onClick={() => navigate(`/app/workspace/agent/${agent.id}`)}
+                                    >
+                                        <div className="agent-card-header">
+                                            <div className="agent-avatar-wrapper">
+                                                <span className="agent-avatar">{AgentAvatarIcons[agent.id] || <Bot size={18} />}</span>
+                                                <span className="agent-status-dot" style={{ background: st.color }}></span>
+                                            </div>
+                                            <div>
+                                                <h3 className="agent-name">{agent.name}</h3>
+                                                <p className="agent-role">{agent.role}</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Hover-only status controls */}
+                                        <div className="agent-card-hover-controls">
+                                            {['active', 'idle', 'offline'].map(s => (
+                                                <button
+                                                    key={s}
+                                                    onClick={(e) => handleStatusUpdate(e, agent.id, s)}
+                                                    className={`agent-status-btn ${agent.status === s ? 'agent-status-btn-active' : ''}`}
+                                                    style={agent.status === s ? { background: statusConfig[s].color } : {}}
+                                                    title={`Set ${s}`}
+                                                >
+                                                    {s[0].toUpperCase()}
+                                                </button>
+                                            ))}
+                                        </div>
+
+                                        {/* Skills */}
+                                        <div className="agent-card-skills">
+                                            {(agent.skills || []).map(skillName => (
+                                                <span key={skillName} className="skill-tag">{skillName}</span>
+                                            ))}
+                                        </div>
+
+                                        {/* Tools */}
+                                        {agent.tools && agent.tools.length > 0 && (
+                                            <div className="agent-card-skills" style={{ marginTop: '4px' }}>
+                                                {agent.tools.map(tool => (
+                                                    <span key={tool} className="skill-tag" style={{ opacity: 0.7 }}>{tool}</span>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </section>
+                );
+            })}
 
             {/* Tools Overview */}
-            <section>
+            <section style={{ marginTop: '16px' }}>
                 <h2 style={{ fontSize: '1.1rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '20px', color: 'var(--text-muted)' }}>
                     {t('workspace.connectedTools')}
                 </h2>
                 <div className="tools-grid">
-                    {TOOLS.map((tool) => (
+                    {TOOLS.map(tool => (
                         <div key={tool.id} className="card tool-card animate-fade-in" onClick={() => navigate(`/app/workspace/tool/${tool.id}`)} style={{ cursor: 'pointer' }}>
                             <div className="tool-card-header">
                                 <span className="tool-icon">{tool.icon}</span>

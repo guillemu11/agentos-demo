@@ -5,7 +5,7 @@ import DailyEodModal from '../components/DailyEodModal.jsx';
 import DailyCoverageAlert from '../components/DailyCoverageAlert.jsx';
 import DailyTrends from '../components/DailyTrends.jsx';
 import DailyAiSummary from '../components/DailyAiSummary.jsx';
-import { MoodIcons, StandupIcons, DailyTabIcons, StatusIcons } from '../components/icons.jsx';
+import { MoodIcons, StandupIcons, DailyTabIcons, StatusIcons, AgentAvatar } from '../components/icons.jsx';
 import { Loader2 } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
@@ -377,7 +377,7 @@ export default function DailyStandup() {
                                     <div key={i} className="standup-item standup-item-done animate-fade-in">
                                         <p className="standup-item-desc">{item.description}</p>
                                         <div className="standup-item-meta">
-                                            <span className="standup-item-agent">{item.agentAvatar} {item.agentName}</span>
+                                            <span className="standup-item-agent"><AgentAvatar agentId={item.agentId} size={14} /> {item.agentName}</span>
                                             {item.duration && <span className="standup-item-duration">{StandupIcons.timer} {item.duration}</span>}
                                         </div>
                                     </div>
@@ -401,7 +401,7 @@ export default function DailyStandup() {
                                             <div className="standup-item-progress-fill" style={{ width: `${item.progress}%` }}></div>
                                         </div>
                                         <div className="standup-item-meta">
-                                            <span className="standup-item-agent">{item.agentAvatar} {item.agentName}</span>
+                                            <span className="standup-item-agent"><AgentAvatar agentId={item.agentId} size={14} /> {item.agentName}</span>
                                             <span className="standup-item-pct">{item.progress}%</span>
                                         </div>
                                     </div>
@@ -424,7 +424,7 @@ export default function DailyStandup() {
                                         <div key={i} className="standup-item standup-item-blocked animate-fade-in">
                                             <p className="standup-item-desc">{item.description}</p>
                                             <div className="standup-item-meta">
-                                                <span className="standup-item-agent">{item.agentAvatar} {item.agentName}</span>
+                                                <span className="standup-item-agent"><AgentAvatar agentId={item.agentId} size={14} /> {item.agentName}</span>
                                                 <span className="standup-severity" style={{ background: sev.bg, color: sev.color }}>
                                                     {sev.label}
                                                 </span>
@@ -444,7 +444,7 @@ export default function DailyStandup() {
                             <div className="standup-insights-list">
                                 {standup.insights.map((item, i) => (
                                     <div key={i} className="standup-insight animate-fade-in">
-                                        <span className="standup-insight-agent">{item.agentAvatar} {item.agentName}</span>
+                                        <span className="standup-insight-agent"><AgentAvatar agentId={item.agentId} size={14} /> {item.agentName}</span>
                                         <p className="standup-insight-text">{item.text}</p>
                                     </div>
                                 ))}

@@ -5,6 +5,7 @@ import { EXPERIMENTS, EXPERIMENT_LOG, CAMPAIGN_QUEUE } from '../data/autoResearc
 import ExperimentCard from './ExperimentCard.jsx';
 import ResearchChart from './ResearchChart.jsx';
 import KnowledgeBasePanel from './KnowledgeBasePanel.jsx';
+import { MessageSquare, Brain } from 'lucide-react';
 
 const OUTCOME_CONFIG = {
   challenger_promoted: { cls: 'promoted', label: 'C' },
@@ -76,7 +77,7 @@ export default function ResearchLabTab() {
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600 }}>{log.campaignName} — Run {log.runNumber}</div>
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.68rem' }}>
-                      {log.outcome === 'challenger_promoted' ? 'Challenger promoted' : log.outcome === 'baseline_kept' ? 'Baseline kept' : 'Inconclusive'} · 💬 WA
+                      {log.outcome === 'challenger_promoted' ? 'Challenger promoted' : log.outcome === 'baseline_kept' ? 'Baseline kept' : 'Inconclusive'} · <MessageSquare size={11} style={{ verticalAlign: 'middle' }} /> WA
                     </div>
                   </div>
                   <span style={{ fontWeight: 700, color: isPos ? 'var(--wa-green)' : '#f87171' }}>{log.delta}</span>
@@ -102,7 +103,7 @@ export default function ResearchLabTab() {
                   <div style={{ width: 7, height: 7, borderRadius: '50%', background: cfg.color, flexShrink: 0 }} />
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '0.78rem', fontWeight: 500 }}>{item.name}</div>
-                    <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>💬 WhatsApp · Run #{item.runNumber}</div>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}><MessageSquare size={11} style={{ verticalAlign: 'middle' }} /> WhatsApp · Run #{item.runNumber}</div>
                   </div>
                   <span style={{ fontSize: '0.68rem', fontWeight: 600, color: cfg.color }}>{cfg.label}</span>
                 </div>
@@ -113,7 +114,7 @@ export default function ResearchLabTab() {
           {/* Agent insight */}
           <div className="research-insight-box">
             <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--wa-green)', marginBottom: 8 }}>
-              🧠 {t('researchLab.agentInsight')} — just now
+              <Brain size={14} style={{ verticalAlign: 'middle' }} /> {t('researchLab.agentInsight')} — just now
             </div>
             <div style={{ fontSize: '0.78rem', color: '#c4c4cc', lineHeight: 1.5 }}>
               Run #14 challenger is trending <strong style={{ color: '#e1e1e6' }}>+52% above baseline</strong>. If it holds, <strong style={{ color: '#e1e1e6' }}>Thursday 09:30 GST + name-first copy</strong> becomes the new default for all WhatsApp expiry campaigns.

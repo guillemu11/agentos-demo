@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Lock } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import PIPELINE_TEMPLATES from '../data/pipelineTemplates.js';
 
@@ -122,7 +123,7 @@ export default function PipelineSelector({ projectId, onCreated }) {
                             {agents.filter(a => a.department === stage.department).length === 0 &&
                                 agents.map(a => <option key={a.id} value={a.id}>{a.name} ({a.department})</option>)}
                         </select>
-                        {stage.gate_type === 'human_approval' && <span className="gate-badge">🔒 Gate</span>}
+                        {stage.gate_type === 'human_approval' && <span className="gate-badge"><Lock size={12} /> Gate</span>}
                         <div className="stage-actions">
                             <button onClick={() => moveStage(i, -1)} disabled={i === 0}>↑</button>
                             <button onClick={() => moveStage(i, 1)} disabled={i === stages.length - 1}>↓</button>

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
-import { Send } from 'lucide-react';
+import { Send, ClipboardList } from 'lucide-react';
+import { LangIcon, AgentAvatar } from '../icons.jsx';
 import renderMarkdown from '../../utils/renderMarkdown.js';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
@@ -25,7 +26,7 @@ function parseBriefUpdates(chunk) {
   return { textChunk, briefUpdates };
 }
 
-const MARKET_FLAGS_INLINE = { en: '🇬🇧', es: '🇪🇸', ar: '🇦🇪', ru: '🇷🇺' };
+// Market labels used inline — LangIcon handles rendering
 
 // Mirror of the backend regex — used only to show skeleton immediately
 const IMAGE_REQUEST_RE = /\b(imagen?|image|foto|photo|banner|hero|visual|picture|ilustra|generat|crea(?:r)?|diseña|design|make)\b.{0,80}\b(imagen?|image|foto|photo|banner|hero|avion|plane|aircraft|logo|background|fondo)\b/i;
@@ -262,7 +263,7 @@ export default function ContentChatPanel({ agent, ticket, completedSessions, act
   if (!ticket) {
     return (
       <div className="content-chat-panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, color: 'var(--text-muted)', fontSize: '0.9rem', padding: 32 }}>
-        <div style={{ fontSize: '2rem' }}>📋</div>
+        <div style={{ fontSize: '2rem' }}><ClipboardList size={32} /></div>
         <div style={{ fontWeight: 600 }}>{t('contentAgent.noTicketSelected') || 'No hay ticket activo'}</div>
         <div style={{ fontSize: '0.8rem', textAlign: 'center', maxWidth: 240, lineHeight: 1.6 }}>
           {t('contentAgent.selectTicketHint') || 'Ve a la tab "Tickets" y selecciona un proyecto para empezar a trabajar con Lucia.'}
@@ -276,7 +277,7 @@ export default function ContentChatPanel({ agent, ticket, completedSessions, act
       {/* Agent header */}
       <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: 8, background: '#fff' }}>
         <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>
-          {agent.avatar || '✍️'}
+          <AgentAvatar agentId={agent.id} size={16} />
         </div>
         <div>
           <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#1e293b' }}>{agent.name}</div>
@@ -333,7 +334,7 @@ export default function ContentChatPanel({ agent, ticket, completedSessions, act
                     <div key={j} className={`brief-inline-market-row${u.status === 'generating' ? ' generating' : ''}`}>
                       <div className="brief-inline-market-value">
                         <span style={{ fontSize: '0.72rem', fontWeight: 700, marginRight: 6 }}>
-                          {MARKET_FLAGS_INLINE[u.variant?.split(':')[0]] || '🌐'} {u.variant?.toUpperCase().replace(':', ' / ')}
+                          <LangIcon lang={u.variant?.split(':')[0] || 'en'} /> {u.variant?.toUpperCase().replace(':', ' / ')}
                         </span>
                         {u.status === 'generating' ? '...' : u.value}
                       </div>

@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { FlaskConical } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { WA_CAMPAIGNS } from '../data/emiratesWhatsAppCampaigns.js';
 import WaCampaignCard from './WaCampaignCard.jsx';
@@ -29,7 +30,7 @@ export default function WaTab() {
           <strong>{avgResponse}%</strong>&nbsp;{t('whatsapp.summaryAvgResponse')}
         </div>
         <div className="wa-research-banner">
-          <span style={{ fontSize: '1.2rem' }}>🔬</span>
+          <FlaskConical size={20} />
           <div style={{ flex: 1 }}>
             <div style={{ fontWeight: 700, fontSize: '0.8rem', color: 'var(--wa-green)', marginBottom: 2 }}>
               {t('whatsapp.researchBannerTitle').replace('{n}', researchCount)}

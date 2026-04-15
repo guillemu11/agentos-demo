@@ -1,4 +1,5 @@
 import { useLanguage } from '../i18n/LanguageContext.jsx';
+import { MessageSquare } from 'lucide-react';
 
 export default function ExperimentCard({ experiment }) {
   const { t } = useLanguage();
@@ -10,7 +11,7 @@ export default function ExperimentCard({ experiment }) {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px 10px', borderBottom: '1px solid var(--border)' }}>
         <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '2px 8px', borderRadius: 8, background: 'var(--wa-green-dim)', color: 'var(--wa-green)' }}>
-          💬 WhatsApp
+          <MessageSquare size={11} style={{ verticalAlign: 'middle' }} /> WhatsApp
         </span>
         <span style={{ fontWeight: 600, fontSize: '0.85rem', flex: 1 }}>{experiment.campaignName}</span>
         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Run #{experiment.runNumber}</span>

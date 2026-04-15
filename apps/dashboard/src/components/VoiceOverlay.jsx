@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { useGeminiVoice } from '../hooks/useGeminiVoice.js';
 import { Mic, MicOff, Phone, PhoneOff, Wifi, WifiOff } from 'lucide-react';
+import { AgentAvatar } from './icons.jsx';
 
 /**
  * Full-screen voice conversation overlay.
@@ -58,7 +59,7 @@ export default function VoiceOverlay({ agentId, agentName, agentAvatar, campaign
                 {/* Agent avatar */}
                 <div className={`voice-overlay-avatar ${speaking ? 'speaking' : ''} ${listening ? 'listening' : ''}`}>
                     <span className="voice-overlay-avatar-text">
-                        {agentAvatar || '🤖'}
+                        <AgentAvatar agentId={agentId} size={28} />
                     </span>
                     {speaking && (
                         <div className="voice-overlay-rings">

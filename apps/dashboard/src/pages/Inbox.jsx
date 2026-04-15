@@ -11,6 +11,10 @@ export default function Inbox() {
     const [selectedItemId, setSelectedItemId] = useState(null);
     const [refreshKey, setRefreshKey] = useState(0);
     const [drawerOpen, setDrawerOpen] = useState(false);
+    // Separate key for forcing PMAgentChat remount: only bumps on explicit panel
+    // selection / close / delete — NOT when the chat creates a new item mid-stream
+    // (otherwise the first message remounts the component and kills the SSE reader).
+    const [chatMountKey, setChatMountKey] = useState(0);
 
     // Close drawer on Escape key
     useEffect(() => {
@@ -37,16 +41,21 @@ export default function Inbox() {
 
     function handleSelectItem(id) {
         setSelectedItemId(id);
+        setChatMountKey(k => k + 1); // explicit panel selection → fresh chat
         setDrawerOpen(false);
     }
 
     function handleCloseChat() {
         setSelectedItemId(null);
+        setChatMountKey(k => k + 1); // closing → fresh chat next time
         setRefreshKey(k => k + 1);
         setDrawerOpen(true);
     }
 
     function handleItemCreated(newId) {
+        // Chat just created a new inbox item mid-stream. Update the id so the
+        // panel highlights it and future actions reference it, but DO NOT bump
+        // chatMountKey — we need the same component instance to keep streaming.
         setSelectedItemId(newId);
         setRefreshKey(k => k + 1);
     }
@@ -78,7 +87,7 @@ export default function Inbox() {
             {/* Chat: always visible, full-width */}
             <div className="inbox-chat-main">
                 <PMAgentChat
-                    key={selectedItemId ?? 'new'}
+                    key={chatMountKey}
                     inboxItemId={selectedItemId}
                     onItemCreated={handleItemCreated}
                     onStatusChange={handleStatusChange}

@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
+import { DeptIcons, AgentAvatarIcons } from '../components/icons.jsx';
+import { Bot } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -111,7 +113,7 @@ export default function DepartmentDetail() {
             <header style={{ marginBottom: '32px' }}>
                 <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '8px' }}>
-                        <span style={{ fontSize: '2.5rem' }}>{dept.emoji}</span>
+                        <span style={{ fontSize: '2.5rem', display: 'inline-flex' }}>{DeptIcons[dept.id] || dept.emoji}</span>
                         <div>
                             <h1 style={{ marginBottom: '4px' }}>{dept.name}</h1>
                             <p className="subtitle">{dept.description}</p>
@@ -190,7 +192,7 @@ export default function DepartmentDetail() {
                                 {/* Agent Header */}
                                 <div className="agent-card-header">
                                     <div className="agent-avatar-wrapper">
-                                        <span className="agent-avatar">{agent.avatar}</span>
+                                        <span className="agent-avatar">{AgentAvatarIcons[agent.id] || <Bot size={18} />}</span>
                                         <span className="agent-status-dot" style={{ background: st.color }}></span>
                                     </div>
                                     <div>

@@ -99,7 +99,7 @@ export default function CampaignDetail() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
                             <h1 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0 }}>{waCampaign.name}</h1>
                             <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '2px 8px', borderRadius: 8, background: 'var(--wa-green-dim)', color: 'var(--wa-green)', border: '1px solid var(--wa-green-border)' }}>
-                                💬 WhatsApp
+                                <MessageSquare size={11} style={{ verticalAlign: 'middle' }} /> WhatsApp
                             </span>
                             <span className="campaign-status-badge live">● {waCampaign.status}</span>
                             {waCampaign.autoResearch.active && (
@@ -147,7 +147,7 @@ export default function CampaignDetail() {
                 {/* AutoResearch tab */}
                 {activeTab === 'autoresearch' && (
                     <div className="card" style={{ padding: 32, textAlign: 'center' }}>
-                        <div style={{ fontSize: '1.5rem', marginBottom: 12 }}>🔬</div>
+                        <div style={{ fontSize: '1.5rem', marginBottom: 12 }}><Zap size={28} /></div>
                         <p style={{ color: 'var(--text-muted)', marginBottom: 16 }}>
                             {waCampaign.autoResearch.active
                                 ? `Run #${waCampaign.autoResearch.runNumber} active — challenger up +${waCampaign.autoResearch.lift}%`

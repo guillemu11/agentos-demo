@@ -3,7 +3,7 @@ import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { useGeminiLive } from '../hooks/useGeminiLive.js';
 import renderMarkdown from '../utils/renderMarkdown.js';
 import { InboxIcons } from './icons.jsx';
-import { FileEdit, Rocket, MessageSquare, Mic, MicOff, PhoneOff, Loader, Send, ChevronUp, ChevronDown, Trash2, ShieldCheck, ShieldOff } from 'lucide-react';
+import { FileEdit, Rocket, MessageSquare, Mic, MicOff, PhoneOff, Loader, Send, ChevronUp, ChevronDown, Trash2, ShieldCheck, ShieldOff, Lock } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -147,7 +147,7 @@ export default function PMAgentChat({ inboxItemId, onItemCreated, onStatusChange
 
             const ragHeader = res.headers.get('X-RAG-Sources');
             if (ragHeader) {
-                try { setRagSources(JSON.parse(ragHeader)); } catch { /* ignore */ }
+                try { setRagSources(JSON.parse(decodeURIComponent(ragHeader))); } catch { /* ignore */ }
             }
 
             const newItemId = res.headers.get('X-Inbox-Item-Id');
@@ -472,7 +472,7 @@ export default function PMAgentChat({ inboxItemId, onItemCreated, onStatusChange
                                             <span className="draft-stage-dept">{stage.department}</span>
                                             {stage.gate_type === 'human_approval' && (
                                                 <span className="draft-gate-tag" onClick={() => toggleGate(idx)} title={stage.gate_reason || t('pmChat.removeGate')}>
-                                                    🔒 {t('pmChat.gate')}
+                                                    <Lock size={12} style={{ verticalAlign: 'middle' }} /> {t('pmChat.gate')}
                                                 </span>
                                             )}
                                         </div>
