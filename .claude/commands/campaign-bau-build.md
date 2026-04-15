@@ -5,6 +5,68 @@ Given a campaign type and content, automatically creates folder hierarchy,
 duplicates the email template, duplicates placeholder DEs, generates images,
 fills content, and produces a preview.
 
+## Two execution modes
+
+This skill has **two distinct modes** that share low-level primitives but differ
+radically in orchestration. Pick the right one before invoking.
+
+### Mode A: CLI end-to-end (this skill file)
+
+Used when working conversationally in Claude Code. Writes DEs straight to MC
+and renders **after** the push. No human gate.
+
+Flow: Plan → `ensureFolderHierarchy` → `duplicateEmail` → `duplicateAllDEs` →
+generate images + `uploadImage` → `fillDERows` → render preview via
+`buildCampaignEmails({ assetId: newEmailId })` (reads the freshly written DEs).
+
+This is what the rest of this document describes.
+
+### Mode B: Dashboard UI (human-in-the-loop)
+
+Used from the AgentOS dashboard at `/app/campaigns/create`. Generates a preview
+**before** writing anything to MC, so a human approves variants before commit.
+
+Flow:
+1. `packages/core/campaign-builder/phase-a-prepare.js` → builds preview HTML
+   without touching MC (block-level rendering, detailed below)
+2. Preview gate (UI) → user approves variants
+3. `packages/core/campaign-builder/phase-b-push.js` → writes to MC using the
+   same primitives (`buildBAUCampaign`, `uploadImage`, `fillDERows`) with the
+   approved content
+
+**Critical differences from Mode A:**
+
+- Phase A fetches blocks directly and asks Claude to emit **filled block HTML**
+  per language. Does NOT reuse `buildCampaignEmails` / `renderAllVariants` —
+  those are designed for reading real DEs from MC and break on synthetic rows.
+- Block fetch is **recursive**: follows every `ContentBlockbyID` reference.
+  Emirates templates nest 2-3 levels (top-level wrapper → language logic block
+  → actual content sub-block). Fetching only top-level = empty wrappers.
+- Top-level blocks get nested refs **pre-inlined** (substitute
+  `%%=ContentBlockbyID("X")=%%` with block X's HTML, depth ≤ 6 for cycles)
+  before sending to Claude.
+- Per target language, a regex pass (`selectLanguageBranch`) collapses
+  `IF @language == "ENGLISH" ELSEIF "ARABIC" …` chains down to the active
+  branch. Emirates blocks include ~25 language branches; without this the
+  Claude prompt hits ~1.1M tokens and fails.
+- Claude call **must use streaming** (`anthropic.messages.stream` +
+  `on('text')` + `await finalMessage()`). `messages.create` rejects with
+  *"Streaming is required for operations that may take longer than 10 minutes"*
+  for prompts this size.
+- Claude returns `{ blocks: { "<id>": "<filled HTML>" } }`. Image references
+  come back as `[[IMG: description]]` tokens that the server post-processes
+  with Imagen (cache by prompt to avoid redundant generation).
+- Final HTML = concatenated filled blocks (in template block order) wrapped in
+  `email_blocks/template_style.html` shell.
+
+See `packages/core/campaign-builder/phase-a-prepare.js` for the canonical
+implementation. See `.claude/tasks/lessons.md` (entry 2026-04-15 BAU preview
+gate) for the debugging trail.
+
+---
+
+## Mode A details (CLI end-to-end)
+
 ## How to use
 
 The user provides a **campaign type** and a **brief** (market, content, languages).

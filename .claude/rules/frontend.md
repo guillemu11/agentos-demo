@@ -45,9 +45,11 @@ paths:
 
 ## Iconos
 
-- `lucide-react` para iconos generales
-- Emojis para avatares de agentes (definidos en mockData.js)
+- `lucide-react` para TODOS los iconos — cero emojis en UI
+- Avatares de agentes: usar `AgentAvatar` component de `icons.jsx` (no `agent.avatar`)
+- Mercados: usar `LangIcon` component de `icons.jsx` (no flag emojis)
 - Iconos de navegacion centralizados en `components/icons.jsx`
+- Mapas de iconos por dominio: `AgentAvatarIcons`, `DeptIcons`, `SkillIcons`, `BauCategoryIcons`, etc.
 
 ## Voz
 
