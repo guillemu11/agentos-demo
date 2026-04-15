@@ -56,6 +56,10 @@ function emitFixed(range, out) {
     const iter = new Date(start.getFullYear(), start.getMonth(), 1);
     while (iter <= end) {
       const fixedDate = new Date(iter.getFullYear(), iter.getMonth(), cfg.dayOfMonth);
+      if (fixedDate.getMonth() !== iter.getMonth()) {
+        iter.setMonth(iter.getMonth() + 1);
+        continue;
+      }
       const iso = toIsoDate(fixedDate);
       if (inRange(iso, range.start, range.end)) {
         const source = CAMPAIGNS.find(c => c.id === campaignId);
@@ -104,6 +108,7 @@ function emitAlwaysOn(range, out) {
 }
 
 export function buildCalendarEvents(startDate, endDate) {
+  if (startDate > endDate) return [];
   const range = { start: startDate, end: endDate };
   const out = [];
   emitScheduledBau(range, out);

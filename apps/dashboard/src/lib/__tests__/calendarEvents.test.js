@@ -40,25 +40,43 @@ describe('buildCalendarEvents', () => {
     expect(cart.endDate).toBe('2026-04-30');
   });
 
-  it('each event has required shape', () => {
+  it('every event has required shape across all flavors', () => {
     const events = buildCalendarEvents(RANGE.start, RANGE.end);
-    const ev = events[0];
-    expect(ev).toMatchObject({
-      id: expect.any(String),
-      campaignId: expect.any(String),
-      campaignName: expect.any(String),
-      group: expect.any(String),
-      flavor: expect.stringMatching(/^(fixed|scheduled|always-on)$/),
-      startDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
-      endDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
-      channel: expect.any(String),
-      color: expect.stringMatching(/^#/),
-    });
+    const scheduled = events.find(e => e.flavor === 'scheduled');
+    const fixed = events.find(e => e.flavor === 'fixed');
+    const alwaysOn = events.find(e => e.flavor === 'always-on');
+    expect(scheduled).toBeDefined();
+    expect(fixed).toBeDefined();
+    expect(alwaysOn).toBeDefined();
+    for (const ev of [scheduled, fixed, alwaysOn]) {
+      expect(ev).toMatchObject({
+        id: expect.any(String),
+        campaignId: expect.any(String),
+        campaignName: expect.any(String),
+        group: expect.any(String),
+        flavor: expect.stringMatching(/^(fixed|scheduled|always-on)$/),
+        startDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        channel: expect.any(String),
+        color: expect.stringMatching(/^#/),
+      });
+    }
   });
 
   it('always-on events include projected monthly volume', () => {
     const events = buildCalendarEvents(RANGE.start, RANGE.end);
     const cart = events.find(e => e.campaignId === 'cart-abandon');
     expect(cart.projectedVolume).toBeGreaterThan(0);
+  });
+
+  it('emits one fixed event per month across a multi-month range', () => {
+    const events = buildCalendarEvents('2026-04-01', '2026-05-31');
+    const statements = events.filter(e => e.campaignId === 'statement-email');
+    expect(statements).toHaveLength(2);
+    expect(statements.map(e => e.startDate).sort()).toEqual(['2026-04-14', '2026-05-14']);
+  });
+
+  it('returns empty array for inverted range (start > end)', () => {
+    expect(buildCalendarEvents('2026-04-30', '2026-04-01')).toEqual([]);
   });
 });
