@@ -9,13 +9,28 @@ assets/kb/
 # Archivos temporales y de prueba
 *.png
 *.pdf
+*.csv
+*.doc
+*.docx
 email-blocks-preview.html
 qr_qatarairways_com.html
 view_e_emirates_email.html
 "view_e_emirates_email (1).html"
+view_e_emirates_email*.html
+debug-variant.html
 tmp_pipeline.json
 apps/dashboard/fix_pwd.cjs
 apps/dashboard/public/temp-images/
+apps/dashboard/query-kb-tmp.js
+
+# Dumps MC API / exploracion email builder (contienen datos sensibles)
+tmp-mc-preview/
+email_blocks/
+IFRAME_CREATECAMPAIGN
+restart.bat
+
+# Locks de scheduled tasks
+.claude/scheduled_tasks.lock
 
 # Config local
 .vscode/
