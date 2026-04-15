@@ -34,6 +34,8 @@ import CampaignCreationPage from './pages/CampaignCreationPage.jsx';
 import PreviewTestPage from './pages/PreviewTestPage.jsx';
 import CompetitorAnalysisPage from './pages/CompetitorAnalysisPage.jsx';
 import BrandAuditPage from './pages/BrandAuditPage.jsx';
+import JourneysListPage from './pages/JourneysListPage.jsx';
+import JourneyBuilderPage from './pages/JourneyBuilderPage.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -133,8 +135,11 @@ createRoot(document.getElementById('root')).render(
                       <Route path="/preview-test" element={<PreviewTestPage />} />
                       <Route path="/competitor-analysis" element={<CompetitorAnalysisPage />} />
                       <Route path="/brand-audit" element={<BrandAuditPage />} />
+                      <Route path="/journeys" element={<JourneysListPage />} />
                       <Route path="/settings" element={<SettingsPage />} />
                     </Route>
+                    {/* Journey builder — full-screen */}
+                    <Route path="/journeys/:id" element={<JourneyBuilderPage />} />
                     {/* Studio routes — full-screen, no sidebar */}
                     <Route path="/workspace/agent/content-agent/studio" element={<ContentStudioPage />} />
                     <Route path="/workspace/agent/html-developer/studio" element={<EmailStudioPage />} />
