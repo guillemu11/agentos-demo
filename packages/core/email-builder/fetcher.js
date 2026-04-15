@@ -101,6 +101,51 @@ export function deriveCampaignHint(emailName) {
   return null;
 }
 
+/**
+ * Search Marketing Cloud for email/templatebasedemail assets whose name
+ * matches `query` (case-insensitive substring). Returns top-N ordered by
+ * modifiedDate descending — most recently edited first.
+ *
+ * Used by the email-build skill to disambiguate between multiple candidates
+ * when the user provides a name instead of a specific asset ID.
+ */
+export async function searchEmailAssets(mcClient, query, { limit = 10 } = {}) {
+  if (!query || !query.trim()) throw new Error('searchEmailAssets: query is required');
+  const q = query.trim();
+
+  // Asset type IDs for emails: 207 (templatebasedemail), 208 (htmlemail), 206 (textonlyemail)
+  const body = {
+    page: { page: 1, pageSize: Math.max(limit * 5, 50) },
+    query: {
+      leftOperand: {
+        leftOperand: { property: 'name', simpleOperator: 'like', value: q },
+        logicalOperator: 'AND',
+        rightOperand: { property: 'assetType.id', simpleOperator: 'equal', value: 207 },
+      },
+      logicalOperator: 'OR',
+      rightOperand: {
+        leftOperand: { property: 'name', simpleOperator: 'like', value: q },
+        logicalOperator: 'AND',
+        rightOperand: { property: 'assetType.id', simpleOperator: 'equal', value: 208 },
+      },
+    },
+    sort: [{ property: 'modifiedDate', direction: 'DESC' }],
+    fields: ['id', 'name', 'assetType', 'modifiedDate', 'createdDate', 'category'],
+  };
+
+  const resp = await mcClient.rest('POST', '/asset/v1/content/assets/query', body);
+  const items = resp?.items || [];
+  return items.slice(0, limit).map(a => ({
+    id: a.id,
+    name: a.name,
+    assetType: a.assetType?.name || '',
+    modifiedDate: a.modifiedDate,
+    createdDate: a.createdDate,
+    categoryId: a.category?.id,
+    categoryName: a.category?.name,
+  }));
+}
+
 export async function resolveEmailTemplate(mcClient, assetId, options = {}) {
   const onProgress = options.onProgress || (() => {});
 
@@ -251,11 +296,14 @@ export async function fetchCampaignData(manifest, mcClient, options = {}) {
     }
     onProgress('de', `  DE "${de.name}" → key: ${externalKey}`);
 
-    // Fetch all rows. Stories DEs can be very large (2000+ rows), so
-    // increase limit for DEs with 'stories' or 'story' in the name.
-    const isLargeDE = de.name.toLowerCase().includes('stories') || de.name.toLowerCase().includes('story');
-    // Stories_Ref_Table_shortlink has ~5-6k rows (28 languages × ~200 stories).
-    // 2500 dropped whole language slices → story name lookups returned empty.
+    // Fetch all rows. Stories / FeaturedItems / centralized_products DEs can
+    // be very large (2000+ rows across 28 languages). Bump the cap so name
+    // lookups resolve beyond the first 500 rows.
+    const lcName = de.name.toLowerCase();
+    const isLargeDE = lcName.includes('stories') || lcName.includes('story')
+      || lcName.includes('featureditems') || lcName.includes('featured_items')
+      || lcName.includes('centralized_products') || lcName.includes('centralized_blocks')
+      || lcName.includes('impression');
     const rows = await queryDE(mcClient, externalKey, null, isLargeDE ? 20000 : 500);
 
     deData[de.name] = rows;

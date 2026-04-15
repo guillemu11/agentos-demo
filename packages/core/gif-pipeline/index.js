@@ -32,7 +32,8 @@ export async function runPipeline(mode, prompt, options, emit, ctx) {
     return runImagePipeline(prompt, options, emit, ctx);
   }
   if (mode === 'slideshow') {
-    throw new Error('Mode "slideshow" not implemented yet (see Phase 2)');
+    const { runSlideshowPipeline } = await import('./slideshow.js');
+    return runSlideshowPipeline(prompt, options, emit, ctx);
   }
   if (mode === 'veo') {
     throw new Error('Mode "veo" not implemented yet (see Phase 4)');

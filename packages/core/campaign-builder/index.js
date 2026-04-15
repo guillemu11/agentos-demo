@@ -286,7 +286,7 @@ async function findSubfolders(mc, parentId) {
 }
 
 function escapeXml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ─── SOAP shared_dataextension folder creation ─────────────────────────────────
@@ -294,10 +294,24 @@ function escapeXml(str) {
 // "unknown error". This was discovered empirically — the MC docs don't mention it.
 
 async function createDEFolder(mc, name, parentId) {
+  // Before trying to create, check if a folder with this name already exists
+  // under the parent. Previous partial attempts can leave folders behind and
+  // MC returns opaque "unknown error" codes for CustomerKey collisions.
+  const nameStr = String(name);
+  const preExisting = await findSubfolders(mc, parentId);
+  const preMatch = preExisting.find(f => String(f.name) === nameStr);
+  if (preMatch) return preMatch.id;
+
+  // Use a fresh UUID for CustomerKey so uniqueness is guaranteed.
+  // MC doesn't expose CustomerKey in folder listings anyway — the Name is the
+  // human-readable identifier users see.
+  const { randomUUID } = await import('node:crypto');
+  const customerKey = randomUUID();
+
   const xml = await mc.soap('Create', `<CreateRequest xmlns="http://exacttarget.com/wsdl/partnerAPI">
     <Objects xsi:type="DataFolder" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-      <CustomerKey>${escapeXml(name)}</CustomerKey>
-      <Name>${escapeXml(name)}</Name>
+      <CustomerKey>${customerKey}</CustomerKey>
+      <Name>${escapeXml(nameStr)}</Name>
       <Description></Description>
       <ParentFolder><ID>${parentId}</ID></ParentFolder>
       <ContentType>shared_dataextension</ContentType>
@@ -310,13 +324,13 @@ async function createDEFolder(mc, name, parentId) {
   const newId = xml.match(/<NewID>([^<]+)/)?.[1];
   const msg = xml.match(/<StatusMessage>([^<]+)/)?.[1] || '';
   if (status !== 'OK') {
-    // Check if duplicate
-    if (msg.includes('already exists') || msg.includes('duplicate')) {
-      const existing = await findSubfolders(mc, parentId);
-      const match = existing.find(f => f.name === name);
-      if (match) return match.id;
-    }
-    throw new Error(`Failed to create DE folder "${name}": ${msg}`);
+    // Any non-OK status: re-query children once more. MC sometimes throws
+    // "unknown error" when it actually committed the row, or when a concurrent
+    // request won the race. If the folder now exists by name, use its ID.
+    const after = await findSubfolders(mc, parentId);
+    const hit = after.find(f => String(f.name) === nameStr);
+    if (hit) return hit.id;
+    throw new Error(`Failed to create DE folder "${nameStr}": ${msg || 'unknown MC error'}`);
   }
   return newId;
 }
@@ -324,19 +338,52 @@ async function createDEFolder(mc, name, parentId) {
 // ─── REST Content Builder category (folder) helpers ────────────────────────────
 
 async function findOrCreateCBCategory(mc, parentId, name, log) {
-  // Search existing
-  const search = await mc.rest('GET', `/asset/v1/content/categories?$filter=${encodeURIComponent(`parentId eq ${parentId}`)}&$pageSize=50`);
-  const existing = (search?.items || []).find(c => c.name === name);
+  // Normalize name to string — MC returns folder names as strings. Passing
+  // a Number (e.g. year 2026) would break strict `===` comparison below.
+  const target = String(name);
+
+  // Paginate the category listing so deep/large hierarchies still resolve.
+  async function findExisting() {
+    let page = 1;
+    while (page <= 20) {
+      const res = await mc.rest(
+        'GET',
+        `/asset/v1/content/categories?$filter=${encodeURIComponent(`parentId eq ${parentId}`)}&$pageSize=50&$page=${page}`
+      );
+      const items = res?.items || [];
+      const hit = items.find(c => String(c.name) === target);
+      if (hit) return hit;
+      if (items.length < 50) return null;
+      page += 1;
+    }
+    return null;
+  }
+
+  const existing = await findExisting();
   if (existing) {
-    log(`  Found CB: ${name} (ID:${existing.id})`);
+    log(`  Found CB: ${target} (ID:${existing.id})`);
     return existing.id;
   }
-  // Create new
-  log(`  Creating CB: ${name} under ${parentId}...`);
-  const created = await mc.rest('POST', '/asset/v1/content/categories', { name, parentId });
-  if (!created?.id) throw new Error(`Failed to create CB folder "${name}": ${JSON.stringify(created).substring(0, 300)}`);
-  log(`  Created CB: ${name} (ID:${created.id})`);
-  return created.id;
+
+  log(`  Creating CB: ${target} under ${parentId}...`);
+  try {
+    const created = await mc.rest('POST', '/asset/v1/content/categories', { name: target, parentId });
+    if (!created?.id) throw new Error(`Failed to create CB folder "${target}": ${JSON.stringify(created).substring(0, 300)}`);
+    log(`  Created CB: ${target} (ID:${created.id})`);
+    return created.id;
+  } catch (err) {
+    // MC returns 400 "Category already exists with name: X under parentId: Y"
+    // when the folder exists but our search missed it (pagination, caching,
+    // race). Re-query and surface the existing ID.
+    if (/already exists/i.test(err.message || '')) {
+      const retry = await findExisting();
+      if (retry) {
+        log(`  Reconciled CB: ${target} (ID:${retry.id}) after "already exists"`);
+        return retry.id;
+      }
+    }
+    throw err;
+  }
 }
 
 // ─── Step 1: Ensure folder hierarchy ───────────────────────────────────────────
@@ -369,40 +416,46 @@ export async function ensureFolderHierarchy(mc, config, onProgress) {
   log('Creating DE folder hierarchy (SOAP)...');
   const deVariantRoot = variant === 'Skywards' ? DE_SKYWARDS_ROOT : DE_ECOMMERCE_ROOT;
 
+  // Normalize folder names to strings — MC stores folder names as strings
+  // but callers often pass Year as a Number; strict comparisons miss.
+  const yearStr = String(config.year);
+  const monthStr = String(config.yearMonth);
+  const campStr = String(config.campaignFolderName);
+
   // Year
   const yearFolders = await findSubfolders(mc, deVariantRoot);
-  let yearFolder = yearFolders.find(f => f.name === config.year);
+  let yearFolder = yearFolders.find(f => String(f.name) === yearStr);
   if (yearFolder) {
     log(`  Found DE year: ${yearFolder.name} (ID:${yearFolder.id})`);
   } else {
-    log(`  Creating DE year: ${config.year}...`);
-    const yearId = await createDEFolder(mc, config.year, deVariantRoot);
-    log(`  Created DE year: ${config.year} (ID:${yearId})`);
-    yearFolder = { id: yearId, name: config.year };
+    log(`  Creating DE year: ${yearStr}...`);
+    const yearId = await createDEFolder(mc, yearStr, deVariantRoot);
+    log(`  Created DE year: ${yearStr} (ID:${yearId})`);
+    yearFolder = { id: yearId, name: yearStr };
   }
 
   // Month
   const monthFolders = await findSubfolders(mc, yearFolder.id);
-  let monthFolder = monthFolders.find(f => f.name === config.yearMonth);
+  let monthFolder = monthFolders.find(f => String(f.name) === monthStr);
   if (monthFolder) {
     log(`  Found DE month: ${monthFolder.name} (ID:${monthFolder.id})`);
   } else {
-    log(`  Creating DE month: ${config.yearMonth}...`);
-    const monthId = await createDEFolder(mc, config.yearMonth, yearFolder.id);
-    log(`  Created DE month: ${config.yearMonth} (ID:${monthId})`);
-    monthFolder = { id: monthId, name: config.yearMonth };
+    log(`  Creating DE month: ${monthStr}...`);
+    const monthId = await createDEFolder(mc, monthStr, yearFolder.id);
+    log(`  Created DE month: ${monthStr} (ID:${monthId})`);
+    monthFolder = { id: monthId, name: monthStr };
   }
 
   // Campaign
   const campFolders = await findSubfolders(mc, monthFolder.id);
-  let campFolder = campFolders.find(f => f.name === config.campaignFolderName);
+  let campFolder = campFolders.find(f => String(f.name) === campStr);
   if (campFolder) {
     log(`  Found DE campaign: ${campFolder.name} (ID:${campFolder.id})`);
   } else {
-    log(`  Creating DE campaign: ${config.campaignFolderName}...`);
-    const campId = await createDEFolder(mc, config.campaignFolderName, monthFolder.id);
-    log(`  Created DE campaign: ${config.campaignFolderName} (ID:${campId})`);
-    campFolder = { id: campId, name: config.campaignFolderName };
+    log(`  Creating DE campaign: ${campStr}...`);
+    const campId = await createDEFolder(mc, campStr, monthFolder.id);
+    log(`  Created DE campaign: ${campStr} (ID:${campId})`);
+    campFolder = { id: campId, name: campStr };
   }
 
   return { cbFolderId: cbCampaign, deFolderId: campFolder.id };
@@ -471,7 +524,7 @@ export async function duplicateEmail(mc, config, onProgress) {
 /**
  * Get the field schema of a placeholder DE via SOAP.
  */
-async function getDEFields(mc, customerKey) {
+export async function getDEFields(mc, customerKey) {
   const xml = await mc.soap('Retrieve', `<RetrieveRequestMsg xmlns="http://exacttarget.com/wsdl/partnerAPI">
     <RetrieveRequest>
       <ObjectType>DataExtensionField</ObjectType>

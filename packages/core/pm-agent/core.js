@@ -334,7 +334,7 @@ export async function generateSummary(conversation) {
 const VALID_AGENT_IDS = [
     'raul', 'valentina', 'guillermo', 'competitive-intel',
     'lucia', 'diego', 'andres', 'martina', 'html-developer',
-    'sofia', 'javier', 'elena', 'carlos', 'doc-agent'
+    'sofia', 'javier', 'elena', 'carlos', 'doc-agent', 'mc-architect'
 ];
 
 const DRAFT_TOOL_SCHEMA = {

@@ -28,9 +28,21 @@ export function encodeFrames(frames, width, height, options) {
   const gif = GIFEncoder();
 
   if (paletteMode === 'global') {
-    // Build a global palette from the first frame and reuse it.
-    // Works well for typographic content with low color variance.
-    const palette = quantize(frames[0], maxColors);
+    // Build a global palette from a buffer that samples ALL frames, not just
+    // frame 0. Rationale: animations with entrance phases (bounce, slide-in,
+    // fade-in) often have frame 0 as pure background — quantizing only that
+    // frame produces a palette with none of the foreground colors, and every
+    // subsequent frame collapses to the background color (black GIF bug).
+    //
+    // We concatenate every frame's RGBA bytes into one big buffer so quantize()
+    // sees the full color distribution of the animation. Memory cost is modest
+    // for typographic GIFs (600x315x4 ≈ 756KB per frame, ~45MB for 60 frames).
+    const frameBytes = frames[0].length;
+    const combined = new Uint8ClampedArray(frameBytes * frames.length);
+    for (let i = 0; i < frames.length; i++) {
+      combined.set(frames[i], i * frameBytes);
+    }
+    const palette = quantize(combined, maxColors);
     for (const frame of frames) {
       const indexed = applyPalette(frame, palette);
       gif.writeFrame(indexed, width, height, { palette, delay: frameDelay });

@@ -23,6 +23,7 @@ export { analyzeTemplate, analyzeBAUTemplate } from './analyzer.js';
 export {
   fetchCampaignData,
   resolveEmailTemplate,
+  searchEmailAssets,
   isBAUTemplate,
   parseBAUConfig,
   discoverBAUDEs,
@@ -145,7 +146,7 @@ export async function buildCampaignEmails({
     data,
     subscriber,
     templateShell: preparedShell,
-    options: { market: options.market },
+    options: { market: options.market, language: options.language },
   });
   onProgress('render', `Generated ${Object.keys(variants).length} email variants`);
 

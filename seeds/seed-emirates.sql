@@ -88,6 +88,12 @@ INSERT INTO agents (id, name, role, department, status, avatar, skills, tools) V
  '["competitor-monitoring","multi-channel-analysis","swot-analysis","opportunity-detection","sentiment-analysis","trend-identification"]',
  '["Email Scanner","Social Monitor","Web Scraper","Sentiment Analyzer","Claude AI","News Aggregator"]');
 
+INSERT INTO agents (id, name, role, department, status, avatar, skills, tools) VALUES
+('mc-architect', 'MC Architect', 'Marketing Cloud Super-Agent — Executes any SFMC operation via natural language: Data Extensions, Journeys, Automations, Content Builder, Sends, Analytics, AMPscript', 'strategic', 'active', '☁️',
+ '["data-extension-management","journey-builder","automation-studio","content-builder","subscriber-management","send-analytics","sql-queries","ampscript","triggered-sends"]',
+ '["SFMC REST API","SFMC SOAP API","Data Extensions","Journey Builder","Automation Studio","Content Builder","Transactional Messaging","AMPscript Engine"]')
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, skills = EXCLUDED.skills, tools = EXCLUDED.tools;
+
 -- ─── WORKSPACE CONFIG ─────────────────────────────────────────────────────────
 
 INSERT INTO workspace_config (key, value)

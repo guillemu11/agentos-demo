@@ -90,6 +90,22 @@ export function buildVariableMap({
   // ── Subscriber data ──
   Object.assign(vars, subscriber);
 
+  // Emirates AMPscript init blocks consistently do:
+  //   SET @first_name = Trim( ProperCase( Field(@VAWP_Row, 'FName') ) )
+  //   SET @last_name  = Trim( ProperCase( Field(@VAWP_Row, 'LName') ) )
+  // MC REST lowercases DE field names (`fname`), so surface the aliased
+  // vars the templates reference (`first_name`, `last_name`) with the
+  // ProperCase transform applied.
+  const toProperCase = (s) => String(s || '').trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+  if (!vars.first_name) {
+    const fn = vars.fname ?? vars.FName ?? vars.firstname ?? vars.FirstName;
+    if (fn) vars.first_name = toProperCase(fn);
+  }
+  if (!vars.last_name) {
+    const ln = vars.lname ?? vars.LName ?? vars.lastname ?? vars.LastName;
+    if (ln) vars.last_name = toProperCase(ln);
+  }
+
   // ── Header ──
   if (headerContent) {
     Object.entries(headerContent).forEach(([k, v]) => { vars[k] = v; });
@@ -124,8 +140,12 @@ export function buildVariableMap({
     // the block templates render them in different elements (bold salutation +
     // separate body paragraph). Prepending salText to body_copy here causes
     // the salutation to appear twice in the rendered email.
+    // Use the aliased vars.first_name (already ProperCased from VAWP fname)
+    // rather than subscriber.first_name, which MC-sourced subscriber objects
+    // rarely provide directly.
+    const fname = vars.first_name || subscriber.first_name || '';
     const salText = salutation?.salutation
-      ? salutation.salutation.replace('{first_name}', subscriber.first_name || '')
+      ? salutation.salutation.replace(/\{first_name\}/gi, fname).replace(/\{FirstName\}/gi, fname)
       : '';
     const fullBody = dc.body_copy || '';
     vars.body_copy = fullBody;
@@ -153,8 +173,20 @@ export function buildVariableMap({
     vars.AliasLink4 = dc.aliaslink4 || '';
 
     // ── Stories 1-3 (3-column circle images) ──
+    // Different Emirates templates name the DC "story name" field differently:
+    //   - standard BAU: `story1`, `story2`, `story3`
+    //   - MilesAbandon / Churn: `triplecols_story1`, `triplecols_story2`, `triplecols_story3`
+    //   - OfferPromo variants: `story_triple1`, `threecol_story1`, …
+    // Try the canonical name first, fall back to common prefixes.
+    const storyNameCandidates = (i) => [
+      dc[`story${i}`],
+      dc[`triplecols_story${i}`],
+      dc[`story_triple${i}`],
+      dc[`threecol_story${i}`],
+      dc[`triple_story${i}`],
+    ].find(v => v);
     for (let i = 1; i <= 3; i++) {
-      const storyName = dc[`story${i}`];
+      const storyName = storyNameCandidates(i);
       const story = storyOf(storyName);
       if (story) {
         vars[`story${i}_image`] = img(story.story_image_circle || story.story_image);
@@ -163,6 +195,24 @@ export function buildVariableMap({
         vars[`story${i}_link`] = url(story.story_url || '');
         vars[`story${i}_alias`] = story.story_alias || '';
         vars[`story${i}_cta`] = story.story_cta || '';
+      }
+    }
+
+    // ── Info items 1-3 (single-row info block. Different from stories.) ──
+    // Emirates MilesAbandon / AbMiles uses `@info_item{N}_image`,
+    // `@info_item{N}_header`, etc. — sourced from Stories_Ref_Table
+    // matched by `story_name = dc.info_item{N}`.
+    for (let i = 1; i <= 3; i++) {
+      const infoName = dc[`info_item${i}`];
+      if (!infoName) continue;
+      const story = storyOf(infoName);
+      if (story) {
+        vars[`info_item${i}_image`] = img(story.story_image_square || story.story_image || story.story_image_circle);
+        vars[`info_item${i}_header`] = story.story_header || '';
+        vars[`info_item${i}_body`] = story.story_body || '';
+        vars[`info_item${i}_link`] = url(story.story_url || '');
+        vars[`info_item${i}_alias`] = story.story_alias || '';
+        vars[`info_item${i}_cta`] = story.story_cta || '';
       }
     }
 
@@ -597,7 +647,90 @@ export function renderAllVariants({ manifest, data, subscriber, templateShell, o
   const headerRows = Object.entries(deData).find(([n]) => n.toLowerCase().includes('header'))?.[1] || [];
   const footerRows = Object.entries(deData).find(([n]) => n.toLowerCase().includes('footer'))?.[1] || [];
   const storiesRows = Object.entries(deData).find(([n]) => n.toLowerCase().includes('stories') || n.toLowerCase().includes('story'))?.[1] || [];
+  // Some Emirates DEs carry row-based stories: one row per language with
+  // columns story1_image, story1_header, story1_link, story2_*, story3_*,
+  // instead of the name-based pattern of Stories_Ref_Table. Detect and
+  // expose separately so buildVariableMap can spread it into vars.
+  const rowBasedStoriesDE = Object.entries(deData).find(([, rows]) =>
+    Array.isArray(rows) && rows[0] && typeof rows[0] === 'object'
+      && 'story1_image' in rows[0] && 'story1_header' in rows[0]
+  );
+  const rowBasedStoriesRows = rowBasedStoriesDE?.[1] || [];
+
+  // Build template-level token aliases from AMPscript init block so the
+  // post-render `{token}` interpolation resolves any var the template
+  // defines — no hardcoded per-email mappings.
+  //
+  //   {token} → @token → (if empty) @alias resolved from either:
+  //     1. `Replace(@X, '{token}', @source)`     direct alias
+  //     2. `SET @target = Field(@VAWP_Row, 'col')`   target → col
+  //     3. `SET @target = col`                   target → col (ELSE branch)
+  //
+  // Emirates init blocks consistently SET vars from VAWP row fields with
+  // optional Trim/ProperCase wrappers. Parse those to understand which
+  // @var maps to which DE column.
+  const tokenAliases = {};
+  const tpl = manifest._templateHtml || '';
+
+  let m;
+
+  // 1. SET @target = [Trim/ProperCase/Uppercase/Lowercase …] Field(@VAWP_Row, 'col')
+  //    Authoritative: this maps an AMPscript @var to a concrete DE column.
+  const vawpFieldRe = /SET\s+@(\w+)\s*=\s*(?:[A-Za-z]+\s*\(\s*)*\s*Field\s*\(\s*@\w*(?:Row|row)\s*,\s*'(\w+)'/gi;
+  while ((m = vawpFieldRe.exec(tpl)) !== null) {
+    const target = m[1].toLowerCase();
+    const col = m[2].toLowerCase();
+    if (target !== col) tokenAliases[target] = col;
+  }
+
+  // 2. Replace(@X, '{token}', @source) — only when target token not already
+  //    aliased by the Field() pass above. Skip self-references.
+  const replaceRe = /Replace\s*\(\s*@\w+\s*,\s*'\{([^}]+)\}'\s*,\s*@(\w+)\s*\)/gi;
+  while ((m = replaceRe.exec(tpl)) !== null) {
+    const token = m[1].toLowerCase();
+    const src = m[2].toLowerCase();
+    if (token === src) continue;
+    if (!tokenAliases[token]) tokenAliases[token] = src;
+  }
+
+  // 3. SET @target = bareIdentifier (ELSE branch when _messagecontext != 'VAWP')
+  //    e.g. `SET @email = membership_email`  (same alias target→col).
+  const bareSetRe = /SET\s+@(\w+)\s*=\s*(?:[A-Za-z]+\s*\(\s*)*\s*([a-z_][a-z0-9_]*)\s*[\s\)\r\n]/gi;
+  while ((m = bareSetRe.exec(tpl)) !== null) {
+    const target = m[1].toLowerCase();
+    const col = m[2].toLowerCase();
+    // Filter out AMPscript function/keyword tokens
+    if (['if', 'then', 'else', 'endif', 'row', 'field', 'now', 'true', 'false', 'null'].includes(col)) continue;
+    if (target === col) continue;
+    if (!tokenAliases[target]) tokenAliases[target] = col;
+  }
+  // Resolve alias chains one level (e.g. abmiles → miles_abandoned) so the
+  // runtime lookup is a single hop.
+  for (const k of Object.keys(tokenAliases)) {
+    const next = tokenAliases[tokenAliases[k]];
+    if (next && next !== k) tokenAliases[k] = next;
+  }
+
   const caveatRows = Object.entries(deData).find(([n]) => n.toLowerCase().includes('caveat'))?.[1] || [];
+  // VAWP: the subscriber table. The template's init block SETs @FlightNo,
+  // @DeptAirport, @Deptdate, @PNR, @LoungeFare, @first_name etc. from one
+  // VAWP row. Without this, the DE body_copy keeps raw "{FlightNo}" tokens.
+  const vawpRows = Object.entries(deData).find(([n]) => n.toLowerCase().includes('vawp'))?.[1] || [];
+  function pickVawpSample(langHint, tierHint) {
+    if (!vawpRows.length) return {};
+    const lc = String(langHint || '').toLowerCase();
+    const langOk = r => !lc || (r.language || r.Language || '').toLowerCase().startsWith(lc.slice(0, 2));
+    const tierOk = r => {
+      const t = (r.tier || r.Tier || '').toLowerCase();
+      if (tierHint === 'skw') return t && !/ebase|none|non[- ]member/i.test(t);
+      if (tierHint === 'ebase') return !t || /ebase|none|non[- ]member/i.test(t);
+      return true;
+    };
+    return vawpRows.find(r => langOk(r) && tierOk(r))
+      || vawpRows.find(langOk)
+      || vawpRows[0]
+      || {};
+  }
   const salutationRows = Object.entries(deData).find(([n]) => n.toLowerCase().includes('salutation'))?.[1] || [];
 
   // Resolve a DE row by language. Emirates DEs are inconsistent —
@@ -648,15 +781,24 @@ export function renderAllVariants({ manifest, data, subscriber, templateShell, o
 
   // Generate each variant
   for (const segment of segments) {
+    // Root cause of the "Arabic leaks into English" bug: Emirates DEs often
+    // have the Arabic row at index 0. Falling back to dcRows[0] makes every
+    // downstream pickRow(headerRows, variantLang) resolve to Arabic too.
+    // When the caller requested a specific language, honour it.
     const segmentContent = segment === 'default'
-      ? dcRows[0] || {}
+      ? (pickRow(dcRows, options.language) || dcRows[0] || {})
       : dcRows.find(r => (r.segment || r.Segment || '').toLowerCase() === segment);
     if (!segmentContent) continue;
 
     for (const headerType of headerTypes) {
       const variantLang = segmentContent?.language || '';
+      // Auto-populate the template's VAWP-driven @variables (FlightNo, PNR,
+      // DeptAirport, Deptdate, LoungeFare, first_name, tier, miles_balance…)
+      // from a matching sample row. Caller-provided `subscriber` wins.
+      const vawpSample = pickVawpSample(variantLang, headerType);
+      const mergedSubscriber = { ...vawpSample, ...subscriber };
       const vars = buildVariableMap({
-        subscriber,
+        subscriber: mergedSubscriber,
         headerContent: pickRow(headerRows, variantLang),
         footerContent: pickRow(footerRows, variantLang),
         segmentContent,
@@ -669,6 +811,67 @@ export function renderAllVariants({ manifest, data, subscriber, templateShell, o
         market,
         language: variantLang,
       });
+
+      // Row-based stories fallback (Emirates_Exp_Lounge_shortlink etc.):
+      // spread story{1..3}_{image,header,body,link,alias} straight into
+      // vars, resolving image IDs to CDN URLs. Only when buildVariableMap
+      // didn't already populate a story1_image via name-based lookup.
+      if (rowBasedStoriesRows.length && !vars.story1_image) {
+        const row = pickRow(rowBasedStoriesRows, variantLang);
+        if (row) {
+          for (let i = 1; i <= 6; i++) {
+            const imgKey = `story${i}_image`;
+            if (row[imgKey]) {
+              const raw = row[imgKey];
+              vars[imgKey] = /^\d+$/.test(String(raw)) ? (imageMap[raw] || raw) : raw;
+              for (const suf of ['header', 'body', 'link', 'alias', 'cta', 'subheader']) {
+                const k = `story${i}_${suf}`;
+                if (row[k] !== undefined) vars[k] = row[k];
+              }
+            }
+          }
+          if (row.stories_header_title) vars.stories_header_title = row.stories_header_title;
+        }
+      }
+
+      // Info block (Emirates "Skywards Plus" pattern):
+      //   SET @Skw_Plus_Content = LookupRows('FeaturedItems_Ref_Table_shortlink',
+      //       'language', Lowercase(@lm_code), 'FItem_name', @FSItem1)
+      //   …later, positionally, right before ContentBlockbyID(35052):
+      //     SET @image = @Skw_Plus_image   ← rebind. The positional walker
+      //                                      handles this via localBindings.
+      // We populate the aliased @Skw_Plus_* vars only — NOT @image directly,
+      // since @image is also rebound for the offer_area (airplane icon) and
+      // clobbering it globally breaks that block.
+      const featuredItemsRows = Object.entries(deData).find(([n]) =>
+        n.toLowerCase().includes('featureditems'))?.[1] || [];
+      const fsitem1 = segmentContent?.fsitem1 || segmentContent?.FSItem1;
+      if (featuredItemsRows.length && fsitem1) {
+        const targetLang = String(variantLang || '').toLowerCase() || 'en';
+        const fiRow = featuredItemsRows.find(r =>
+          (r.language || '').toLowerCase() === targetLang
+          && String(r.fitem_name || r.FItem_name || '').toLowerCase() === String(fsitem1).toLowerCase()
+        );
+        if (fiRow) {
+          const imgId = fiRow.fitem_image || fiRow.FItem_image;
+          if (imgId) {
+            vars.Skw_Plus_image = /^\d+$/.test(String(imgId)) ? (imageMap[imgId] || imgId) : imgId;
+          }
+          if (fiRow.fitem_link_alias) vars.Skw_Plus_body_link_alias = fiRow.fitem_link_alias;
+          if (fiRow.fitem_link) vars.Skw_Plus_body_link = fiRow.fitem_link;
+          if (fiRow.fitem_body_copy) vars.Skw_Plus_body_copy = fiRow.fitem_body_copy;
+        }
+      }
+
+      // Some Emirates templates concat salutation + body_copy at send time:
+      //   SET @body_copy = concat(@body_copy_salutation, @body_copy)
+      // Replicate so the rendered block shows "Hello Maria, you've been…"
+      // instead of losing the salutation entirely.
+      if (manifest._templateHtml
+          && /concat\s*\(\s*@body_copy_salutation\s*,\s*@body_copy/i.test(manifest._templateHtml)
+          && vars.body_copy_salutation) {
+        vars.body_copy = vars.body_copy_salutation + ' ' + (vars.body_copy || '');
+      }
 
       // Determine block order for this variant
       const blockOrder = manifest.blockOrder.allBlocks || manifest.blockOrder.default || [];
@@ -694,7 +897,7 @@ export function renderAllVariants({ manifest, data, subscriber, templateShell, o
         filename = `${segment}.html`;
       }
 
-      results[filename] = renderVariant({
+      let html = renderVariant({
         blocks: variantBlocks,
         vars,
         blockOrder,
@@ -702,6 +905,29 @@ export function renderAllVariants({ manifest, data, subscriber, templateShell, o
         preheader: vars.Preheader,
         renderInstructions,
       });
+
+      // DE body copy can embed runtime tokens like "{FlightNo}" / "{PNR}" /
+      // "{abmiles}" / "{first_name}" — not AMPscript %%...%%. These survive
+      // replaceAmpscriptVars. Interpolate against vars, falling back to the
+      // template-parsed alias map when the token points at another @var via
+      // AMPscript's `Replace(@X, '{token}', @sourceVar)` pattern.
+      // Case-insensitive: MC REST lowercases DE field names (`flightno`)
+      // but templates use mixed case (`{FlightNo}`).
+      const varsLookup = {};
+      for (const [k, v] of Object.entries(vars)) varsLookup[k.toLowerCase()] = v;
+      const lookupValue = (key) => {
+        const lk = String(key || '').toLowerCase();
+        if (varsLookup[lk] !== undefined && varsLookup[lk] !== null && varsLookup[lk] !== '') return varsLookup[lk];
+        const alias = tokenAliases[lk];
+        if (alias && varsLookup[alias] !== undefined && varsLookup[alias] !== null && varsLookup[alias] !== '') return varsLookup[alias];
+        return undefined;
+      };
+      html = html.replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, k) => {
+        const v = lookupValue(k);
+        return v !== undefined ? String(v) : m;
+      });
+
+      results[filename] = html;
     }
   }
 

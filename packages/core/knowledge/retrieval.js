@@ -337,6 +337,23 @@ export async function buildRAGContext(pool, query, options = {}) {
 
     let results = await searchMultiNamespace(pool, query, namespaces, { topK, filter, minScore });
 
+    // Demo-critical: when user asks for a non-email visual (whatsapp, screenshot, foto),
+    // ensure the top image-namespace match is always included, even if cosine score is lower
+    // than email results that ranked higher.
+    const nonEmailVisualMention = /\b(whatsapp|wa|sms|screenshot|captura|foto|photo|banner|picture)\b/i.test(query);
+    if (nonEmailVisualMention && namespaces.includes('images')) {
+        const hasImageResult = results.some(r => r._namespace === 'images' && r.mediaType === 'image');
+        if (!hasImageResult) {
+            // Force-fetch the top image-namespace match
+            const imageOnly = await searchMultiNamespace(pool, query, ['images'], { topK: 3, filter, minScore: 0.3 });
+            const topImage = imageOnly.find(r => r.mediaType === 'image');
+            if (topImage) {
+                results = [topImage, ...results];
+                console.log(`[RAG] Force-included image result: ${topImage.documentTitle} (score: ${topImage.score})`);
+            }
+        }
+    }
+
     // Adaptive threshold: if top result is very strong, filter out comparatively weak results
     if (results.length > 1 && results[0].score > 0.8) {
         const adaptiveMin = results[0].score * 0.5;
@@ -344,11 +361,20 @@ export async function buildRAGContext(pool, query, options = {}) {
     }
 
     // Boost visual results to top when user asks for visuals (images > pdf_page > text)
+    // When query explicitly mentions a non-email visual channel (whatsapp, screenshot, etc.),
+    // push html_email DOWN so uploaded screenshots win over email templates.
+    const nonEmailVisualQuery = /\b(whatsapp|wa|sms|screenshot|captura|foto|photo|banner|picture)\b/i.test(query);
     if (visualQuery && results.length > 0) {
         results.sort((a, b) => {
-            const aVisual = a.mediaType === 'image' ? 2 : (a.mediaType === 'pdf_page' || a.mediaType === 'html_email' ? 1 : 0);
-            const bVisual = b.mediaType === 'image' ? 2 : (b.mediaType === 'pdf_page' || b.mediaType === 'html_email' ? 1 : 0);
-            if (bVisual !== aVisual) return bVisual - aVisual;
+            const rank = (r) => {
+                if (r.mediaType === 'image') return 3;
+                if (nonEmailVisualQuery && r.mediaType === 'html_email') return 0; // demote emails
+                if (r.mediaType === 'pdf_page' || r.mediaType === 'html_email') return 1;
+                return 0;
+            };
+            const ra = rank(a);
+            const rb = rank(b);
+            if (rb !== ra) return rb - ra;
             return b.score - a.score;
         });
     }
