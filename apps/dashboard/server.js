@@ -8544,16 +8544,358 @@ app.delete('/api/journeys/:id', requireAuth, async (req, res) => {
     res.json({ ok: true });
 });
 
-const JOURNEY_SYSTEM_PROMPT = `You are a Marketing Cloud Journey Builder agent for Emirates BAU.
-You help the user assemble a journey by calling tools that mutate a DSL document.
-RULES:
-- BEFORE writing SQL for entry, call inspect_master_de to learn the schema.
-- Use unique ids: wait_1, split_1, send_gold, etc.
-- Always call validate_journey after significant changes and before deploy_journey_draft.
-- Deploy always produces a Draft in MC. Never claim the journey is active.
-- Prefer small incremental tool calls; narrate briefly what you are adding.
-- The 5 supported activity types are: wait_duration, decision_split, email_send, wait_until_event, engagement_split.
-- For email_send, campaign_type must be one of the BAU campaign types.`;
+// Patch a single DSL activity — used by email builder modal to write back mc_email_id
+app.patch('/api/journeys/:id/activities/:actId', requireAuth, async (req, res) => {
+    const { id: journeyId, actId } = req.params;
+    const { mc_email_id, email_shell_name } = req.body || {};
+    if (!mc_email_id || !email_shell_name) return res.status(400).json({ error: 'mc_email_id and email_shell_name required' });
+
+    const { rows } = await pool.query(
+        `SELECT dsl_json FROM journeys WHERE id = $1 AND user_id = $2`,
+        [journeyId, req.session.userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'not found' });
+
+    const dsl = rows[0].dsl_json;
+    const actIdx = dsl.activities.findIndex((a) => a.id === actId);
+    if (actIdx === -1) return res.status(404).json({ error: `activity ${actId} not found` });
+    if (dsl.activities[actIdx].type !== 'email_send') return res.status(400).json({ error: 'activity is not email_send' });
+
+    const updatedActivities = [...dsl.activities];
+    updatedActivities[actIdx] = { ...updatedActivities[actIdx], mc_email_id, email_shell_name };
+    const updatedDsl = { ...dsl, activities: updatedActivities };
+
+    await pool.query(
+        `UPDATE journeys SET dsl_json = $1 WHERE id = $2 AND user_id = $3`,
+        [JSON.stringify(updatedDsl), journeyId, req.session.userId]
+    );
+    res.json({ ok: true, dsl: updatedDsl });
+});
+
+// Email builder — generate HTML preview for a journey email_send activity
+app.post('/api/journeys/:id/activities/:actId/email/build', requireAuth, async (req, res) => {
+    const { id: journeyId, actId } = req.params;
+    const { language = 'en', brief = '' } = req.body || {};
+
+    const { rows } = await pool.query(
+        `SELECT dsl_json FROM journeys WHERE id = $1 AND user_id = $2`,
+        [journeyId, req.session.userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const dsl = rows[0].dsl_json;
+    const activity = (dsl.activities || []).find((a) => a.id === actId);
+    if (!activity || activity.type !== 'email_send') return res.status(400).json({ error: 'activity not found or not email_send' });
+
+    const { CAMPAIGN_TYPES } = await import('../../packages/core/campaign-builder/index.js');
+    const typeDef = CAMPAIGN_TYPES[activity.campaign_type];
+    if (!typeDef) return res.status(400).json({ error: `Unknown campaign_type: ${activity.campaign_type}` });
+    const assetId = typeDef.templates.noCugoCode;
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    const mc = await getEmailBuilderMCClient();
+    if (!mc) {
+        sseSend(res, { type: 'error', message: 'Marketing Cloud not configured' });
+        return res.end();
+    }
+
+    const templateShell = getEmailBuilderShell();
+
+    try {
+        const { buildCampaignEmails } = await import('../../packages/core/email-builder/index.js');
+        const result = await buildCampaignEmails({
+            assetId,
+            mcClient: mc,
+            templateShell,
+            campaignHint: brief || activity.email_shell_name,
+            options: {
+                language,
+                onProgress: (phase, detail) => sseSend(res, { type: 'status', phase, message: String(detail || '') }),
+            },
+        });
+
+        const variantHtml = Object.values(result.variants || {})[0] || '';
+        sseSend(res, { type: 'result', html: variantHtml, emailName: result.emailName || activity.email_shell_name });
+    } catch (e) {
+        sseSend(res, { type: 'error', message: e.message });
+    }
+
+    res.end();
+});
+
+// Email builder — iterative refinement via Claude
+app.post('/api/journeys/:id/activities/:actId/email/refine', requireAuth, async (req, res) => {
+    const { id: journeyId, actId } = req.params;
+    const { message, currentHtml } = req.body || {};
+    if (!message || !currentHtml) return res.status(400).json({ error: 'message and currentHtml required' });
+
+    const { rows } = await pool.query(
+        `SELECT id FROM journeys WHERE id = $1 AND user_id = $2`,
+        [journeyId, req.session.userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'not found' });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    sseSend(res, { type: 'status', message: 'Applying changes...' });
+
+    try {
+        const msg = await anthropic.messages.create({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 8192,
+            messages: [{
+                role: 'user',
+                content: `You are an email HTML editor. Apply the requested modification to the email HTML below.\n\nModification: ${message}\n\nReturn ONLY the complete modified HTML. No explanation, no markdown, no code fences — just the raw HTML.\n\n${currentHtml}`,
+            }],
+        });
+
+        const html = msg.content[0]?.text || currentHtml;
+        sseSend(res, { type: 'result', html });
+    } catch (e) {
+        sseSend(res, { type: 'error', message: e.message });
+    }
+
+    res.end();
+});
+
+// Email builder — confirm: create MC shell and return mc_email_id
+app.post('/api/journeys/:id/activities/:actId/email/confirm', requireAuth, async (req, res) => {
+    const { id: journeyId, actId } = req.params;
+    const { campaign_type, emailName } = req.body || {};
+    if (!campaign_type) return res.status(400).json({ error: 'campaign_type required' });
+
+    const { rows } = await pool.query(
+        `SELECT dsl_json FROM journeys WHERE id = $1 AND user_id = $2`,
+        [journeyId, req.session.userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'not found' });
+
+    const { CAMPAIGN_TYPES, duplicateEmail } = await import('../../packages/core/campaign-builder/index.js');
+    const typeDef = CAMPAIGN_TYPES[campaign_type];
+    if (!typeDef) return res.status(400).json({ error: `Unknown campaign_type: ${campaign_type}` });
+
+    const mc = await getEmailBuilderMCClient();
+    if (!mc) return res.status(503).json({ error: 'Marketing Cloud not configured' });
+
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const stamp = `${pad(now.getDate())}${pad(now.getMonth()+1)}${String(now.getFullYear()).slice(2)}_${pad(now.getHours())}${pad(now.getMinutes())}`;
+    const shellName = `${emailName || actId}_${stamp}`;
+
+    const { assetId: mc_email_id } = await duplicateEmail(mc, {
+        sourceAssetId: typeDef.templates.noCugoCode,
+        newName: shellName,
+        attributes: { attr3: shellName, attr4: 'xx' },
+    });
+
+    res.json({ ok: true, mc_email_id, email_shell_name: shellName });
+});
+
+// Human-triggered deploy. Never called by the agent — only by the toolbar button.
+app.post('/api/journeys/:id/deploy', requireAuth, async (req, res) => {
+    const { id: journeyId } = req.params;
+    const { rows } = await pool.query(
+        `SELECT * FROM journeys WHERE id = $1 AND user_id = $2`,
+        [journeyId, req.session.userId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'not found' });
+    const journey = rows[0];
+    const dsl = journey.dsl_json;
+
+    const { valid, errors } = validateDsl(dsl);
+    if (!valid) return res.status(400).json({ error: 'Invalid DSL', details: errors });
+
+    const mc = createMCClient(pool, decryptValue);
+    const steps = [];
+    const started = Date.now();
+
+    try {
+        // Wrap deployJourney with per-step logging so we can see exactly where MC 404s.
+        const wrapStep = (name, fn) => async (...args) => {
+            const t0 = Date.now();
+            steps.push({ name, status: 'running' });
+            try {
+                const result = await fn(...args);
+                steps[steps.length - 1] = { name, status: 'ok', ms: Date.now() - t0 };
+                return result;
+            } catch (err) {
+                steps[steps.length - 1] = { name, status: 'error', ms: Date.now() - t0, error: err.message };
+                console.error(`[journey deploy] step "${name}" failed:`, err.message);
+                throw err;
+            }
+        };
+
+        // Import stubs and wrap each
+        const { ensureFolderHierarchy } = await import('../../packages/core/campaign-builder/index.js');
+        const { createDataExtensionRaw, createInteraction, createEventDefinition } = await import('../../packages/core/mc-api/executor.js');
+        const { createQueryActivity } = await import('../../packages/core/journey-builder/query-activity.js');
+        const { createEmailShells } = await import('../../packages/core/journey-builder/shells.js');
+
+        // Pass the cached master DE schema so deploy can infer target DE column types
+        // from the SELECT list, rather than using a fixed 4-column default.
+        const MASTER_DE_KEY_LOCAL = '9E15FDCB-B36B-46C3-B147-75FE93E44567';
+        let masterSchema = null;
+        try {
+            masterSchema = await fetchDeSchemaCompact(mc, MASTER_DE_KEY_LOCAL);
+        } catch (err) {
+            console.warn('[journey deploy] could not fetch master schema for type inference:', err.message);
+        }
+
+        const out = await deployJourney({ mc, dsl, config: { variant: 'Ecommerce' } }, {
+            ensureFolderHierarchy: wrapStep('ensureFolderHierarchy', ensureFolderHierarchy),
+            createDataExtension: wrapStep('createDataExtension', createDataExtensionRaw),
+            createQueryActivity: wrapStep('createQueryActivity', createQueryActivity),
+            createEmailShells: wrapStep('createEmailShells', createEmailShells),
+            createEventDef: wrapStep('createEventDef', createEventDefinition),
+            createInteractionDraft: wrapStep('createInteractionDraft', createInteraction),
+            masterSchema,
+        });
+
+        await pool.query(
+            `UPDATE journeys SET dsl_json = $1, status = 'deployed_draft',
+               mc_interaction_id = $2, mc_target_de_key = $3, mc_query_activity_id = $4
+             WHERE id = $5`,
+            [JSON.stringify(out.dsl), out.mc_interaction_id, out.mc_target_de_key, out.mc_query_activity_id, journeyId]
+        );
+        console.log(`[journey deploy] OK ${journeyId} in ${Date.now() - started}ms`);
+        res.json({
+            ok: true,
+            mc_interaction_id: out.mc_interaction_id,
+            mc_target_de_key: out.mc_target_de_key,
+            mc_query_activity_id: out.mc_query_activity_id,
+            steps,
+        });
+    } catch (err) {
+        console.error('[journey deploy] error', err);
+        res.status(500).json({ error: err.message, steps });
+    }
+});
+
+const JOURNEY_SYSTEM_PROMPT = `You are the Journey Builder agent for the Emirates BAU marketing team.
+
+Users are MARKETING people, not engineers — they speak in outcomes ("reactivate lapsed Dubai shoppers"), not tool calls. Your job is to translate intent into a complete, safe SFMC journey, handling ALL technical details silently. Never ask the user for SQL, column names, DE keys, brackets, or row caps — infer or look them up yourself.
+
+# Workspace context (assume unless told otherwise)
+
+Primary master Data Extension:
+  - Name: "BAU CS Master dataset" (has spaces — reference as [BAU CS Master dataset] in SQL)
+  - CustomerKey: 9E15FDCB-B36B-46C3-B147-75FE93E44567
+  - Size: ~14 million rows
+  - Default entry source for virtually every BAU journey.
+
+Market shorthand:
+  - "UAE" → 'AE'
+  - "GCC" → 'AE','SA','KW','QA','BH','OM'
+  - "MENA" → GCC + 'EG','JO','LB','MA'
+  - "DACH" → 'DE','AT','CH'
+  - Default languages for GCC: 'en' and 'ar'.
+
+Timeframe shorthand:
+  - "lapsed" / "inactive" → no email open in last 45 days
+  - "engaged" / "active" → at least one open in last 30 days
+  - "recent shoppers" → search or booking in last 90 days
+  - "near-upgrade" / "almost gold" → tier = Silver with high spend in last 90 days
+
+Domain terms:
+  - "Dubai holiday" / "destination reactivation" → filter on destination-related column
+  - "VIP" / "premium" → Skywards Gold or Platinum tier
+  - "partner" / "hotel bundle" → campaign_type partner-offer
+
+# Do these WITHOUT asking (defaults)
+
+1. The master DE schema is ALREADY pre-loaded for you (injected below). Do NOT call inspect_master_de unless the user explicitly names a DIFFERENT DE. Skip it and go straight to set_entry_source.
+2. In entry SQL, reference the DE as [BAU CS Master dataset] (brackets, because of spaces).
+3. Always include TOP 10000 on first deploy — safety cap against the 14M master. Place it right after SELECT. Mention the cap briefly.
+4. NEVER attempt to deploy. You have no deploy tool. The user clicks the "Deploy to MC (Draft)" button in the toolbar when ready. When you finish building + validation, end your message with a clear call-to-action: "Ready to go — click **Deploy to MC (Draft)** in the toolbar when you want to push it to Marketing Cloud."
+5. After significant changes, call validate_journey and report.
+6. When intent is ambiguous (e.g., "reactivate" without a timeframe), apply the defaults above and TELL the user what you assumed — do not block to ask.
+7. Batch tool calls: issue multiple add_activity calls in a SINGLE response whenever the structure is clear — this is much faster than one-at-a-time.
+
+# Naming conventions
+
+- Activity ids: descriptive snake_case — send_hero, wait_5d, split_engagement, send_lastcall
+- Email shell names: PascalCase_With_Underscores matching journey theme — Dubai_Reactivation_Hero
+
+# Activity types and their EXACT shapes (critical — follow these fields precisely)
+
+**wait_duration** — delay in the flow:
+  { id, type: "wait_duration", amount: <number>, unit: "minutes"|"hours"|"days"|"weeks", next: "<next_id>" | null }
+
+**email_send** — a single send:
+  { id, type: "email_send", campaign_type: "<bau_campaign_type>", email_shell_name: "<PascalCase_Name>", mc_email_id: null, next: "<next_id>" | null }
+
+**decision_split** — attribute-based split (by column value, tier, market, etc.):
+  { id, type: "decision_split",
+    branches: [ { label: "<label>", condition: "<SQL-like expr>", next: "<branch_target_id>" }, ... ],
+    default_next: "<fallback_id>" | null }
+
+**engagement_split** — behavior-based split on a PREVIOUS send's metric (opened/clicked):
+  { id, type: "engagement_split",
+    send_activity_id: "<id of the prior email_send>",
+    metric: "opened" | "clicked",
+    yes_next: "<target_if_engaged_id>" | null,
+    no_next: "<target_if_not_engaged_id>" | null }
+
+**wait_until_event** — wait for an event or a timeout:
+  { id, type: "wait_until_event",
+    event: "<event_name>",
+    target_activity: "<id of event source>",
+    timeout_hours: <number>,
+    on_event_next: "<id>" | null,
+    on_timeout_next: "<id>" | null }
+
+# CRITICAL wiring rule
+
+Every activity you add MUST point at the next activity in the flow via the relevant field (next / yes_next+no_next / branches[].next+default_next / on_event_next+on_timeout_next). Activities without outbound pointers are orphans and the canvas will show them disconnected.
+
+PLAN FIRST, THEN EMIT: before calling add_activity, write out the flow as a short list with ids and connections. Example:
+
+  Flow plan:
+  - send_hero (email) → wait_5d
+  - wait_5d → split_engagement
+  - split_engagement (on send_hero opens) → yes: send_hotel_upsell, no: wait_10d
+  - send_hotel_upsell → null (exit)
+  - wait_10d → send_lastcall
+  - send_lastcall → null (exit)
+
+Then emit the add_activity calls with each pointer populated. Use null only at exit points.
+
+# Valid campaign_type values for email_send
+holiday-offer, product-offer-ecommerce, product-offer-skywards, partner-offer, partner-launch, route-launch, route-launch-inbound, route-launch-outbound, broadcast-emirates, event-offer, product-update, single-region, newsletter, occasional-announcement, partner-acquisition
+
+Mapping from marketing language:
+  - "promo" / "offer" / "destination push" → holiday-offer
+  - "hotel" / "partner bundle" → partner-offer
+  - "ecom" / "product" / "shop" → product-offer-ecommerce
+  - "Skywards" / "miles" / "tier" → product-offer-skywards
+  - "newsletter" / "weekly" → newsletter
+
+# Communication style
+
+Talk like a senior campaign manager, not an engineer.
+  YES: "Kicking off the hero send first, then 5 days of wait before we split on who opened."
+  NO:  "Calling add_activity with payload {type: email_send, next: wait_1}..."
+
+After each tool call, ONE short confirmation in plain marketing language:
+  "✓ Entry set — lapsed Dubai shoppers in UAE/GCC, capped at 10k for this Draft."
+  "✓ Added the hero send (holiday-offer template)."
+  "✓ Split set — opens go to the hotel upsell, non-opens get a 10-day wait then the last call."
+
+End with a brief summary + invite the user to review the Draft in MC.
+
+# Never do
+
+- Ask the user for column names, SQL, DE keys, or technical configuration. Infer or inspect.
+- Write DROP/DELETE/UPDATE/TRUNCATE/INSERT/ALTER in entry SQL (validator will reject).
+- Deploy the journey yourself. You have no deploy tool. The user clicks the Deploy button.
+- Activate a journey. All deploys are Draft.
+- Mention "tools", "DSL", or JSON payloads in your narration — talk about sends, waits, splits.`;
 
 app.post('/api/chat/journey-builder/:id', requireAuth, async (req, res) => {
     const { id: journeyId } = req.params;
@@ -8576,10 +8918,18 @@ app.post('/api/chat/journey-builder/:id', requireAuth, async (req, res) => {
         `SELECT role, content FROM journey_chat_messages WHERE journey_id = $1 ORDER BY created_at ASC`,
         [journeyId]
     );
-    const messages = priorMsgs.rows.map((r) => ({
-        role: r.role === 'tool' ? 'user' : r.role,
-        content: r.content,
-    }));
+    const messages = [];
+    for (const r of priorMsgs.rows) {
+        const role = r.role === 'tool' ? 'user' : r.role;
+        const c = r.content;
+        // Claude requires content to be string OR array of content blocks.
+        // Skip rows with legacy/invalid shapes (e.g. old tool audit objects).
+        if (typeof c === 'string' || Array.isArray(c)) {
+            messages.push({ role, content: c });
+        } else {
+            console.warn('[journey chat] skipping legacy message shape', { role: r.role, keys: Object.keys(c || {}) });
+        }
+    }
     messages.push({ role: 'user', content: message });
     await pool.query(
         `INSERT INTO journey_chat_messages (journey_id, role, content) VALUES ($1, $2, $3)`,
@@ -8594,13 +8944,28 @@ app.post('/api/chat/journey-builder/:id', requireAuth, async (req, res) => {
         return mcClient;
     };
 
+    // Pre-warm: fetch and cache the master DE schema in parallel with the first Claude call.
+    // Inject it into the system prompt so Claude skips the inspect_master_de roundtrip entirely.
+    const MASTER_DE_KEY = '9E15FDCB-B36B-46C3-B147-75FE93E44567';
+    let schemaHint = '';
+    try {
+        const mc = await getMc();
+        const schema = await fetchDeSchemaCompact(mc, MASTER_DE_KEY);
+        if (schema.columns?.length) {
+            const colList = schema.columns.map((c) => `${c.name}:${c.type}${c.max ? `(${c.max})` : ''}`).join(', ');
+            schemaHint = `\n\n# Master DE schema (pre-loaded — do NOT call inspect_master_de)\nColumns of [BAU CS Master dataset]: ${colList}`;
+        }
+    } catch (err) {
+        console.warn('[journey chat] schema pre-warm failed, agent will inspect:', err.message);
+    }
+
     try {
         let keepGoing = true;
         while (keepGoing) {
             const stream = anthropic.messages.stream({
                 model: 'claude-sonnet-4-6',
                 max_tokens: 4096,
-                system: JOURNEY_SYSTEM_PROMPT,
+                system: JOURNEY_SYSTEM_PROMPT + schemaHint,
                 tools: JOURNEY_TOOLS,
                 messages,
             });
@@ -8618,10 +8983,35 @@ app.post('/api/chat/journey-builder/:id', requireAuth, async (req, res) => {
                 break;
             }
 
-            const toolResults = [];
-            for (const tu of toolUses) {
+            // Partition tools: DSL mutators (add/update/remove/set) must run sequentially
+            // because they mutate shared state. Everything else (inspect, validate) can run
+            // in parallel with mutators — but keeping it simple, we run sequential for mutators,
+            // parallel for everything else within the same turn.
+            const mutatorNames = new Set(['set_entry_source', 'add_activity', 'update_activity', 'remove_activity', 'deploy_journey_draft']);
+            const parallelUses = toolUses.filter((tu) => !mutatorNames.has(tu.name));
+            const serialUses = toolUses.filter((tu) => mutatorNames.has(tu.name));
+
+            const mc = await getMc();
+            const toolResults = new Array(toolUses.length);
+            const indexById = new Map(toolUses.map((tu, i) => [tu.id, i]));
+
+            // Parallel non-mutators
+            await Promise.all(parallelUses.map(async (tu) => {
                 send({ type: 'tool_status', tool: tu.name, status: 'running' });
-                const mc = await getMc();
+                const { result, error } = await dispatchJourneyTool({
+                    tool: tu.name, input: tu.input, dsl: journey.dsl_json, mc, journey, pool,
+                });
+                send({ type: 'tool_status', tool: tu.name, status: 'done' });
+                toolResults[indexById.get(tu.id)] = {
+                    type: 'tool_result', tool_use_id: tu.id,
+                    content: error ? `ERROR: ${error}` : JSON.stringify(result),
+                    is_error: !!error,
+                };
+            }));
+
+            // Serial mutators (shared DSL state)
+            for (const tu of serialUses) {
+                send({ type: 'tool_status', tool: tu.name, status: 'running' });
                 const { dsl: newDsl, result, error } = await dispatchJourneyTool({
                     tool: tu.name, input: tu.input, dsl: journey.dsl_json, mc, journey, pool,
                 });
@@ -8630,17 +9020,18 @@ app.post('/api/chat/journey-builder/:id', requireAuth, async (req, res) => {
                     send({ type: 'journey_state', dsl: newDsl });
                 }
                 send({ type: 'tool_status', tool: tu.name, status: 'done' });
-                toolResults.push({
-                    type: 'tool_result',
-                    tool_use_id: tu.id,
+                toolResults[indexById.get(tu.id)] = {
+                    type: 'tool_result', tool_use_id: tu.id,
                     content: error ? `ERROR: ${error}` : JSON.stringify(result),
                     is_error: !!error,
-                });
-                await pool.query(
-                    `INSERT INTO journey_chat_messages (journey_id, role, content) VALUES ($1, $2, $3)`,
-                    [journeyId, 'tool', JSON.stringify({ tool: tu.name, input: tu.input, result, error })]
-                );
+                };
             }
+            // Persist the full tool_result batch as ONE row so replay reproduces
+            // the exact (role:user, content:[tool_result, ...]) shape Claude expects.
+            await pool.query(
+                `INSERT INTO journey_chat_messages (journey_id, role, content) VALUES ($1, $2, $3)`,
+                [journeyId, 'tool', JSON.stringify(toolResults)]
+            );
             messages.push({ role: 'user', content: toolResults });
         }
         send({ type: 'done' });
@@ -8652,29 +9043,78 @@ app.post('/api/chat/journey-builder/:id', requireAuth, async (req, res) => {
     }
 });
 
+// In-memory DE schema cache — invalidate manually if schema changes.
+const deSchemaCache = new Map();
+const DE_SCHEMA_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+async function fetchDeSchemaCompact(mc, deKey) {
+    const cached = deSchemaCache.get(deKey);
+    if (cached && Date.now() - cached.at < DE_SCHEMA_TTL_MS) {
+        return cached.value;
+    }
+    const schemaXml = `<RetrieveRequestMsg xmlns="http://exacttarget.com/wsdl/partnerAPI">
+      <RetrieveRequest>
+        <ObjectType>DataExtensionField</ObjectType>
+        <Properties>Name</Properties><Properties>FieldType</Properties><Properties>MaxLength</Properties>
+        <Filter xsi:type="SimpleFilterPart" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+          <Property>DataExtension.CustomerKey</Property>
+          <SimpleOperator>equals</SimpleOperator>
+          <Value>${deKey}</Value>
+        </Filter>
+      </RetrieveRequest>
+    </RetrieveRequestMsg>`;
+
+    // Run schema + sample in parallel so total wall time ≈ slower of the two.
+    const [schemaRaw, sampleRaw] = await Promise.allSettled([
+        mc.soap('Retrieve', schemaXml),
+        mc.rest('GET', `/data/v1/customobjectdata/key/${encodeURIComponent(deKey)}/rowset?$top=5`),
+    ]);
+
+    // Compact the schema — extract column names + types, drop the SOAP envelope noise.
+    let columns = [];
+    if (schemaRaw.status === 'fulfilled') {
+        const fields = extractFieldsFromSoap(schemaRaw.value);
+        columns = fields.map((f) => ({
+            name: f.Name,
+            type: f.FieldType,
+            ...(f.MaxLength && f.FieldType === 'Text' ? { max: parseInt(f.MaxLength, 10) } : {}),
+        }));
+    }
+
+    // Compact sample to just the first 3 rows (Claude doesn't need 5).
+    let sampleRows = [];
+    if (sampleRaw.status === 'fulfilled') {
+        const items = sampleRaw.value?.items || [];
+        sampleRows = items.slice(0, 3).map((r) => r.values || r);
+    }
+
+    const value = {
+        key: deKey,
+        columns,
+        sample: sampleRows,
+        fetched_at: new Date().toISOString(),
+    };
+    deSchemaCache.set(deKey, { at: Date.now(), value });
+    return value;
+}
+
+function extractFieldsFromSoap(soapResp) {
+    // mc.soap() returns parsed JSON from SOAP XML. The shape varies;
+    // look for Results array at common locations.
+    const results =
+        soapResp?.RetrieveResponseMsg?.Results ||
+        soapResp?.Body?.RetrieveResponseMsg?.Results ||
+        soapResp?.Results ||
+        [];
+    return Array.isArray(results) ? results : [results].filter(Boolean);
+}
+
 async function dispatchJourneyTool({ tool, input, dsl, mc, journey, pool }) {
     try {
         switch (tool) {
             case 'inspect_master_de': {
-                const schemaXml = `<RetrieveRequestMsg xmlns="http://exacttarget.com/wsdl/partnerAPI">
-                  <RetrieveRequest>
-                    <ObjectType>DataExtensionField</ObjectType>
-                    <Properties>Name</Properties><Properties>FieldType</Properties><Properties>MaxLength</Properties>
-                    <Filter xsi:type="SimpleFilterPart" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-                      <Property>DataExtension.CustomerKey</Property>
-                      <SimpleOperator>equals</SimpleOperator>
-                      <Value>${input.de_name}</Value>
-                    </Filter>
-                  </RetrieveRequest>
-                </RetrieveRequestMsg>`;
-                const schema = await mc.soap('Retrieve', schemaXml);
-                let sample = null;
-                try {
-                    sample = await mc.rest('GET', `/data/v1/customobjectdata/key/${encodeURIComponent(input.de_name)}/rowset?$top=5`);
-                } catch (e) {
-                    sample = { error: e.message };
-                }
-                return { result: { schema, sample } };
+                const value = await fetchDeSchemaCompact(mc, input.de_name);
+                return { result: value };
             }
             case 'set_entry_source':
                 return { dsl: journeySetEntrySource(dsl, input), result: 'entry source set' };
@@ -8687,18 +9127,6 @@ async function dispatchJourneyTool({ tool, input, dsl, mc, journey, pool }) {
             case 'validate_journey': {
                 const { valid, errors } = validateDsl(dsl);
                 return { result: { valid, errors } };
-            }
-            case 'deploy_journey_draft': {
-                const { valid, errors } = validateDsl(dsl);
-                if (!valid) return { error: `Cannot deploy: ${errors.join('; ')}` };
-                const out = await deployJourney({ mc, dsl, config: { market: 'GL' } });
-                await pool.query(
-                    `UPDATE journeys SET dsl_json = $1, status = 'deployed_draft',
-                       mc_interaction_id = $2, mc_target_de_key = $3, mc_query_activity_id = $4
-                     WHERE id = $5`,
-                    [JSON.stringify(out.dsl), out.mc_interaction_id, out.mc_target_de_key, out.mc_query_activity_id, journey.id]
-                );
-                return { dsl: out.dsl, result: { mc_interaction_id: out.mc_interaction_id, status: 'Draft' } };
             }
             default:
                 return { error: `unknown tool ${tool}` };

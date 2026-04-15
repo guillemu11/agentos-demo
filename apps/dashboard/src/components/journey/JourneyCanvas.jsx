@@ -20,7 +20,7 @@ const nodeTypes = {
 };
 const edgeTypes = { animated: AnimatedEdge };
 
-export default function JourneyCanvas({ dsl, toolStatus }) {
+export default function JourneyCanvas({ dsl, toolStatus, onNodeClick, highlightActivityId }) {
   const { nodes, edges } = useMemo(() => dslToGraph(dsl), [dsl]);
   const [lastAddedId, setLastAddedId] = useState(null);
   const [prevIds, setPrevIds] = useState(new Set());
@@ -38,7 +38,11 @@ export default function JourneyCanvas({ dsl, toolStatus }) {
 
   const decoratedNodes = nodes.map((n) => ({
     ...n,
-    data: { ...n.data, isNewlyAdded: n.id === lastAddedId, toolRunning: toolStatus?.status === 'running' },
+    data: {
+      ...n.data,
+      isNewlyAdded: n.id === lastAddedId || n.id === highlightActivityId,
+      toolRunning: toolStatus?.status === 'running',
+    },
   }));
 
   return (
@@ -48,6 +52,7 @@ export default function JourneyCanvas({ dsl, toolStatus }) {
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        onNodeClick={onNodeClick ? (_, node) => onNodeClick(node) : undefined}
         fitView
         fitViewOptions={{ padding: 0.2, duration: 500 }}
         defaultEdgeOptions={{ markerEnd: { type: MarkerType.ArrowClosed } }}

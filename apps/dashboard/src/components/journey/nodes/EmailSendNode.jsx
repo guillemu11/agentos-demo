@@ -6,7 +6,7 @@ export default function EmailSendNode({ data }) {
   const { t } = useLanguage();
   const a = data.activity;
   return (
-    <div className={`journey-node journey-node--send ${data.isNewlyAdded ? 'journey-node--newly-added' : ''}`}>
+    <div className={`journey-node journey-node--send ${data.isNewlyAdded ? 'journey-node--newly-added' : ''} ${!a.mc_email_id ? 'journey-node--clickable' : ''}`}>
       <Handle type="target" position={Position.Top} />
       <div className="journey-node__header"><Mail size={16} /> {t('journeys.nodeTypes.email_send')}</div>
       <div className="journey-node__body">
