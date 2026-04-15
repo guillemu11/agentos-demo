@@ -5,6 +5,8 @@ import JourneyCanvas from '../components/journey/JourneyCanvas.jsx';
 import JourneyToolbar from '../components/journey/JourneyToolbar.jsx';
 import EmailBuilderModal from '../components/journey/EmailBuilderModal.jsx';
 import EntrySourceModal from '../components/journey/EntrySourceModal.jsx';
+import AIIdeasTab from '../components/ai-proposals/AIIdeasTab.jsx';
+import { AI_PROPOSALS } from '../data/aiProposals.js';
 
 const API = import.meta.env.VITE_API_URL || '/api';
 
@@ -19,7 +21,10 @@ export default function JourneyBuilderPage() {
   const [emailBuilderActivity, setEmailBuilderActivity] = useState(null);
   const [highlightActivityId, setHighlightActivityId] = useState(null);
   const [entryModalOpen, setEntryModalOpen] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState('chat');
   const loadedRef = useRef(false);
+
+  const journeyHighPriorityCount = AI_PROPOSALS.journeys.default.filter(p => p.priority === 'urgent' || p.priority === 'high').length;
 
   useEffect(() => {
     fetch(`${API}/journeys/${id}`, { credentials: 'include' })
@@ -57,15 +62,46 @@ export default function JourneyBuilderPage() {
         onRename={(name) => setJourney({ ...journey, name })}
       />
       <div className="journey-builder__body">
-        <JourneyBuilderChat
-          journeyId={id}
-          messages={messages}
-          seedMessage={seedMessage}
-          onSeedConsumed={() => setSeedMessage(null)}
-          onJourneyState={setDsl}
-          onToolStatus={setToolStatus}
-          onMessage={(m) => setMessages((prev) => [...prev, m])}
-        />
+        <aside className="journey-chat">
+          <div className="journey-sidebar-tabs">
+            <button
+              className={`journey-sidebar-tab${sidebarTab === 'chat' ? ' active' : ''}`}
+              onClick={() => setSidebarTab('chat')}
+              type="button"
+            >
+              Chat
+            </button>
+            <button
+              className={`journey-sidebar-tab${sidebarTab === 'ai-ideas' ? ' active' : ''}`}
+              onClick={() => setSidebarTab('ai-ideas')}
+              type="button"
+            >
+              ✦ AI Ideas
+              {journeyHighPriorityCount > 0 && (
+                <span className="ai-tab-badge">{journeyHighPriorityCount}</span>
+              )}
+            </button>
+          </div>
+
+          {sidebarTab === 'chat' ? (
+            <JourneyBuilderChat
+              journeyId={id}
+              messages={messages}
+              seedMessage={seedMessage}
+              onSeedConsumed={() => setSeedMessage(null)}
+              onJourneyState={setDsl}
+              onToolStatus={setToolStatus}
+              onMessage={(m) => setMessages((prev) => [...prev, m])}
+            />
+          ) : (
+            <AIIdeasTab
+              proposals={AI_PROPOSALS.journeys.default}
+              onDemand={false}
+              metaText="Auto-analysis · 5 min ago"
+            />
+          )}
+        </aside>
+
         <JourneyCanvas
           dsl={dsl}
           toolStatus={toolStatus}
@@ -77,6 +113,7 @@ export default function JourneyBuilderPage() {
         open={!!emailBuilderActivity}
         journeyId={id}
         activity={emailBuilderActivity}
+        dsl={dsl}
         onClose={() => setEmailBuilderActivity(null)}
         onConfirmed={(updatedDsl) => {
           setDsl(updatedDsl);
