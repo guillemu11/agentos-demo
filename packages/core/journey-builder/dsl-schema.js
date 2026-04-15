@@ -1,7 +1,7 @@
 import { CAMPAIGN_TYPES } from '../campaign-builder/index.js';
 
 const ACTIVITY_TYPES = ['wait_duration', 'decision_split', 'email_send', 'wait_until_event', 'engagement_split'];
-const DANGEROUS_SQL = /\b(DROP|DELETE|UPDATE|TRUNCATE|INSERT|ALTER|GRANT|REVOKE)\b/i;
+const DANGEROUS_SQL = /\b(DROP|DELETE|UPDATE|TRUNCATE|INSERT|ALTER|GRANT|REVOKE|MERGE|EXEC|EXECUTE|SP_\w+|XP_\w+)\b/i;
 
 export function validateDsl(dsl) {
   const errors = [];
@@ -22,7 +22,8 @@ export function validateDsl(dsl) {
 
   for (const a of dsl.activities) validateActivity(a, ids, dsl.activities, errors);
 
-  if (errors.length === 0 && hasCycle(dsl)) errors.push('cycle detected in activity graph');
+  try { if (hasCycle(dsl)) errors.push('cycle detected in activity graph'); }
+  catch { /* malformed activities already reported above */ }
 
   return { valid: errors.length === 0, errors };
 }
@@ -33,6 +34,7 @@ function validateEntry(entry, errors) {
   if (!s.master_de_key) errors.push('entry.source.master_de_key required');
   if (!s.target_de_name) errors.push('entry.source.target_de_name required');
   if (!s.sql) { errors.push('entry.source.sql required'); return; }
+  if (s.sql.includes(';')) errors.push('sql must be a single statement (no semicolons)');
   if (DANGEROUS_SQL.test(s.sql)) errors.push('dangerous sql detected (DROP/DELETE/UPDATE/TRUNCATE/INSERT/ALTER)');
   if (!/^\s*SELECT\b/i.test(s.sql)) errors.push('sql must start with SELECT');
   if (s.master_de_key && !new RegExp(`\\bFROM\\s+\\[?${s.master_de_key}\\]?`, 'i').test(s.sql))
@@ -58,6 +60,8 @@ function validateActivity(a, ids, all, errors) {
     case 'email_send':
       if (!CAMPAIGN_TYPES[a.campaign_type]) errors.push(`${a.id}: campaign_type "${a.campaign_type}" not in CAMPAIGN_TYPES registry`);
       if (!a.email_shell_name) errors.push(`${a.id}: email_shell_name required`);
+      if (a.mc_email_id !== null && a.mc_email_id !== undefined && typeof a.mc_email_id !== 'number')
+        errors.push(`${a.id}: mc_email_id must be null or a number`);
       nextRefs.push(a.next);
       break;
     case 'wait_until_event':

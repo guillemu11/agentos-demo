@@ -31,7 +31,7 @@ describe('validateDsl', () => {
   it('rejects dangling next', () => {
     const { valid, errors } = validateDsl(load('dsl-invalid-dangling-next.json'));
     expect(valid).toBe(false);
-    expect(errors.some(e => /ghost/i.test(e) && /next/i.test(e))).toBe(true);
+    expect(errors.some(e => /next.+does not reference/i.test(e))).toBe(true);
   });
 
   it('rejects SQL with DROP', () => {
@@ -62,5 +62,26 @@ describe('validateDsl', () => {
     const { valid, errors } = validateDsl(bad);
     expect(valid).toBe(false);
     expect(errors.some(e => /preceding|before|earlier/i.test(e))).toBe(true);
+  });
+
+  it('rejects duplicate activity ids', () => {
+    const bad = load('dsl-minimal.json');
+    bad.activities.push({ ...bad.activities[0] });
+    const { valid, errors } = validateDsl(bad);
+    expect(valid).toBe(false);
+    expect(errors.some(e => /duplicate/i.test(e))).toBe(true);
+  });
+
+  it('rejects self-loop (a.next = a.id)', () => {
+    const bad = {
+      version: 1, name: 'SelfLoop',
+      entry: { source: { type: 'master_de_query', master_de_key: 'M', sql: 'SELECT 1 FROM M', target_de_name: 'T' } },
+      activities: [
+        { id: 'loop', type: 'wait_duration', amount: 1, unit: 'days', next: 'loop' }
+      ]
+    };
+    const { valid, errors } = validateDsl(bad);
+    expect(valid).toBe(false);
+    expect(errors.some(e => /cycle/i.test(e))).toBe(true);
   });
 });
