@@ -421,7 +421,7 @@ async function logAudit(eventType, department, title, details, agentId = null) {
 // CAMPAIGN CALENDAR — AI insights
 // ═══════════════════════════════════════════════════════════════════════════════
 
-app.post('/api/calendar/ai-insights', async (req, res) => {
+app.post('/api/calendar/ai-insights', requireAuth, async (req, res) => {
     const { events = [], ruleHits = [], rangeStart, rangeEnd } = req.body || {};
     if (!rangeStart || !rangeEnd) {
         return res.status(400).json({ error: 'rangeStart and rangeEnd required' });
@@ -434,8 +434,10 @@ app.post('/api/calendar/ai-insights', async (req, res) => {
             error: 'ANTHROPIC_API_KEY not configured',
         });
     }
+    const truncatedEvents = events.slice(0, 200);
+    const truncatedRuleHits = ruleHits.slice(0, 50);
     try {
-        const out = await enrichCalendarInsights({ client: anthropic, events, ruleHits, rangeStart, rangeEnd });
+        const out = await enrichCalendarInsights({ client: anthropic, events: truncatedEvents, ruleHits: truncatedRuleHits, rangeStart, rangeEnd });
         res.json(out);
     } catch (err) {
         console.error('[calendar/ai-insights] error:', err);

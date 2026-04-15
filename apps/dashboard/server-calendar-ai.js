@@ -27,40 +27,62 @@ Return strict JSON matching this shape:
 }
 Output ONLY the JSON, no markdown fences, no prose.`;
 
+function stripJsonFences(text) {
+  // Handle ```json\n{...}\n``` or ```\n{...}\n```
+  const fencePattern = /^\s*```(?:json)?\s*\n?([\s\S]*?)\n?```\s*$/;
+  const m = text.match(fencePattern);
+  return m ? m[1] : text;
+}
+
+function degradedFallback(ruleHits, errorMsg) {
+  return {
+    enriched: ruleHits.map(h => ({
+      id: h.id,
+      narrative: h.title,
+      action: '',
+      estimatedImpact: '',
+    })),
+    freeformInsights: [],
+    degraded: true,
+    error: errorMsg,
+  };
+}
+
 export async function enrichWithClaude({ client, events, ruleHits, rangeStart, rangeEnd }) {
   const payload = { rangeStart, rangeEnd, events, ruleHits };
+
+  let resp;
   try {
-    const resp = await client.messages.create({
+    resp = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 2000,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: JSON.stringify(payload) }],
     });
-    const text = (resp.content || []).find(c => c.type === 'text')?.text || '{}';
-    const parsed = JSON.parse(text);
-    return {
-      enriched: parsed.enriched || [],
-      freeformInsights: parsed.freeformInsights || [],
-      degraded: false,
-    };
   } catch (err) {
-    return {
-      enriched: ruleHits.map(h => ({
-        id: h.id,
-        narrative: h.title,
-        action: '',
-        estimatedImpact: '',
-      })),
-      freeformInsights: [],
-      degraded: true,
-      error: err.message,
-    };
+    return degradedFallback(ruleHits, `claude-api: ${err.message}`);
   }
+
+  const rawText = (resp.content || []).find(c => c.type === 'text')?.text || '{}';
+  const cleaned = stripJsonFences(rawText);
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (err) {
+    return degradedFallback(ruleHits, `parse: ${err.message}`);
+  }
+
+  return {
+    enriched: parsed.enriched || [],
+    freeformInsights: parsed.freeformInsights || [],
+    degraded: false,
+  };
 }
 
 // Simple in-memory cache keyed by eventsHash + range
 const cache = new Map();
 const TTL_MS = 5 * 60 * 1000;
+const CACHE_MAX = 100;
 
 function hashPayload(events, ruleHits, rangeStart, rangeEnd) {
   const ids = [...events.map(e => e.id), ...ruleHits.map(h => h.id)].sort().join('|');
@@ -73,6 +95,11 @@ export async function getOrEnrich({ client, events, ruleHits, rangeStart, rangeE
   const cached = cache.get(key);
   if (cached && now - cached.at < TTL_MS) return cached.value;
   const value = await enrichWithClaude({ client, events, ruleHits, rangeStart, rangeEnd });
+  if (cache.size >= CACHE_MAX) {
+    // Evict oldest entry (Map iteration order is insertion order)
+    const firstKey = cache.keys().next().value;
+    if (firstKey !== undefined) cache.delete(firstKey);
+  }
   cache.set(key, { at: now, value });
   return value;
 }
