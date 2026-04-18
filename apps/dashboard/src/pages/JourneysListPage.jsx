@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import CreateJourneyModal from '../components/journey/CreateJourneyModal.jsx';
+import SuggestedJourneys from '../components/journey/SuggestedJourneys.jsx';
 import { AI_PROPOSALS } from '../data/aiProposals.js';
 
 const API = import.meta.env.VITE_API_URL || '/api';
@@ -94,6 +95,8 @@ export default function JourneysListPage() {
         <StatCard icon={<Rocket size={16} strokeWidth={2} />} label={t('journeys.statusDeployedDraft')} value={stats.deployed_draft || 0} tone="emerald" />
         <StatCard icon={<Archive size={16} strokeWidth={2} />} label={t('journeys.statusArchived')} value={stats.archived || 0} tone="muted" />
       </div>
+
+      {!loading && <SuggestedJourneys onCreated={handleCreated} />}
 
       {!loading && items.length > 0 && (
         <div className="jl__search">
@@ -184,7 +187,10 @@ function JourneyCard({ journey, onClick, onDelete }) {
         {(() => {
           const count = AI_PROPOSALS.journeys.default.filter(p => p.priority === 'urgent' || p.priority === 'high').length;
           return count > 0 ? (
-            <div className="jl__card-proposal-badge">✦ {count} AI suggestions</div>
+            <div className="jl__card-proposal-badge">
+              <Sparkles size={12} strokeWidth={2} />
+              {t('journeys.aiSuggestionsCount').replace('{n}', count)}
+            </div>
           ) : null;
         })()}
         <div className="jl__card-footer">

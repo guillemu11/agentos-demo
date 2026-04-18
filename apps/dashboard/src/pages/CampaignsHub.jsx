@@ -6,9 +6,9 @@ import { BAU_CAMPAIGN_TYPES, BAU_CATEGORIES, getAllBauCategories } from '../data
 import WaTab from '../components/WaTab.jsx';
 
 const complexityColors = {
-    low: '#10b981',
-    medium: '#f59e0b',
-    high: '#D71920',
+    low: 'var(--success)',
+    medium: 'var(--warning)',
+    high: 'var(--primary)',
     'very-high': '#7c3aed',
 };
 

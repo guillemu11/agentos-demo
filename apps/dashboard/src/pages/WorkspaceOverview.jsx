@@ -13,10 +13,10 @@ export default function WorkspaceOverview() {
     const { t } = useLanguage();
 
     const statusConfig = {
-        active: { color: '#10b981', label: t('status.active'), bg: '#ecfdf5' },
-        idle: { color: '#f59e0b', label: t('status.idle'), bg: '#fffbeb' },
-        offline: { color: '#94a3b8', label: t('status.offline'), bg: '#f1f5f9' },
-        error: { color: '#ef4444', label: t('status.error'), bg: '#fef2f2' },
+        active: { color: 'var(--success)', label: t('status.active'), bg: 'var(--success-soft)' },
+        idle: { color: 'var(--warning)', label: t('status.idle'), bg: 'var(--warning-soft)' },
+        offline: { color: 'var(--text-muted)', label: t('status.offline'), bg: 'var(--theme-graphite-soft)' },
+        error: { color: 'var(--danger)', label: t('status.error'), bg: 'var(--danger-soft)' },
     };
 
     const [agents, setAgents] = useState([]);
@@ -130,7 +130,7 @@ export default function WorkspaceOverview() {
         return (
             <div className="dashboard-container animate-fade-in" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
                 <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '2rem', marginBottom: '16px', color: '#ef4444' }}>{t('workspace.errorLabel')}</div>
+                    <div style={{ fontSize: '2rem', marginBottom: '16px', color: 'var(--danger)' }}>{t('workspace.errorLabel')}</div>
                     <p className="subtitle" style={{ marginBottom: '16px' }}>{error}</p>
                     <button
                         onClick={() => window.location.reload()}
@@ -235,26 +235,26 @@ export default function WorkspaceOverview() {
             {(pipelineCounts.research_active > 0 || pipelineCounts.emails_active > 0 || pipelineCounts.experiments_active > 0) && (
                 <section style={{ marginBottom: 32 }}>
                     <h2 style={{ fontSize: '1.1rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '16px', color: 'var(--text-muted)' }}>
-                        Active Items
+                        {t('workspace.activeItems')}
                     </h2>
                     <div className="kb-stats-grid">
-                        <div className="kb-stat-card" style={{ cursor: 'pointer', borderLeft: '3px solid #3b82f6' }} onClick={() => navigate('/app/research')}>
+                        <div className="kb-stat-card" style={{ cursor: 'pointer', borderLeft: '3px solid var(--info)' }} onClick={() => navigate('/app/research')}>
                             <span className="kb-stat-value" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <Search size={18} style={{ color: '#3b82f6' }} /> {pipelineCounts.research_active || 0}
+                                <Search size={18} style={{ color: 'var(--info)' }} /> {pipelineCounts.research_active || 0}
                             </span>
-                            <span className="kb-stat-label">Active Research</span>
+                            <span className="kb-stat-label">{t('workspace.activeResearch')}</span>
                         </div>
-                        <div className="kb-stat-card" style={{ cursor: 'pointer', borderLeft: '3px solid #10b981' }} onClick={() => navigate('/app/campaigns')}>
+                        <div className="kb-stat-card" style={{ cursor: 'pointer', borderLeft: '3px solid var(--success)' }} onClick={() => navigate('/app/campaigns')}>
                             <span className="kb-stat-value" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <Mail size={18} style={{ color: '#10b981' }} /> {pipelineCounts.emails_active || 0}
+                                <Mail size={18} style={{ color: 'var(--success)' }} /> {pipelineCounts.emails_active || 0}
                             </span>
-                            <span className="kb-stat-label">Emails in Review</span>
+                            <span className="kb-stat-label">{t('workspace.emailsInReview')}</span>
                         </div>
-                        <div className="kb-stat-card" style={{ cursor: 'pointer', borderLeft: '3px solid #f59e0b' }} onClick={() => navigate('/app/research')}>
+                        <div className="kb-stat-card" style={{ cursor: 'pointer', borderLeft: '3px solid var(--warning)' }} onClick={() => navigate('/app/research')}>
                             <span className="kb-stat-value" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <FlaskConical size={18} style={{ color: '#f59e0b' }} /> {pipelineCounts.experiments_active || 0}
+                                <FlaskConical size={18} style={{ color: 'var(--warning)' }} /> {pipelineCounts.experiments_active || 0}
                             </span>
-                            <span className="kb-stat-label">Running Experiments</span>
+                            <span className="kb-stat-label">{t('workspace.runningExperiments')}</span>
                         </div>
                     </div>
                 </section>
@@ -323,7 +323,7 @@ export default function WorkspaceOverview() {
                                                     onClick={(e) => handleStatusUpdate(e, agent.id, s)}
                                                     className={`agent-status-btn ${agent.status === s ? 'agent-status-btn-active' : ''}`}
                                                     style={agent.status === s ? { background: statusConfig[s].color } : {}}
-                                                    title={`Set ${s}`}
+                                                    title={t('workspace.setStatus').replace('{status}', s)}
                                                 >
                                                     {s[0].toUpperCase()}
                                                 </button>
