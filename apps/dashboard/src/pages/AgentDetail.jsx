@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { getViewForAgent } from '../components/agent-views/index.js';
+import { AgentAvatar } from '../components/icons.jsx';
+import Button from '../components/ui/Button.jsx';
+import Modal from '../components/ui/Modal.jsx';
+import FormField from '../components/ui/FormField.jsx';
+import { useToast } from '../components/ui/ToastProvider.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -23,12 +29,13 @@ export default function AgentDetail() {
     const { agentId } = useParams();
     const navigate = useNavigate();
     const { t, lang } = useLanguage();
+    const toast = useToast();
 
     const statusConfig = {
-        active: { color: '#10b981', label: t('status.active'), bg: '#ecfdf5' },
-        idle: { color: '#f59e0b', label: t('status.idle'), bg: '#fffbeb' },
-        offline: { color: '#94a3b8', label: t('status.offline'), bg: '#f1f5f9' },
-        error: { color: '#ef4444', label: t('status.error'), bg: '#fef2f2' },
+        active: { color: 'var(--success)', label: t('status.active'), bg: 'var(--success-soft)' },
+        idle: { color: 'var(--warning)', label: t('status.idle'), bg: 'var(--warning-soft)' },
+        offline: { color: 'var(--text-muted)', label: t('status.offline'), bg: 'var(--theme-graphite-soft)' },
+        error: { color: 'var(--danger)', label: t('status.error'), bg: 'var(--danger-soft)' },
     };
 
     const [agent, setAgent] = useState(null);
@@ -96,7 +103,7 @@ export default function AgentDetail() {
             setShowModal(false);
             fetchAgent();
         } catch (err) {
-            alert(err.message);
+            toast.error(err.message);
         } finally {
             setIsSubmitting(false);
         }
@@ -105,7 +112,9 @@ export default function AgentDetail() {
     if (loading) {
         return (
             <div className="dashboard-container animate-fade-in">
-                <button className="back-button" onClick={() => navigate('/app/workspace')}>← {t('agentDetail.back')}</button>
+                <Button variant="ghost" onClick={() => navigate('/app/workspace')}>
+                    <ArrowLeft size={16} /> {t('agentDetail.back')}
+                </Button>
                 <div className="empty-state">{t('agentDetail.loadingAgent')}</div>
             </div>
         );
@@ -114,7 +123,9 @@ export default function AgentDetail() {
     if (error || !agent) {
         return (
             <div className="dashboard-container animate-fade-in">
-                <button className="back-button" onClick={() => navigate('/app/workspace')}>← {t('agentDetail.back')}</button>
+                <Button variant="ghost" onClick={() => navigate('/app/workspace')}>
+                    <ArrowLeft size={16} /> {t('agentDetail.back')}
+                </Button>
                 <p>{error || t('agentDetail.agentNotFound')}</p>
             </div>
         );
@@ -127,9 +138,9 @@ export default function AgentDetail() {
 
     return (
         <div className={`dashboard-container animate-fade-in ${theme}${activeTab === 'chat' ? ' dashboard-container--chat-mode' : ''}`}>
-            <button className="back-button" onClick={() => navigate(`/app/workspace/${agent.department}`)}>
-                ← {t('agentDetail.backTo')} {agent.department}
-            </button>
+            <Button variant="ghost" onClick={() => navigate(`/app/workspace/${agent.department}`)}>
+                <ArrowLeft size={16} /> {t('agentDetail.backTo')} {agent.department}
+            </Button>
 
             {/* Agent Profile Header */}
             <section
@@ -137,11 +148,12 @@ export default function AgentDetail() {
             >
                 <div className="agent-profile-left">
                     <div className="agent-profile-avatar-wrapper">
-                        <span className="agent-profile-avatar">{agent.avatar}</span>
+                        {/* TODO: AgentAvatar uses agentId map; agent.avatar is an emoji string. Falls back to <Bot> if id not in map. */}
+                        <span className="agent-profile-avatar"><AgentAvatar agentId={agent.id} size={32} /></span>
                         <span className="agent-profile-status-dot" style={{ background: st.color }}></span>
                     </div>
                     <div className="agent-profile-info">
-                        <h1 style={{ marginBottom: '4px' }}>{agent.name}</h1>
+                        <h1 style={{ marginBottom: 'var(--space-1)' }}>{agent.name}</h1>
                         <p className="agent-profile-role">{agent.role}</p>
                         <div className="agent-profile-badges">
                             <span className="dept-badge">
@@ -154,13 +166,9 @@ export default function AgentDetail() {
                     </div>
                 </div>
                 {activeTab !== 'chat' && (
-                    <button
-                        className="back-button"
-                        style={{ margin: 0, background: 'var(--primary)', color: 'white' }}
-                        onClick={() => setShowModal(true)}
-                    >
+                    <Button variant="primary" onClick={() => setShowModal(true)}>
                         {t('agentDetail.editProfile')}
-                    </button>
+                    </Button>
                 )}
             </section>
 
@@ -168,84 +176,68 @@ export default function AgentDetail() {
             <ViewComponent agent={agent} activeTab={activeTab} onTabChange={setActiveTab} />
 
             {/* ════════ EDIT AGENT MODAL ════════ */}
-            {showModal && (
-                <div style={{
-                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                    background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    zIndex: 1000, backdropFilter: 'blur(4px)', padding: '20px'
-                }}>
-                    <div className="card" style={{ width: '100%', maxWidth: '500px' }}>
-                        <h2 style={{ marginBottom: '20px' }}>{t('agentDetail.editAgentProfile')}</h2>
-                        <form onSubmit={handleEditSubmit}>
-                            <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: '16px', marginBottom: '16px' }}>
-                                <div>
-                                    <label className="edit-label">{t('agentDetail.avatar')}</label>
-                                    <input
-                                        className="edit-input-inline"
-                                        value={formData.avatar}
-                                        onChange={(e) => setFormData({ ...formData, avatar: e.target.value })}
-                                        placeholder="Avatar"
-                                        required
-                                    />
-                                </div>
-                                <div>
-                                    <label className="edit-label">{t('agentDetail.name')}</label>
-                                    <input
-                                        className="edit-input-inline"
-                                        value={formData.name}
-                                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                        required
-                                    />
-                                </div>
-                            </div>
-
-                            <div style={{ marginBottom: '16px' }}>
-                                <label className="edit-label">{t('agentDetail.role')}</label>
-                                <input
-                                    className="edit-input-inline"
-                                    value={formData.role}
-                                    onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                                    required
-                                />
-                            </div>
-
-                            <div style={{ marginBottom: '16px' }}>
-                                <label className="edit-label">{t('agentDetail.skillsComma')}</label>
-                                <input
-                                    className="edit-input-inline"
-                                    value={formData.skills}
-                                    onChange={(e) => setFormData({ ...formData, skills: e.target.value })}
-                                    placeholder="Python, Scrapy, Selenium..."
-                                />
-                            </div>
-
-                            <div style={{ marginBottom: '24px' }}>
-                                <label className="edit-label">{t('agentDetail.toolsComma')}</label>
-                                <input
-                                    className="edit-input-inline"
-                                    value={formData.tools}
-                                    onChange={(e) => setFormData({ ...formData, tools: e.target.value })}
-                                    placeholder="Browser, FileSystem, MCP:GoogleMaps..."
-                                />
-                            </div>
-
-                            <div style={{ display: 'flex', gap: '12px' }}>
-                                <button type="button" className="back-button" style={{ flex: 1, margin: 0 }} onClick={() => setShowModal(false)}>
-                                    {t('agentDetail.cancel')}
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="back-button"
-                                    style={{ flex: 1, margin: 0, background: 'var(--primary)', color: 'white' }}
-                                    disabled={isSubmitting}
-                                >
-                                    {isSubmitting ? t('agentDetail.saving') : t('agentDetail.saveChanges')}
-                                </button>
-                            </div>
-                        </form>
+            <Modal
+                open={showModal}
+                onClose={() => setShowModal(false)}
+                title={t('agentDetail.editAgentProfile')}
+                size="md"
+            >
+                <form onSubmit={handleEditSubmit}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
+                        <FormField label={t('agentDetail.avatar')} required>
+                            <input
+                                value={formData.avatar}
+                                onChange={(e) => setFormData({ ...formData, avatar: e.target.value })}
+                                placeholder="Avatar"
+                            />
+                        </FormField>
+                        <FormField label={t('agentDetail.name')} required>
+                            <input
+                                value={formData.name}
+                                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                            />
+                        </FormField>
                     </div>
-                </div>
-            )}
+
+                    <div style={{ marginBottom: 'var(--space-4)' }}>
+                        <FormField label={t('agentDetail.role')} required>
+                            <input
+                                value={formData.role}
+                                onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                            />
+                        </FormField>
+                    </div>
+
+                    <div style={{ marginBottom: 'var(--space-4)' }}>
+                        <FormField label={t('agentDetail.skillsComma')}>
+                            <input
+                                value={formData.skills}
+                                onChange={(e) => setFormData({ ...formData, skills: e.target.value })}
+                                placeholder="Python, Scrapy, Selenium..."
+                            />
+                        </FormField>
+                    </div>
+
+                    <div style={{ marginBottom: 'var(--space-6)' }}>
+                        <FormField label={t('agentDetail.toolsComma')}>
+                            <input
+                                value={formData.tools}
+                                onChange={(e) => setFormData({ ...formData, tools: e.target.value })}
+                                placeholder="Browser, FileSystem, MCP:GoogleMaps..."
+                            />
+                        </FormField>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+                        <Button variant="secondary" onClick={() => setShowModal(false)} style={{ flex: 1 }}>
+                            {t('agentDetail.cancel')}
+                        </Button>
+                        <Button type="submit" variant="primary" disabled={isSubmitting} style={{ flex: 1 }}>
+                            {isSubmitting ? t('agentDetail.saving') : t('agentDetail.saveChanges')}
+                        </Button>
+                    </div>
+                </form>
+            </Modal>
         </div>
     );
 }

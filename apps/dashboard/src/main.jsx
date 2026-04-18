@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import './index.css'
 import { LanguageProvider } from './i18n/LanguageContext.jsx'
+import { ToastProvider } from './components/ui/ToastProvider.jsx'
 import Layout from './components/Layout.jsx'
 import App from './App.jsx'
 import WorkspaceOverview from './pages/WorkspaceOverview.jsx'
@@ -34,6 +35,7 @@ import CampaignCreationPage from './pages/CampaignCreationPage.jsx';
 import PreviewTestPage from './pages/PreviewTestPage.jsx';
 import CompetitorAnalysisPage from './pages/CompetitorAnalysisPage.jsx';
 import BrandAuditPage from './pages/BrandAuditPage.jsx';
+import BrandGuardianPage from './pages/BrandGuardianPage.jsx';
 import JourneysListPage from './pages/JourneysListPage.jsx';
 import JourneyBuilderPage from './pages/JourneyBuilderPage.jsx';
 import CampaignCalendarPage from './pages/CampaignCalendarPage.jsx';
@@ -98,6 +100,7 @@ createRoot(document.getElementById('root')).render(
   <StrictMode>
     <ErrorBoundary>
       <LanguageProvider>
+        <ToastProvider>
         <BrowserRouter>
           <Routes>
             {/* Redirect root to dashboard */}
@@ -136,6 +139,7 @@ createRoot(document.getElementById('root')).render(
                       <Route path="/preview-test" element={<PreviewTestPage />} />
                       <Route path="/competitor-analysis" element={<CompetitorAnalysisPage />} />
                       <Route path="/brand-audit" element={<BrandAuditPage />} />
+                      <Route path="/brand-guardian" element={<BrandGuardianPage />} />
                       <Route path="/journeys" element={<JourneysListPage />} />
                       <Route path="/calendar" element={<CampaignCalendarPage />} />
                       <Route path="/settings" element={<SettingsPage />} />
@@ -152,6 +156,7 @@ createRoot(document.getElementById('root')).render(
             } />
           </Routes>
         </BrowserRouter>
+        </ToastProvider>
       </LanguageProvider>
     </ErrorBoundary>
   </StrictMode>,
