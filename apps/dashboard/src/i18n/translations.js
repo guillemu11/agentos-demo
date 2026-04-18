@@ -1473,6 +1473,21 @@ export const translations = {
       bauChatEmptyTitle: 'Asistente BAU',
       bauChatEmptyText: 'Pregunta sobre esta campana BAU, rendimiento historico o como optimizarla.',
       bauChatPlaceholder: 'Pregunta sobre este tipo de campana...',
+      hero: {
+        eyebrow: 'Marketing Cloud · Campañas',
+        subtitle: 'Lanza campañas BAU y lifecycle con presets productivos.',
+      },
+      searchPlaceholder: 'Buscar campañas…',
+      empty: {
+        title: 'Sin campañas',
+        description: 'No hay campañas en esta vista todavía.',
+      },
+      noResults: 'Sin resultados para "{query}"',
+      stats: {
+        total: 'Total',
+        active: 'Activas',
+        complexity: 'Alta complejidad',
+      },
     },
 
     voice: {
@@ -3703,6 +3718,21 @@ export const translations = {
       bauChatEmptyTitle: 'BAU Assistant',
       bauChatEmptyText: 'Ask about this BAU campaign type, historical performance, or how to optimize it.',
       bauChatPlaceholder: 'Ask about this campaign type...',
+      hero: {
+        eyebrow: 'Marketing Cloud · Campaigns',
+        subtitle: 'Launch BAU and lifecycle campaigns with production-ready presets.',
+      },
+      searchPlaceholder: 'Search campaigns…',
+      empty: {
+        title: 'No campaigns',
+        description: 'There are no campaigns in this view yet.',
+      },
+      noResults: 'No results for "{query}"',
+      stats: {
+        total: 'Total',
+        active: 'Active',
+        complexity: 'High complexity',
+      },
     },
 
     voice: {

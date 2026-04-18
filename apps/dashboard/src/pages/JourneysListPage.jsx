@@ -8,12 +8,14 @@ import {
   Archive,
   Sparkles,
   ArrowUpRight,
-  Search,
   Trash2,
 } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import CreateJourneyModal from '../components/journey/CreateJourneyModal.jsx';
 import SuggestedJourneys from '../components/journey/SuggestedJourneys.jsx';
+import HubHero from '../components/ui/HubHero.jsx';
+import { HubStats, HubStatCard } from '../components/ui/HubStats.jsx';
+import HubSearch from '../components/ui/HubSearch.jsx';
 import { AI_PROPOSALS } from '../data/aiProposals.js';
 
 const API = import.meta.env.VITE_API_URL || '/api';
@@ -63,55 +65,40 @@ export default function JourneysListPage() {
 
   return (
     <div className="jl">
-      <header className="jl__hero">
-        <div className="jl__hero-grid" aria-hidden="true" />
-        <div className="jl__hero-glow" aria-hidden="true" />
-        <div className="jl__hero-content">
-          <div className="jl__hero-eyebrow">
-            <Sparkles size={14} strokeWidth={2.5} />
-            <span>{t('journeys.hero.eyebrow')}</span>
-          </div>
-          <h1 className="jl__hero-title">
-            {t('journeys.title')}
-            <span className="jl__hero-title-accent">.</span>
-          </h1>
-          <p className="jl__hero-subtitle">{t('journeys.hero.subtitle')}</p>
-          <div className="jl__hero-actions">
-            <button className="jl__cta" onClick={() => setModalOpen(true)}>
-              <Plus size={16} strokeWidth={2.5} />
-              <span>{t('journeys.newJourney')}</span>
-              <span className="jl__cta-shine" aria-hidden="true" />
-            </button>
-            <div className="jl__hero-hint">
-              <kbd>↳</kbd> {t('journeys.hero.hint')}
-            </div>
-          </div>
-        </div>
-      </header>
+      <HubHero
+        eyebrow={<>
+          <Sparkles size={14} strokeWidth={2.5} />
+          <span>{t('journeys.hero.eyebrow')}</span>
+        </>}
+        title={t('journeys.title')}
+        subtitle={t('journeys.hero.subtitle')}
+        actions={
+          <button className="jl__cta" onClick={() => setModalOpen(true)}>
+            <Plus size={16} strokeWidth={2.5} />
+            <span>{t('journeys.newJourney')}</span>
+            <span className="jl__cta-shine" aria-hidden="true" />
+          </button>
+        }
+        hint={<><kbd>↳</kbd> {t('journeys.hero.hint')}</>}
+      />
 
-      <div className="jl__stats">
-        <StatCard icon={<Workflow size={16} strokeWidth={2} />} label={t('journeys.stats.total')} value={stats.total} tone="neutral" />
-        <StatCard icon={<Clock size={16} strokeWidth={2} />} label={t('journeys.statusDrafting')} value={stats.drafting || 0} tone="amber" />
-        <StatCard icon={<Rocket size={16} strokeWidth={2} />} label={t('journeys.statusDeployedDraft')} value={stats.deployed_draft || 0} tone="emerald" />
-        <StatCard icon={<Archive size={16} strokeWidth={2} />} label={t('journeys.statusArchived')} value={stats.archived || 0} tone="muted" />
-      </div>
+      <HubStats>
+        <HubStatCard icon={<Workflow size={16} strokeWidth={2} />} label={t('journeys.stats.total')} value={stats.total} tone="neutral" />
+        <HubStatCard icon={<Clock size={16} strokeWidth={2} />} label={t('journeys.statusDrafting')} value={stats.drafting || 0} tone="amber" />
+        <HubStatCard icon={<Rocket size={16} strokeWidth={2} />} label={t('journeys.statusDeployedDraft')} value={stats.deployed_draft || 0} tone="emerald" />
+        <HubStatCard icon={<Archive size={16} strokeWidth={2} />} label={t('journeys.statusArchived')} value={stats.archived || 0} tone="muted" />
+      </HubStats>
 
       {!loading && <SuggestedJourneys onCreated={handleCreated} />}
 
       {!loading && items.length > 0 && (
-        <div className="jl__search">
-          <Search size={15} strokeWidth={2} className="jl__search-icon" />
-          <input
-            type="text"
-            placeholder={t('journeys.searchPlaceholder')}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label={t('journeys.searchPlaceholder')}
-          />
-          {query && (
-            <span className="jl__search-count">{filtered.length} / {items.length}</span>
-          )}
-        </div>
+        <HubSearch
+          value={query}
+          onChange={setQuery}
+          placeholder={t('journeys.searchPlaceholder')}
+          count={filtered.length}
+          total={items.length}
+        />
       )}
 
       {loading ? (
@@ -143,18 +130,6 @@ export default function JourneysListPage() {
         onClose={() => setModalOpen(false)}
         onCreated={handleCreated}
       />
-    </div>
-  );
-}
-
-function StatCard({ icon, label, value, tone }) {
-  return (
-    <div className={`jl__stat jl__stat--${tone}`}>
-      <div className="jl__stat-icon">{icon}</div>
-      <div className="jl__stat-body">
-        <div className="jl__stat-value">{value}</div>
-        <div className="jl__stat-label">{label}</div>
-      </div>
     </div>
   );
 }
