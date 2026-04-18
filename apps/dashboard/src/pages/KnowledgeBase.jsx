@@ -1,24 +1,51 @@
 import { useState, useEffect } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { Database, FileText, Upload, Trash2, RefreshCw, Loader, Image, File, MessageSquare } from 'lucide-react';
+import {
+    Brain,
+    Database,
+    FileText,
+    Upload,
+    Trash2,
+    RefreshCw,
+    Loader,
+    Image,
+    File,
+    MessageSquare,
+    FolderOpen,
+    Layers,
+    Activity,
+} from 'lucide-react';
 import KBChat from '../components/KBChat.jsx';
+import HubHero from '../components/ui/HubHero.jsx';
+import { HubStats, HubStatCard } from '../components/ui/HubStats.jsx';
+import HubSearch from '../components/ui/HubSearch.jsx';
+import Button from '../components/ui/Button.jsx';
+import FormField from '../components/ui/FormField.jsx';
+import EmptyState from '../components/ui/EmptyState.jsx';
+import Skeleton from '../components/ui/Skeleton.jsx';
+import TabStrip from '../components/ui/TabStrip.jsx';
+import { useToast } from '../components/ui/ToastProvider.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
+const NAMESPACES = ['campaigns', 'emails', 'images', 'kpis', 'research', 'brand'];
+
 export default function KnowledgeBase() {
     const { t } = useLanguage();
+    const toast = useToast();
     const [tab, setTab] = useState('overview');
     const [status, setStatus] = useState(null);
     const [documents, setDocuments] = useState([]);
     const [docTotal, setDocTotal] = useState(0);
+    const [docsLoading, setDocsLoading] = useState(false);
     const [ingesting, setIngesting] = useState(false);
     const [docFilter, setDocFilter] = useState({ namespace: '', status: '' });
-    const [toast, setToast] = useState(null);
     const [uploadFile, setUploadFile] = useState(null);
     const [uploadTitle, setUploadTitle] = useState('');
     const [uploadNamespace, setUploadNamespace] = useState('research');
     const [uploading, setUploading] = useState(false);
+    const [heroQuery, setHeroQuery] = useState('');
 
     useEffect(() => { loadStatus(); }, []);
     useEffect(() => { if (tab === 'documents') loadDocuments(); }, [tab, docFilter]);
@@ -31,6 +58,7 @@ export default function KnowledgeBase() {
     }
 
     async function loadDocuments() {
+        setDocsLoading(true);
         try {
             const params = new URLSearchParams({ page: '1', limit: '50' });
             if (docFilter.namespace) params.set('namespace', docFilter.namespace);
@@ -41,7 +69,9 @@ export default function KnowledgeBase() {
                 setDocuments(data.documents);
                 setDocTotal(data.total);
             }
-        } catch { /* ignore */ }
+        } catch { /* ignore */ } finally {
+            setDocsLoading(false);
+        }
     }
 
     async function handleIngestCampaigns() {
@@ -50,14 +80,14 @@ export default function KnowledgeBase() {
             const res = await fetch(`${API_URL}/knowledge/ingest-campaigns`, { method: 'POST', credentials: 'include' });
             if (res.ok) {
                 const data = await res.json();
-                setToast(`${t('knowledge.ingested')}: ${data.documentsCreated} docs, ${data.chunksCreated} chunks`);
+                toast.success(`${t('knowledge.ingested')}: ${data.documentsCreated} docs, ${data.chunksCreated} chunks`);
                 loadStatus();
             } else {
                 const err = await res.json();
-                setToast(err.error || 'Error');
+                toast.error(err.error || 'Error');
             }
         } catch (err) {
-            setToast(err.message);
+            toast.error(err.message);
         } finally {
             setIngesting(false);
         }
@@ -86,26 +116,40 @@ export default function KnowledgeBase() {
             });
             if (res.ok) {
                 const data = await res.json();
-                setToast(`${t('knowledge.uploaded')}: ${data.contentType} — ${data.chunksCreated} chunks`);
+                toast.success(`${t('knowledge.uploaded')}: ${data.contentType} - ${data.chunksCreated} chunks`);
                 setUploadFile(null);
                 setUploadTitle('');
                 loadStatus();
             } else {
                 const err = await res.json();
-                setToast(err.error || t('knowledge.uploadError'));
+                toast.error(err.error || t('knowledge.uploadError'));
             }
         } catch (err) {
-            setToast(err.message);
+            toast.error(err.message);
         } finally {
             setUploading(false);
         }
+    }
+
+    function triggerUploadFlow() {
+        setTab('overview');
+        // Focus the hidden file input so the native picker opens.
+        requestAnimationFrame(() => {
+            document.getElementById('kb-file-input')?.click();
+        });
+    }
+
+    function handleHeroSearchChange(val) {
+        setHeroQuery(val);
+        if (val && tab !== 'search') setTab('search');
     }
 
     const nsData = status?.namespaces
         ? Object.entries(status.namespaces).map(([name, data]) => ({ name, docs: data.indexed, chunks: data.chunks }))
         : [];
 
-    const NAMESPACES = ['campaigns', 'emails', 'images', 'kpis', 'research', 'brand'];
+    const ready = status?.ready;
+
     const tabs = [
         { id: 'overview', label: t('knowledge.overview'), icon: <Database size={14} /> },
         { id: 'documents', label: t('knowledge.documents'), icon: <FileText size={14} /> },
@@ -114,54 +158,76 @@ export default function KnowledgeBase() {
 
     return (
         <div className="dashboard-container animate-fade-in">
-            {toast && <div className="settings-toast" onClick={() => setToast(null)}>{toast}</div>}
+            <HubHero
+                eyebrow={<>
+                    <Brain size={14} strokeWidth={2.5} />
+                    <span>{t('knowledge.hero.eyebrow')}</span>
+                </>}
+                title={t('knowledge.hero.title')}
+                subtitle={t('knowledge.hero.subtitle')}
+                actions={
+                    <Button variant="primary" onClick={triggerUploadFlow}>
+                        <Upload size={14} strokeWidth={2.5} />
+                        {t('knowledge.uploadCta')}
+                    </Button>
+                }
+            />
 
-            <div style={{ marginBottom: 24 }}>
-                <h1 style={{ fontSize: '1.5rem', fontWeight: 800, margin: '0 0 4px' }}>{t('knowledge.title')}</h1>
-                <p style={{ color: 'var(--text-muted)', margin: 0, fontSize: '0.9rem' }}>{t('knowledge.subtitle')}</p>
+            <div style={{ marginBottom: 'var(--space-4)' }}>
+                <HubSearch
+                    value={heroQuery}
+                    onChange={handleHeroSearchChange}
+                    placeholder={t('knowledge.heroSearchPlaceholder')}
+                    ariaLabel={t('knowledge.heroSearchPlaceholder')}
+                />
             </div>
 
-            {/* Tabs */}
-            <div className="kb-tabs">
-                {tabs.map(tb => (
-                    <button
-                        key={tb.id}
-                        className={`kb-tab ${tab === tb.id ? 'active' : ''}`}
-                        onClick={() => setTab(tb.id)}
-                    >
-                        {tb.icon} {tb.label}
-                    </button>
-                ))}
+            <HubStats>
+                <HubStatCard
+                    icon={<FileText size={16} strokeWidth={2} />}
+                    label={t('knowledge.stats.documents')}
+                    value={status?.totalDocuments ?? '-'}
+                    tone="neutral"
+                />
+                <HubStatCard
+                    icon={<Layers size={16} strokeWidth={2} />}
+                    label={t('knowledge.stats.chunks')}
+                    value={status?.totalChunks ?? '-'}
+                    tone="neutral"
+                />
+                <HubStatCard
+                    icon={<Database size={16} strokeWidth={2} />}
+                    label={t('knowledge.stats.namespaces')}
+                    value={nsData.length}
+                    tone="neutral"
+                />
+                <HubStatCard
+                    icon={<Activity size={16} strokeWidth={2} />}
+                    label={t('knowledge.stats.status')}
+                    value={
+                        <span className={ready ? 'kb-status--online' : 'kb-status--offline'}>
+                            {ready ? t('knowledge.stats.online') : t('knowledge.stats.offline')}
+                        </span>
+                    }
+                    tone={ready ? 'emerald' : 'amber'}
+                />
+            </HubStats>
+
+            <div style={{ margin: 'var(--space-4) 0 var(--space-3)' }}>
+                <TabStrip
+                    tabs={tabs}
+                    active={tab}
+                    onChange={setTab}
+                    ariaLabel={t('knowledge.title')}
+                />
             </div>
 
             {/* Overview Tab */}
             {tab === 'overview' && (
                 <div>
-                    {/* Status cards */}
-                    <div className="kb-stats-grid">
-                        <div className="kb-stat-card">
-                            <span className="kb-stat-value">{status?.totalDocuments ?? '—'}</span>
-                            <span className="kb-stat-label">{t('knowledge.totalDocs')}</span>
-                        </div>
-                        <div className="kb-stat-card">
-                            <span className="kb-stat-value">{status?.totalChunks ?? '—'}</span>
-                            <span className="kb-stat-label">{t('knowledge.totalChunks')}</span>
-                        </div>
-                        <div className="kb-stat-card">
-                            <span className="kb-stat-value">{nsData.length}</span>
-                            <span className="kb-stat-label">{t('knowledge.namespaces')}</span>
-                        </div>
-                        <div className="kb-stat-card">
-                            <span className={`kb-stat-value ${status?.ready ? 'text-green' : 'text-red'}`}>
-                                {status?.ready ? 'Online' : 'Offline'}
-                            </span>
-                            <span className="kb-stat-label">Status</span>
-                        </div>
-                    </div>
-
                     {/* Namespace chart */}
                     {nsData.length > 0 && (
-                        <div className="card" style={{ padding: 20, marginBottom: 20 }}>
+                        <div className="card" style={{ padding: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
                             <h3 className="kb-section-title">{t('knowledge.byNamespace')}</h3>
                             <ResponsiveContainer width="100%" height={200}>
                                 <BarChart data={nsData}>
@@ -176,7 +242,7 @@ export default function KnowledgeBase() {
                     )}
 
                     {/* Upload */}
-                    <div className="card" style={{ padding: 20, marginBottom: 20 }}>
+                    <div className="card" style={{ padding: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
                         <h3 className="kb-section-title">{t('knowledge.uploadFile')}</h3>
                         <div className="kb-upload-zone">
                             <input
@@ -197,43 +263,41 @@ export default function KnowledgeBase() {
                                 {uploadFile ? uploadFile.name : t('knowledge.dragDrop')}
                             </label>
                             {uploadFile && (
-                                <div style={{ display: 'flex', gap: 12, marginTop: 12, flexWrap: 'wrap', alignItems: 'end' }}>
-                                    <div style={{ flex: 1, minWidth: 200 }}>
-                                        <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>{t('knowledge.docTitle')}</label>
+                                <div style={{ display: 'flex', gap: 'var(--space-3)', marginTop: 'var(--space-3)', flexWrap: 'wrap', alignItems: 'end' }}>
+                                    <FormField label={t('knowledge.docTitle')} className="kb-upload-field">
                                         <input value={uploadTitle} onChange={e => setUploadTitle(e.target.value)} placeholder={t('knowledge.docTitle')} />
-                                    </div>
-                                    <div>
-                                        <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Namespace</label>
+                                    </FormField>
+                                    <FormField label={t('knowledge.namespaceLabel')}>
                                         <select value={uploadNamespace} onChange={e => setUploadNamespace(e.target.value)} className="kb-filter-select">
                                             {NAMESPACES.map(ns => <option key={ns} value={ns}>{ns}</option>)}
                                         </select>
-                                    </div>
-                                    <button className="kb-action-btn" onClick={handleUpload} disabled={uploading || !uploadTitle.trim()}>
+                                    </FormField>
+                                    <Button variant="primary" onClick={handleUpload} disabled={uploading || !uploadTitle.trim()}>
                                         {uploading ? <Loader size={14} className="spin" /> : <Upload size={14} />}
                                         {uploading ? t('knowledge.uploading') : t('knowledge.uploadFile')}
-                                    </button>
+                                    </Button>
                                 </div>
                             )}
-                            <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: 8 }}>
-                                {t('knowledge.maxFileSize')} — PDF, PNG, JPG, WebP, GIF
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: 'var(--space-2)' }}>
+                                {t('knowledge.maxFileSize')} - PDF, PNG, JPG, WebP, GIF
                             </p>
                         </div>
                     </div>
 
                     {/* Actions */}
-                    <div className="card" style={{ padding: 20 }}>
+                    <div className="card" style={{ padding: 'var(--space-4)' }}>
                         <h3 className="kb-section-title">{t('knowledge.actions')}</h3>
-                        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                            <button className="kb-action-btn" onClick={handleIngestCampaigns} disabled={ingesting}>
+                        <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+                            <Button variant="secondary" onClick={handleIngestCampaigns} disabled={ingesting}>
                                 {ingesting ? <Loader size={14} className="spin" /> : <RefreshCw size={14} />}
                                 {ingesting ? t('knowledge.ingesting') : t('knowledge.ingestAll')}
-                            </button>
-                            <button className="kb-action-btn secondary" onClick={loadStatus}>
+                            </Button>
+                            <Button variant="secondary" onClick={loadStatus}>
                                 <RefreshCw size={14} /> {t('knowledge.refresh')}
-                            </button>
+                            </Button>
                         </div>
                         {status?.lastIngestion && (
-                            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 12 }}>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 'var(--space-3)' }}>
                                 {t('knowledge.lastIngestion')}: {new Date(status.lastIngestion).toLocaleString()}
                             </p>
                         )}
@@ -244,74 +308,96 @@ export default function KnowledgeBase() {
             {/* Documents Tab */}
             {tab === 'documents' && (
                 <div>
-                    <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-                        <select
-                            value={docFilter.namespace}
-                            onChange={e => setDocFilter(p => ({ ...p, namespace: e.target.value }))}
-                            className="kb-filter-select"
-                        >
-                            <option value="">{t('knowledge.allNamespaces')}</option>
-                            {NAMESPACES.map(ns => <option key={ns} value={ns}>{ns}</option>)}
-                        </select>
-                        <select
-                            value={docFilter.status}
-                            onChange={e => setDocFilter(p => ({ ...p, status: e.target.value }))}
-                            className="kb-filter-select"
-                        >
-                            <option value="">{t('knowledge.allStatuses')}</option>
-                            <option value="indexed">Indexed</option>
-                            <option value="pending">Pending</option>
-                            <option value="processing">Processing</option>
-                            <option value="error">Error</option>
-                        </select>
+                    <div style={{ display: 'flex', gap: 'var(--space-3)', marginBottom: 'var(--space-3)', flexWrap: 'wrap' }}>
+                        <FormField label={t('knowledge.namespaceLabel')}>
+                            <select
+                                value={docFilter.namespace}
+                                onChange={e => setDocFilter(p => ({ ...p, namespace: e.target.value }))}
+                                className="kb-filter-select"
+                            >
+                                <option value="">{t('knowledge.allNamespaces')}</option>
+                                {NAMESPACES.map(ns => <option key={ns} value={ns}>{ns}</option>)}
+                            </select>
+                        </FormField>
+                        <FormField label={t('knowledge.sourceType')}>
+                            <select
+                                value={docFilter.status}
+                                onChange={e => setDocFilter(p => ({ ...p, status: e.target.value }))}
+                                className="kb-filter-select"
+                            >
+                                <option value="">{t('knowledge.allStatuses')}</option>
+                                <option value="indexed">Indexed</option>
+                                <option value="pending">Pending</option>
+                                <option value="processing">Processing</option>
+                                <option value="error">Error</option>
+                            </select>
+                        </FormField>
                         <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', alignSelf: 'center' }}>
                             {docTotal} {t('knowledge.documents').toLowerCase()}
                         </span>
                     </div>
 
-                    <div className="card" style={{ padding: 0, overflow: 'auto' }}>
-                        <table className="kb-docs-table">
-                            <thead>
-                                <tr>
-                                    <th>{t('knowledge.docTitle')}</th>
-                                    <th>{t('knowledge.fileType')}</th>
-                                    <th>Namespace</th>
-                                    <th>{t('knowledge.sourceType')}</th>
-                                    <th>Chunks</th>
-                                    <th>Status</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {documents.map(doc => (
-                                    <tr key={doc.id}>
-                                        <td style={{ fontWeight: 600, maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title}</td>
-                                        <td>
-                                            <span className="kb-media-badge" title={doc.content_type || 'text'}>
-                                                {doc.content_type === 'image' ? <Image size={13} /> : doc.content_type === 'pdf' ? <File size={13} /> : <FileText size={13} />}
-                                            </span>
-                                        </td>
-                                        <td><span className="kb-namespace-tag">{doc.namespace}</span></td>
-                                        <td style={{ color: 'var(--text-muted)' }}>{doc.source_type}</td>
-                                        <td>{doc.chunk_count}</td>
-                                        <td><span className={`kb-status-badge ${doc.status}`}>{doc.status}</span></td>
-                                        <td>
-                                            <button className="kb-icon-btn" onClick={() => handleDeleteDoc(doc.id)} title="Delete">
-                                                <Trash2 size={14} />
-                                            </button>
-                                        </td>
+                    {docsLoading && documents.length === 0 ? (
+                        <div className="card" style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                            <Skeleton height={20} />
+                            <Skeleton height={20} width="80%" />
+                            <Skeleton height={20} width="60%" />
+                            <Skeleton height={20} width="90%" />
+                        </div>
+                    ) : documents.length === 0 ? (
+                        <EmptyState
+                            icon={<FolderOpen size={28} />}
+                            title={t('knowledge.empty.title')}
+                            description={t('knowledge.empty.description')}
+                            action={
+                                <Button variant="primary" onClick={triggerUploadFlow}>
+                                    <Upload size={14} strokeWidth={2.5} />
+                                    {t('knowledge.uploadCta')}
+                                </Button>
+                            }
+                        />
+                    ) : (
+                        <div className="card" style={{ padding: 0, overflow: 'auto' }}>
+                            <table className="kb-docs-table">
+                                <thead>
+                                    <tr>
+                                        <th>{t('knowledge.docTitle')}</th>
+                                        <th>{t('knowledge.fileType')}</th>
+                                        <th>{t('knowledge.namespaceLabel')}</th>
+                                        <th>{t('knowledge.sourceType')}</th>
+                                        <th>Chunks</th>
+                                        <th>{t('knowledge.stats.status')}</th>
+                                        <th></th>
                                     </tr>
-                                ))}
-                                {documents.length === 0 && (
-                                    <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>{t('knowledge.noDocs')}</td></tr>
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
+                                </thead>
+                                <tbody>
+                                    {documents.map(doc => (
+                                        <tr key={doc.id}>
+                                            <td style={{ fontWeight: 600, maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.title}</td>
+                                            <td>
+                                                <span className="kb-media-badge" title={doc.content_type || 'text'}>
+                                                    {doc.content_type === 'image' ? <Image size={13} /> : doc.content_type === 'pdf' ? <File size={13} /> : <FileText size={13} />}
+                                                </span>
+                                            </td>
+                                            <td><span className="kb-namespace-tag">{doc.namespace}</span></td>
+                                            <td style={{ color: 'var(--text-muted)' }}>{doc.source_type}</td>
+                                            <td>{doc.chunk_count}</td>
+                                            <td><span className={`kb-status-badge ${doc.status}`}>{doc.status}</span></td>
+                                            <td>
+                                                <button className="kb-icon-btn" onClick={() => handleDeleteDoc(doc.id)} title="Delete">
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
                 </div>
             )}
 
-            {/* KB Chat Tab */}
+            {/* KB Chat Tab — heroQuery navigates users here; TODO: pipe into KBChat as initialQuery */}
             {tab === 'search' && <KBChat />}
         </div>
     );

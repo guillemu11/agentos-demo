@@ -5,6 +5,8 @@ import { X } from 'lucide-react';
 export default function Modal({ open, onClose, title, children, size = 'md', showClose = true }) {
   const dialogRef = useRef(null);
   const previouslyFocused = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -18,7 +20,7 @@ export default function Modal({ open, onClose, title, children, size = 'md', sho
     }
 
     const onKey = (e) => {
-      if (e.key === 'Escape') onClose?.();
+      if (e.key === 'Escape') onCloseRef.current?.();
       if (e.key === 'Tab' && dialog) {
         const focusables = dialog.querySelectorAll(
           'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
@@ -31,14 +33,13 @@ export default function Modal({ open, onClose, title, children, size = 'md', sho
       }
     };
     document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
+      document.body.style.overflow = '';
       previouslyFocused.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

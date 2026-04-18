@@ -287,6 +287,42 @@ export const translations = {
       experiments: 'Experimentos',
       failed: 'Error',
       waiting: 'Esperando inicio...',
+      hero: {
+        eyebrow: 'Lab · Busqueda con grounding',
+        title: 'Tu agente investigador',
+        subtitle: 'Gemini con grounding busca, cita y sintetiza — luego propone experimentos accionables.',
+      },
+      stats: {
+        totalReports: 'Reportes generados',
+        sourcesAnalyzed: 'Fuentes analizadas',
+        runningNow: 'Corriendo ahora',
+      },
+      modal: {
+        title: 'Nueva investigacion',
+        presetsLabel: 'Presets',
+        topicLabel: 'Tema',
+        submit: 'Iniciar investigacion',
+        cancelBtn: 'Cancelar',
+        presets: {
+          competitorScan: {
+            label: 'Competitor scan',
+            topicSeed: 'Analisis competitivo de email marketing: Emirates vs principales competidores (Qatar Airways, Etihad, Turkish Airlines). Comparar frecuencia, segmentacion, personalizacion y ofertas.',
+          },
+          audienceDeepDive: {
+            label: 'Audience deep-dive',
+            topicSeed: 'Deep-dive de audiencia: segmentos de frequent flyers Emirates — motivaciones, pain points, canales preferidos y ventanas de compra.',
+          },
+          trendReport: {
+            label: 'Trend report',
+            topicSeed: 'Tendencias 2026 en email marketing para aerolineas: AI personalization, dynamic content, AMP emails, privacy-first tracking.',
+          },
+        },
+      },
+      empty: {
+        title: 'Empieza tu primera investigacion',
+        description: 'Lanza un brief y deja que el agente busque, cite y sintetice en tiempo real.',
+        cta: 'Nueva investigacion',
+      },
     },
 
     autoExperiment: {
@@ -410,10 +446,28 @@ export const translations = {
     knowledge: {
       title: 'Knowledge Base',
       subtitle: 'Base de conocimiento vectorial para todos los agentes',
+      hero: {
+        eyebrow: 'Memoria - RAG Vector Store',
+        title: 'Memoria del agente',
+        subtitle: 'Ensena a tus agentes lo que saben. Todo documento, campana o imagen que indexes aqui se convierte en contexto que podran recordar.',
+      },
+      stats: {
+        documents: 'Documentos',
+        chunks: 'Chunks indexados',
+        namespaces: 'Areas de memoria',
+        status: 'Estado',
+        online: 'Online',
+        offline: 'Offline',
+      },
+      empty: {
+        title: 'Aun no hay memoria que consultar',
+        description: 'Sube documentos o ingesta campanas para empezar a entrenar a tus agentes.',
+      },
       overview: 'Overview',
       documents: 'Documentos',
       search: 'Buscar',
       upload: 'Subir',
+      namespaceLabel: 'Area de memoria (namespace)',
       totalDocs: 'Documentos',
       totalChunks: 'Chunks',
       namespaces: 'Namespaces',
@@ -430,10 +484,12 @@ export const translations = {
       sourceType: 'Tipo',
       noDocs: 'Sin documentos. Ingesta campanas para empezar.',
       searchPlaceholder: 'Buscar en la base de conocimiento...',
+      heroSearchPlaceholder: 'Pregunta a la memoria del agente...',
       noResults: 'Sin resultados. Intenta con otra busqueda.',
       copy: 'Copiar',
       copied: 'Copiado al portapapeles',
       uploadFile: 'Subir archivo',
+      uploadCta: 'Subir a la memoria',
       dragDrop: 'Haz clic para seleccionar un archivo (PDF, imagen, HTML, Word)',
       uploading: 'Subiendo...',
       uploaded: 'Archivo subido exitosamente',
@@ -990,7 +1046,7 @@ export const translations = {
       backTo: 'Volver a',
       weeklyPlanning: 'Weekly Planning',
       planningCenter: 'Centro de planificacion semanal del departamento',
-      newWeekly: '+ Nueva Weekly',
+      newWeekly: 'Nueva Weekly',
       inboxTab: 'Inbox',
       weekliesTab: 'Weeklies',
       pipelineTab: 'Pipeline',
@@ -1023,9 +1079,29 @@ export const translations = {
       errorImporting: 'Error importando inbox: ',
       errorUpdating: 'Error actualizando status: ',
       confirmDelete: 'Seguro que quieres borrar esta weekly?',
+      confirmDeleteTitle: 'Borrar weekly',
+      confirmDeleteAction: 'Borrar',
       errorDeleting: 'Error al borrar la weekly',
       loadingDept: 'Cargando datos del departamento...',
       deptNotFound: 'Departamento no encontrado.',
+      hero: {
+        eyebrow: 'Ritual semanal  Semana {week}  {dept}',
+        title: 'Que esta semana cuente',
+        subtitle: 'Abre el ritual, importa proyectos del inbox, orquesta el brainstorm y cierra con un reporte que el equipo quiera leer.',
+      },
+      voiceEyebrow: 'Ritual premium',
+      voiceCta: 'Reunion por voz',
+      stats: {
+        sessions: 'Weeklies',
+        active: 'Activas',
+        completed: 'Completadas',
+        imported: 'Proyectos importados',
+        contributions: 'Contribuciones',
+        state: 'Estado',
+      },
+      emptyTitle: 'Aun no hay weeklies para {dept}',
+      emptyDesc: 'Crea la primera sesion para arrancar el ritual semanal.',
+      error: 'Error',
     },
 
     // DailyStandup
@@ -1127,6 +1203,8 @@ export const translations = {
       title: 'Intelligence Hub',
       subtitle: 'Metricas avanzadas, control de costes y salud del sistema',
       loading: 'Cargando Intelligence Hub...',
+      loadError: 'No pudimos cargar el resumen de inteligencia.',
+      retry: 'Reintentar',
       agents: 'Agentes',
       activeLabel: 'activos',
       eodToday: 'EOD Reports (Hoy)',
@@ -1140,6 +1218,20 @@ export const translations = {
       costsDescription: 'El desglose de costes por agente y servicio aparecera cuando se integren las metricas de uso de APIs externas.',
       noAlerts: 'Sin alertas activas',
       alertsDescription: 'Cuando se detecten anomalias, errores recurrentes o umbrales superados, las alertas apareceran aqui.',
+      hero: {
+        eyebrow: 'Operaciones · Inteligencia',
+        subtitle: 'Observa la salud de tus agentes, el coste de la IA y las senales de anomalia en un solo panel.',
+      },
+      stats: {
+        agentsActive: 'Agentes activos',
+        eodsToday: 'EODs hoy',
+        auditEventsWeek: 'Eventos audit (7d)',
+      },
+      comingSoon: {
+        title: 'Panel de inteligencia en construccion',
+        description: 'Pronto: seguimiento de costes por agente y servicio, latencia de LLMs, deteccion de anomalias y alertas configurables.',
+        action: 'Configurar alertas',
+      },
     },
 
     // PmReports
@@ -1172,6 +1264,20 @@ export const translations = {
     workflows: {
       title: 'Workflows',
       subtitle: 'Catalogo de workflows, historial de ejecuciones y triggers',
+      hero: {
+        eyebrow: 'Operaciones · Flujos de trabajo',
+        subtitle: 'Orquesta agentes IA en pipelines reutilizables. Lanza, monitoriza y valida cada ejecucion desde un solo sitio.',
+      },
+      stats: {
+        active: 'En ejecucion',
+        completedThisWeek: 'Completadas (7d)',
+        lastRun: 'Ultima ejecucion',
+      },
+      empty: {
+        title: 'Sin workflows que mostrar',
+        description: 'Ajusta el filtro de categoria o prueba con otra busqueda para ver mas resultados.',
+      },
+      noResults: 'No encontramos workflows para "{query}".',
       catalog: 'Catalogo',
       history: 'Historial',
       totalWorkflows: 'Total Workflows',
@@ -2563,6 +2669,42 @@ export const translations = {
       experiments: 'Experiments',
       failed: 'Error',
       waiting: 'Waiting to start...',
+      hero: {
+        eyebrow: 'Lab · Grounded Research',
+        title: 'Your research agent',
+        subtitle: 'Gemini with grounding searches, cites, and synthesizes — then proposes actionable experiments.',
+      },
+      stats: {
+        totalReports: 'Reports generated',
+        sourcesAnalyzed: 'Sources analyzed',
+        runningNow: 'Running now',
+      },
+      modal: {
+        title: 'New research',
+        presetsLabel: 'Presets',
+        topicLabel: 'Topic',
+        submit: 'Start research',
+        cancelBtn: 'Cancel',
+        presets: {
+          competitorScan: {
+            label: 'Competitor scan',
+            topicSeed: 'Competitive email marketing analysis: Emirates vs top competitors (Qatar Airways, Etihad, Turkish Airlines). Compare frequency, segmentation, personalization and offers.',
+          },
+          audienceDeepDive: {
+            label: 'Audience deep-dive',
+            topicSeed: 'Audience deep-dive: Emirates frequent flyer segments — motivations, pain points, preferred channels, and purchase windows.',
+          },
+          trendReport: {
+            label: 'Trend report',
+            topicSeed: '2026 airline email marketing trends: AI personalization, dynamic content, AMP emails, privacy-first tracking.',
+          },
+        },
+      },
+      empty: {
+        title: 'Start your first research',
+        description: 'Fire off a brief and let the agent search, cite, and synthesize in real time.',
+        cta: 'New research',
+      },
     },
 
     autoExperiment: {
@@ -2684,10 +2826,28 @@ export const translations = {
     knowledge: {
       title: 'Knowledge Base',
       subtitle: 'Vector knowledge base powering all agents',
+      hero: {
+        eyebrow: 'Memory - RAG Vector Store',
+        title: 'Agent Memory',
+        subtitle: 'Teach your agents what they know. Every document, campaign, or image you index here becomes context they can recall.',
+      },
+      stats: {
+        documents: 'Documents',
+        chunks: 'Indexed chunks',
+        namespaces: 'Memory areas',
+        status: 'Status',
+        online: 'Online',
+        offline: 'Offline',
+      },
+      empty: {
+        title: 'No memory to query yet',
+        description: 'Upload documents or ingest campaigns to start training your agents.',
+      },
       overview: 'Overview',
       documents: 'Documents',
       search: 'Search',
       upload: 'Upload',
+      namespaceLabel: 'Memory area (namespace)',
       totalDocs: 'Documents',
       totalChunks: 'Chunks',
       namespaces: 'Namespaces',
@@ -2704,10 +2864,12 @@ export const translations = {
       sourceType: 'Type',
       noDocs: 'No documents yet. Ingest campaigns to get started.',
       searchPlaceholder: 'Search the knowledge base...',
+      heroSearchPlaceholder: 'Ask the agent memory...',
       noResults: 'No results found. Try a different query.',
       copy: 'Copy',
       copied: 'Copied to clipboard',
       uploadFile: 'Upload file',
+      uploadCta: 'Upload to memory',
       dragDrop: 'Click to select a file (PDF, image, HTML, Word)',
       uploading: 'Uploading...',
       uploaded: 'File uploaded successfully',
@@ -3245,7 +3407,7 @@ export const translations = {
       backTo: 'Back to',
       weeklyPlanning: 'Weekly Planning',
       planningCenter: 'Department weekly planning center',
-      newWeekly: '+ New Weekly',
+      newWeekly: 'New Weekly',
       inboxTab: 'Inbox',
       weekliesTab: 'Weeklies',
       pipelineTab: 'Pipeline',
@@ -3278,9 +3440,29 @@ export const translations = {
       errorImporting: 'Error importing inbox: ',
       errorUpdating: 'Error updating status: ',
       confirmDelete: 'Are you sure you want to delete this weekly?',
+      confirmDeleteTitle: 'Delete weekly',
+      confirmDeleteAction: 'Delete',
       errorDeleting: 'Error deleting weekly',
       loadingDept: 'Loading department data...',
       deptNotFound: 'Department not found.',
+      hero: {
+        eyebrow: 'Weekly Ritual  Week {week}  {dept}',
+        title: 'Make this week count',
+        subtitle: 'Open the ritual, pull projects from the inbox, orchestrate the brainstorm, and ship a report the team wants to read.',
+      },
+      voiceEyebrow: 'Premium ritual',
+      voiceCta: 'Voice meeting',
+      stats: {
+        sessions: 'Weeklies',
+        active: 'Active',
+        completed: 'Completed',
+        imported: 'Imported projects',
+        contributions: 'Contributions',
+        state: 'Status',
+      },
+      emptyTitle: 'No weeklies yet for {dept}',
+      emptyDesc: 'Create the first session to kick off the weekly ritual.',
+      error: 'Error',
     },
 
     daily: {
@@ -3379,6 +3561,8 @@ export const translations = {
       title: 'Intelligence Hub',
       subtitle: 'Advanced metrics, cost control and system health',
       loading: 'Loading Intelligence Hub...',
+      loadError: 'We couldn\'t load the intelligence summary.',
+      retry: 'Retry',
       agents: 'Agents',
       activeLabel: 'active',
       eodToday: 'EOD Reports (Today)',
@@ -3392,6 +3576,20 @@ export const translations = {
       costsDescription: 'Cost breakdown by agent and service will appear when external API usage metrics are integrated.',
       noAlerts: 'No active alerts',
       alertsDescription: 'When anomalies, recurring errors or exceeded thresholds are detected, alerts will appear here.',
+      hero: {
+        eyebrow: 'Operations · Intelligence',
+        subtitle: 'Watch agent health, AI cost and anomaly signals from a single pane.',
+      },
+      stats: {
+        agentsActive: 'Active agents',
+        eodsToday: 'EODs today',
+        auditEventsWeek: 'Audit events (7d)',
+      },
+      comingSoon: {
+        title: 'Intelligence dashboard coming soon',
+        description: 'Coming: per-agent and per-service cost tracking, LLM latency, anomaly detection and configurable alerts.',
+        action: 'Configure alerts',
+      },
     },
 
     pmReports: {
@@ -3421,6 +3619,20 @@ export const translations = {
     workflows: {
       title: 'Workflows',
       subtitle: 'Workflow catalog, run history and triggers',
+      hero: {
+        eyebrow: 'Operations · Workflows',
+        subtitle: 'Orchestrate AI agents through reusable pipelines. Launch, monitor and validate every run from a single place.',
+      },
+      stats: {
+        active: 'In flight',
+        completedThisWeek: 'Completed (7d)',
+        lastRun: 'Last run',
+      },
+      empty: {
+        title: 'No workflows to show',
+        description: 'Adjust the category filter or try a different search to see more results.',
+      },
+      noResults: 'No workflows match "{query}".',
       catalog: 'Catalog',
       history: 'History',
       totalWorkflows: 'Total Workflows',
