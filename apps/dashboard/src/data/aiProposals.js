@@ -237,3 +237,70 @@ export const CHAT_PROMPT_CHIPS = {
     'Suggest a split node for this audience',
   ],
 };
+
+// Proposed journeys — shown on JourneysListPage hero area.
+// Each proposal launches the canvas + seed conversation on click.
+// Focus: airline-specific patterns Emirates actually runs but aren't in the
+// current template set (cart_abandon / welcome / tier_upgrade / scratch).
+export const PROPOSED_JOURNEYS = [
+  {
+    id: 'flight-disruption-care',
+    priority: 'urgent',
+    icon: '⚠',
+    title: 'Flight Disruption Care',
+    description: 'Auto-trigger on IROPS events. Empathy note + 1-click rebook + lounge voucher for delayed premium pax.',
+    context: 'Timely — Iran airspace diversions affect ~23 routes',
+    suggestedName: 'Flight Disruption Care',
+    seed: "Build a journey triggered on an IROPS event (flight_status in ['cancelled','diverted','delayed_3h+']). Start with an empathy + information email immediately after the trigger. Wait 30 minutes, then split by cabin class: Business and First Class get a rebook + complimentary lounge access offer; Economy gets a self-service rebook link with a $50 travel voucher. Wait 24 hours, exit contacts who completed rebook. For the rest, send one follow-up with live agent chat link. Validate at the end so I can review before deploying.",
+  },
+  {
+    id: 'miles-expiry-rescue',
+    priority: 'high',
+    icon: '◈',
+    title: 'Miles Expiry Rescue (3-touch)',
+    description: '90d / 30d / 7d multi-touch. Portfolio 7-day urgency holds 60.3% OR — highest in Emirates lifecycle.',
+    context: 'Proven: 60.3% OR on 7-day warning',
+    suggestedName: 'Miles Expiry Rescue',
+    seed: "Build a journey targeting Skywards members with miles expiring in 90 days. Start with a soft reminder email showing their balance and 3 suggested redemptions. Wait 60 days, then split on engagement — members who redeemed exit the journey; non-redeemers get a 30-day warning with a bonus-miles-if-you-redeem-now offer. Wait 23 days, exit anyone who redeemed; send the remaining contacts a 7-day urgency email with a countdown and single high-value redemption option. Validate at the end so I can review before deploying.",
+  },
+  {
+    id: 'birthday-bonus-miles',
+    priority: 'medium',
+    icon: '✦',
+    title: 'Birthday Bonus Miles',
+    description: 'Fire on member birthday. 1,000 bonus miles + personalised destination recommendation from search history.',
+    context: 'Airline-standard loyalty moment',
+    suggestedName: 'Birthday Bonus Miles',
+    seed: "Build a birthday journey for Skywards members. Trigger on date_of_birth match (run daily). Send a personalised happy-birthday email with 1,000 bonus miles automatically credited and one destination recommendation pulled from the member's recent search activity. Wait 7 days, and split on whether they booked — bookers exit; non-bookers get a gentle follow-up with a flash redemption offer valid for 14 days. Validate at the end so I can review before deploying.",
+  },
+  {
+    id: 'premium-upgrade-72h',
+    priority: 'medium',
+    icon: '◆',
+    title: '72h Premium Upgrade Nudge',
+    description: 'Pre-flight 72h window — bid-based upgrade offer. Portfolio shows bid-based beats fixed (48.4% vs 43.2% OR).',
+    context: 'Proven: bid-based 48.4% OR',
+    suggestedName: 'Premium Upgrade 72h',
+    seed: "Build a pre-flight upgrade journey firing 72 hours before departure for Economy passengers on flights with premium inventory available. Send an email offering a bid-based upgrade to Business Class with the member's suggested bid range. Wait 24 hours, split on whether they placed a bid — bidders exit; non-bidders get a second email at 48h pre-flight with a fixed-price last-minute offer (smaller price, limited time). Validate at the end so I can review before deploying.",
+  },
+  {
+    id: 'dormant-winback-365d',
+    priority: 'medium',
+    icon: '◐',
+    title: 'Dormant Winback (365d)',
+    description: 'Reactivate Skywards members inactive 365 days. 2,500 bonus miles + destination inspiration from profile.',
+    context: 'Airline winback playbook',
+    suggestedName: 'Dormant Winback 365d',
+    seed: "Build a winback journey for Skywards members with no booking or engagement for 365 days. Start with a 'we miss you' email offering 2,500 bonus miles credited instantly, plus three destination ideas based on their profile. Wait 14 days, split on engagement — openers get a follow-up with a fare sale matching those destinations; non-openers get one final SMS/email combo with a generic last-call offer before exiting into an 'inactive' segment for suppression. Validate at the end so I can review before deploying.",
+  },
+  {
+    id: 'postflight-nps-partner',
+    priority: 'low',
+    icon: '◎',
+    title: 'Post-Flight NPS → Partner Upsell',
+    description: 'NPS survey 24h after landing. Promoters (9-10) → partner hotel/car offer; detractors (0-6) → service recovery.',
+    context: 'Dual-purpose: feedback + revenue',
+    suggestedName: 'Post-Flight NPS + Partner',
+    seed: "Build a post-flight journey firing 24 hours after landing. Start with a short NPS survey email (1 question). Wait 3 days and split on the response: promoters (score 9-10) receive a partner hotel and car rental bundle offer for their destination; passives (7-8) get a thank-you with a Skywards miles progress update; detractors (0-6) get a service recovery email with a direct agent contact and optional 5,000 goodwill miles. Exit all contacts 14 days after the split. Validate at the end so I can review before deploying.",
+  },
+];

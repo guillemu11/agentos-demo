@@ -37,6 +37,24 @@ export async function deployJourney({ mc, dsl, config }, overrides = {}) {
   // Derive the target DE schema from the SELECT list of the entry SQL.
   // Types come from the master schema (if provided) — otherwise reasonable defaults.
   const selectedCols = parseSelectColumns(dsl.entry.source.sql);
+
+  // Validate ALL column references in the SQL (SELECT, WHERE, ORDER BY, etc.)
+  // against the master schema BEFORE any MC API calls. SFMC validates the query
+  // SQL against the source DE when creating a Query Activity — catching mismatches
+  // here gives a clear error instead of a cryptic MC 400.
+  const schemaForValidation = masterSchema || BAU_MASTER_SCHEMA;
+  if (schemaForValidation?.columns?.length) {
+    const knownCols = new Set(schemaForValidation.columns.map((c) => c.name.toLowerCase()));
+    const allSqlCols = extractAllColumnRefs(dsl.entry.source.sql, knownCols);
+    const unknown = allSqlCols.filter((col) => !knownCols.has(col.toLowerCase()));
+    if (unknown.length > 0) {
+      throw new Error(
+        `Entry SQL references columns not found in the master DE: ${unknown.join(', ')}. ` +
+        `Use exact column names from the schema (e.g. per_email_address, first_name, date_of_birth, loy_tier_code).`
+      );
+    }
+  }
+
   // BAU_MASTER_SCHEMA is the hardcoded fallback — fetchDeSchemaCompact may fail
   // silently (permissions, network) and return null. Without this fallback every
   // Text field would default to maxLength 254 and heuristics would mistype fields
@@ -50,12 +68,20 @@ export async function deployJourney({ mc, dsl, config }, overrides = {}) {
   const targetDeName = `${dsl.entry.source.target_de_name}_${stamp}`;
   const queryName = `${dsl.name}_Query_${stamp}`;
 
+  const emailField = fields.find((f) => f.fieldType === 'EmailAddress');
+  if (!emailField) {
+    throw new Error(
+      'Entry SQL must SELECT an email column (per_email_address) so the target DE can be sendable. ' +
+      'Add per_email_address to your SELECT clause.'
+    );
+  }
+
   const targetDe = await createDataExtension(mc, {
     name: targetDeName,
     folderId: deFolderId,
     fields,
     isSendable: true,
-    sendableField: fields.find((f) => f.fieldType === 'EmailAddress')?.name || 'EmailAddress',
+    sendableField: emailField.name,
   });
 
   // SFMC requires a valid queryactivity folder categoryId.
@@ -158,6 +184,44 @@ export function buildTargetDeFields(columns, masterSchema) {
 function buildStamp(d) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${pad(d.getDate())}${pad(d.getMonth() + 1)}${String(d.getFullYear()).slice(2)}_${pad(d.getHours())}${pad(d.getMinutes())}`;
+}
+
+/**
+ * Extract all identifier-like tokens from a SQL string that could be column references.
+ * Strips SQL keywords, string literals, numbers, table names in brackets, and operators.
+ * Returns deduplicated list of candidate column names not in the known schema.
+ */
+function extractAllColumnRefs(sql, knownCols) {
+  if (!sql) return [];
+  // Remove string literals (single-quoted)
+  let clean = sql.replace(/'[^']*'/g, '');
+  // Remove bracketed table names (e.g. [BAU CS Master dataset]) — but keep bracketed column names
+  clean = clean.replace(/\[([^\]]*\s[^\]]*)\]/g, '');
+  // Extract bracketed identifiers (no spaces = likely columns)
+  const bracketedCols = [];
+  clean = clean.replace(/\[([^\]]+)\]/g, (_, id) => { bracketedCols.push(id); return ''; });
+  // Tokenize remaining: split on non-word chars
+  const tokens = clean.split(/[^a-zA-Z0-9_]+/).filter(Boolean);
+  // SQL keywords to exclude
+  const keywords = new Set([
+    'select', 'top', 'from', 'where', 'and', 'or', 'not', 'in', 'is', 'null',
+    'between', 'like', 'as', 'on', 'join', 'left', 'right', 'inner', 'outer',
+    'order', 'by', 'group', 'having', 'asc', 'desc', 'case', 'when', 'then',
+    'else', 'end', 'distinct', 'count', 'sum', 'avg', 'min', 'max', 'cast',
+    'convert', 'getdate', 'dateadd', 'datediff', 'isnull', 'coalesce', 'len',
+    'upper', 'lower', 'trim', 'ltrim', 'rtrim', 'replace', 'substring',
+    'insert', 'update', 'delete', 'drop', 'alter', 'create', 'table', 'into',
+    'values', 'set', 'exists', 'union', 'all', 'any', 'some', 'true', 'false',
+  ]);
+  const seen = new Set();
+  const result = [];
+  for (const t of [...tokens, ...bracketedCols]) {
+    const lower = t.toLowerCase();
+    if (seen.has(lower) || keywords.has(lower) || /^\d+$/.test(t)) continue;
+    seen.add(lower);
+    result.push(t);
+  }
+  return result;
 }
 
 function inferType(name) {

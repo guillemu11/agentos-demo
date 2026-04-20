@@ -156,7 +156,8 @@ async function createDataExtension(mc, { name, customerKey, description, fields,
     if (description) body.description = description;
     if (isSendable) {
         body.isSendable = true;
-        body.sendableDataExtensionField = { name: sendableField || 'EmailAddress', fieldType: 'EmailAddress' };
+        if (!sendableField) throw new Error('isSendable=true but no sendableField provided');
+        body.sendableDataExtensionField = { name: sendableField, fieldType: 'EmailAddress' };
         body.sendableSubscriberField = { name: 'Subscriber Key' };
     }
 
@@ -596,7 +597,8 @@ export async function createDataExtensionRaw(mc, { name, customerKey, descriptio
 
     let sendableXml = '';
     if (isSendable) {
-        sendableXml = `<IsSendable>true</IsSendable><SendableDataExtensionField><Name>${esc(sendableField || 'EmailAddress')}</Name><FieldType>EmailAddress</FieldType></SendableDataExtensionField><SendableSubscriberField><Name>Subscriber Key</Name></SendableSubscriberField>`;
+        if (!sendableField) throw new Error('isSendable=true but no sendableField provided');
+        sendableXml = `<IsSendable>true</IsSendable><SendableDataExtensionField><Name>${esc(sendableField)}</Name><FieldType>EmailAddress</FieldType></SendableDataExtensionField><SendableSubscriberField><Name>Subscriber Key</Name></SendableSubscriberField>`;
     }
 
     const inner = `<CreateRequest xmlns="http://exacttarget.com/wsdl/partnerAPI"><Objects xsi:type="DataExtension" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><Name>${esc(name)}</Name><CustomerKey>${esc(ck)}</CustomerKey>${folderId ? `<CategoryID>${folderId}</CategoryID>` : ''}${description ? `<Description>${esc(description)}</Description>` : ''}${sendableXml}<Fields>${fieldsXml}</Fields></Objects></CreateRequest>`;

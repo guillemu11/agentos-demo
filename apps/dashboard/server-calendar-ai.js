@@ -12,7 +12,7 @@ You receive a JSON payload with:
 - ruleHits[]: deterministic risks/opportunities detected by a rules engine
 - rangeStart, rangeEnd
 
-For each ruleHit, write a 1-2 sentence narrative in Spanish grounded in the event data provided.
+For each ruleHit, write a 1-2 sentence narrative in English grounded in the event data provided.
 Include concrete numbers (open rates, conversions, day counts) where the raw evidence supports them.
 Suggest a concrete action per hit.
 
@@ -88,6 +88,8 @@ function hashPayload(events, ruleHits, rangeStart, rangeEnd) {
   const ids = [...events.map(e => e.id), ...ruleHits.map(h => h.id)].sort().join('|');
   return `${rangeStart}|${rangeEnd}|${ids}`;
 }
+
+export function clearCache() { cache.clear(); }
 
 export async function getOrEnrich({ client, events, ruleHits, rangeStart, rangeEnd }) {
   const key = hashPayload(events, ruleHits, rangeStart, rangeEnd);

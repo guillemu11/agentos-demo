@@ -39,10 +39,11 @@ export default function Layout({ user, onLogout }) {
         {
             label: t('layout.actions'),
             items: [
+                { to: '/app/journeys', icon: icons.workflows, label: t('layout.createJourney') },
                 { to: '/app/campaign-creation', icon: icons.campaignCreation, label: t('layout.campaignCreation') },
                 { to: '/app/preview-test', icon: icons.previewTest, label: t('layout.previewTest') },
                 { to: '/app/competitor-analysis', icon: icons.competitorAnalysis, label: t('layout.competitorAnalysis') },
-                { to: '/app/brand-audit', icon: icons.brandAudit, label: t('layout.brandAudit') },
+                { to: '/app/brand-guardian', icon: icons.brandGuardian, label: t('layout.brandGuardian') },
                 { to: '/app/research', icon: icons.intelligence, label: t('layout.autoResearch') },
             ],
         },
@@ -58,7 +59,6 @@ export default function Layout({ user, onLogout }) {
             items: [
                 { to: '/app/inbox', icon: icons.projectManager, label: t('layout.projectManager') },
                 { to: '/app/knowledge', icon: icons.knowledgeBase, label: t('layout.knowledgeBase') },
-                { to: '/app/journeys', icon: icons.workflows, label: t('layout.journeys') },
                 { to: '/app/calendar', icon: icons.calendar, label: t('layout.calendar') },
             ],
         },
