@@ -4,6 +4,7 @@ import { useLanguage } from '../../i18n/LanguageContext.jsx';
 import Overview from './Overview.jsx';
 import Persona from './Persona.jsx';
 import Brand from './Brand.jsx';
+import Comparative from './Comparative.jsx';
 import './competitor-intel.css';
 
 const API = import.meta.env.VITE_API_URL || '/api';
@@ -81,6 +82,7 @@ export default function CompetitorIntelRouter() {
             <Route path=":id" element={<Overview />} />
             <Route path=":id/persona/:personaId" element={<Persona />} />
             <Route path=":id/brand/:brandId" element={<Brand />} />
+            <Route path=":id/comparative" element={<Comparative />} />
         </Routes>
     );
 }

@@ -9950,6 +9950,50 @@ app.put('/api/competitor-intel/brands/:id/score', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/competitor-intel/investigations/:id/comparative', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const ttft = await pool.query(`
+      WITH sub_times AS (
+        SELECT ps.brand_id, ps.persona_id, ps.executed_at
+        FROM competitor_playbook_steps ps
+        WHERE ps.step_order = 2 AND ps.status = 'done'
+      ),
+      first_useful AS (
+        SELECT e.brand_id, e.persona_id, MIN(e.received_at) AS first_at
+        FROM competitor_emails e
+        WHERE e.classification->>'type' NOT IN ('double_opt_in','transactional')
+          AND e.brand_id IS NOT NULL
+        GROUP BY e.brand_id, e.persona_id
+      ),
+      per_brand AS (
+        SELECT b.id AS brand_id, b.name AS brand_name,
+               MIN(EXTRACT(EPOCH FROM (fu.first_at - st.executed_at))) AS seconds_to_first
+        FROM competitor_brands b
+        LEFT JOIN sub_times st ON st.brand_id = b.id
+        LEFT JOIN first_useful fu ON fu.brand_id = b.id AND fu.persona_id = st.persona_id
+        WHERE b.investigation_id = $1
+        GROUP BY b.id, b.name
+      )
+      SELECT * FROM per_brand ORDER BY brand_name
+    `, [id]);
+
+    const heat = await pool.query(`
+      SELECT b.id AS brand_id, b.name AS brand_name,
+             classification->>'type' AS type,
+             COUNT(*)::int AS c
+      FROM competitor_brands b
+      LEFT JOIN competitor_emails e ON e.brand_id = b.id
+      WHERE b.investigation_id = $1
+      GROUP BY b.id, b.name, classification->>'type'
+      ORDER BY b.name
+    `, [id]);
+
+    const stages = ['welcome','nurture','triggered_click_followup','re_engagement','abandonment','transactional'];
+    res.json({ ttft: ttft.rows, heatmap: heat.rows, stages });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 process.on('uncaughtException', (err) => {
     console.error('[Server] Uncaught exception (keeping process alive):', err.message);
 });
