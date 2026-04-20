@@ -51,6 +51,7 @@ import * as competitorIntelClassifierLLM from '../../packages/core/competitor-in
 import * as competitorIntelEngagement from '../../packages/core/competitor-intel/engagement.js';
 import * as competitorIntelScoring from '../../packages/core/competitor-intel/scoring.js';
 import * as competitorIntelDocx from '../../packages/core/competitor-intel/docx-export.js';
+import * as competitorIntelA4 from '../../packages/core/competitor-intel/analysis4-ingest.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -10036,6 +10037,41 @@ app.get('/api/competitor-intel/investigations/:id/comparative', async (req, res)
 
     const stages = ['welcome','nurture','triggered_click_followup','re_engagement','abandonment','transactional'];
     res.json({ ttft: ttft.rows, heatmap: heat.rows, stages });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/competitor-intel/investigations/:id/ingest-analysis4', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const docxPath = req.body?.path || path.join(
+      process.cwd(), '..', '..', 'DERTOUR',
+      'Analysis 4 - Emirates_Holidays_vs_DERTOUR_Portfolio_DX_Comparison.docx'
+    );
+    const rows = await competitorIntelA4.ingestAnalysis4({ investigationId: id, docxPath });
+    res.json({ ingested: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/competitor-intel/investigations/:id/gap', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const lived = await pool.query(`
+      SELECT b.id AS brand_id, b.name AS brand_name, s.overall
+      FROM competitor_brands b
+      LEFT JOIN competitor_brand_scores s ON s.brand_id = b.id
+      WHERE b.investigation_id = $1
+      ORDER BY b.name
+    `, [id]);
+    const reference = await pool.query(`
+      SELECT brand_name, overall FROM competitor_reference_scores
+      WHERE investigation_id = $1
+    `, [id]);
+    const emiratesHolidays = reference.rows.find(r => /emirates/i.test(r.brand_name));
+    res.json({
+      lived: lived.rows.map(r => ({ ...r, overall: r.overall != null ? Number(r.overall) : null })),
+      reference: reference.rows.map(r => ({ ...r, overall: r.overall != null ? Number(r.overall) : null })),
+      emirates_holidays: emiratesHolidays ? { ...emiratesHolidays, overall: Number(emiratesHolidays.overall) } : null,
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -7,3 +7,4 @@ export * from './classifier-llm.js';
 export * from './engagement.js';
 export * from './scoring.js';
 export * from './docx-export.js';
+export * from './analysis4-ingest.js';

@@ -1104,3 +1104,69 @@
     padding: var(--space-1) var(--space-3);
     font-size: 0.75rem;
 }
+
+/* ─── Emirates gap ─── */
+.ci-gap-hero {
+    padding: var(--space-6);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    margin-bottom: var(--space-8);
+    display: grid;
+    gap: var(--space-2);
+}
+.ci-gap-hero-score {
+    font-size: 3.2rem;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    color: var(--primary);
+    margin-top: var(--space-2);
+}
+.ci-gap-table {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+.ci-gap-table table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.ci-gap-table th {
+    padding: var(--space-3) var(--space-4);
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border-light);
+    text-align: left;
+    white-space: nowrap;
+}
+.ci-gap-table tbody th {
+    text-align: left;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-main);
+    text-transform: none;
+    letter-spacing: 0;
+    background: var(--bg-elevated);
+    padding: var(--space-4);
+}
+.ci-gap-table td {
+    padding: var(--space-4);
+    border-top: 1px solid var(--border-light);
+    font-size: 0.92rem;
+}
+.ci-gap-table td.num {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    text-align: right;
+    color: var(--text-main);
+    width: 160px;
+}
+.ci-gap-table td[data-sign="pos"] { color: var(--accent-green); }
+.ci-gap-table td[data-sign="neg"] { color: var(--primary); }
