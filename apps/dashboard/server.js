@@ -45,6 +45,7 @@ import {
 import { deployJourney } from '../../packages/core/journey-builder/deploy.js';
 import { getOrEnrich as enrichCalendarInsights } from './server-calendar-ai.js';
 import * as competitorIntelRecon from '../../packages/core/competitor-intel/recon.js';
+import * as competitorIntelOAuth from '../../packages/core/competitor-intel/gmail-oauth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -8779,6 +8780,28 @@ app.get('/api/competitor-intel/investigations/:id', async (req, res) => {
     const personas = await pool.query('SELECT * FROM competitor_personas WHERE investigation_id = $1 ORDER BY name', [id]);
     res.json({ investigation: inv.rows[0], brands: brands.rows, personas: personas.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/oauth/google/authorize', (req, res) => {
+  const { persona_id } = req.query;
+  if (!persona_id) return res.status(400).json({ error: 'persona_id required' });
+  const url = competitorIntelOAuth.buildAuthUrl({
+    clientId: process.env.GOOGLE_OAUTH_CLIENT_ID,
+    redirectUri: process.env.GOOGLE_OAUTH_REDIRECT_URI,
+    state: `persona_id=${persona_id}`
+  });
+  res.redirect(url);
+});
+
+app.get('/api/oauth/google/callback', async (req, res) => {
+  try {
+    const { code, state } = req.query;
+    const personaId = parseInt(new URLSearchParams(state).get('persona_id'), 10);
+    const { email } = await competitorIntelOAuth.exchangeCodeAndStore({ personaId, code });
+    res.redirect(`/app/competitor-intel?gmail_connected=${encodeURIComponent(email)}&persona_id=${personaId}`);
+  } catch (e) {
+    res.status(500).send('OAuth error: ' + e.message);
+  }
 });
 
 process.on('uncaughtException', (err) => {
