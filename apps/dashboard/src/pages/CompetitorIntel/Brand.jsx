@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import InboxTable from './components/InboxTable.jsx';
 import PlaybookTab from './components/PlaybookTab.jsx';
 import ScoringTab from './components/ScoringTab.jsx';
+import Timeline from './components/Timeline.jsx';
 
 const API = import.meta.env.VITE_API_URL || '/api';
 
@@ -16,12 +17,20 @@ function fmtDateTime(iso) {
 export default function Brand() {
     const { id: investigationId, brandId } = useParams();
     const [data, setData] = useState(null);
-    const [tab, setTab] = useState('playbook');
+    const [tab, setTab] = useState('timeline');
     const [sel, setSel] = useState(null);
+    const [timelineEvents, setTimelineEvents] = useState(null);
+
+    async function loadTimeline() {
+        const r = await fetch(`${API}/competitor-intel/brands/${brandId}/timeline`);
+        const j = await r.json();
+        setTimelineEvents(j.events || []);
+    }
 
     async function load() {
         const r = await fetch(`${API}/competitor-intel/brands/${brandId}`);
         setData(await r.json());
+        await loadTimeline();
     }
     useEffect(() => { load(); }, [brandId]);
 
@@ -64,6 +73,7 @@ export default function Brand() {
 
             <nav className="ci-tabs">
                 {[
+                    { k: 'timeline', label: 'Timeline', count: timelineEvents?.length ?? null },
                     { k: 'playbook', label: 'Playbook', count: `${doneCount}/${totalSteps}` },
                     { k: 'inbox',    label: 'Inbox',    count: emails.length },
                     { k: 'scoring',  label: 'Scoring',  count: overall !== '—' ? overall : null },
@@ -75,6 +85,11 @@ export default function Brand() {
                 ))}
             </nav>
 
+            {tab === 'timeline' && (
+                timelineEvents === null
+                    ? <div className="ci-loading">Loading timeline…</div>
+                    : <Timeline events={timelineEvents} />
+            )}
             {tab === 'playbook' && <PlaybookTab steps={steps} onChange={load} />}
             {tab === 'inbox'    && <InboxTable emails={emails} onSelect={setSel} />}
             {tab === 'scoring'  && <ScoringTab brand={brand} scores={scores} onChange={load} />}

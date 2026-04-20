@@ -10075,6 +10075,182 @@ app.get('/api/competitor-intel/investigations/:id/gap', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/competitor-intel/brands/:id/timeline', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const personaId = req.query.persona_id ? parseInt(req.query.persona_id, 10) : null;
+
+    const personaFilter = personaId ? 'AND persona_id = $2' : '';
+    const params = personaId ? [id, personaId] : [id];
+
+    const rows = [];
+
+    // Playbook steps (done or skipped)
+    const stepsQ = await pool.query(`
+      SELECT ps.id, ps.step_order, ps.action, ps.notes, ps.status, ps.executed_at AS at,
+             p.name AS persona_name, p.profile->>'segment' AS segment
+      FROM competitor_playbook_steps ps
+      JOIN competitor_personas p ON p.id = ps.persona_id
+      WHERE ps.brand_id = $1 AND ps.status IN ('done','skipped') AND ps.executed_at IS NOT NULL
+      ${personaFilter}
+    `, params);
+    for (const s of stepsQ.rows) {
+      rows.push({
+        kind: 'step_done', at: s.at, actor: 'you',
+        persona_name: s.persona_name, persona_segment: s.segment,
+        data: {
+          step_id: s.id, step_order: s.step_order, status: s.status,
+          action: s.action, notes: s.notes
+        }
+      });
+    }
+
+    // Emails
+    const emailsQ = await pool.query(`
+      SELECT e.id, e.subject, e.sender_email, e.received_at AS at, e.classification,
+             p.name AS persona_name, p.profile->>'segment' AS segment
+      FROM competitor_emails e
+      JOIN competitor_personas p ON p.id = e.persona_id
+      WHERE e.brand_id = $1 ${personaId ? 'AND e.persona_id = $2' : ''}
+    `, params);
+    for (const e of emailsQ.rows) {
+      rows.push({
+        kind: 'email_received', at: e.at, actor: 'brand',
+        persona_name: e.persona_name, persona_segment: e.segment,
+        data: {
+          email_id: e.id, subject: e.subject, sender_email: e.sender_email,
+          type: e.classification?.type || null,
+          confidence: e.classification?.confidence || null,
+          phase: e.classification?.phase || null
+        }
+      });
+    }
+
+    // Engagement events
+    const engQ = await pool.query(`
+      SELECT g.id, g.event_type, g.link_url, g.occurred_at AS at,
+             e.subject, p.name AS persona_name, p.profile->>'segment' AS segment
+      FROM competitor_email_engagement g
+      JOIN competitor_emails e ON e.id = g.email_id
+      JOIN competitor_personas p ON p.id = e.persona_id
+      WHERE e.brand_id = $1 ${personaId ? 'AND e.persona_id = $2' : ''}
+    `, params);
+    for (const g of engQ.rows) {
+      rows.push({
+        kind: g.event_type, at: g.at, actor: 'system',
+        persona_name: g.persona_name, persona_segment: g.segment,
+        data: {
+          engagement_id: g.id, link_url: g.link_url, subject: g.subject
+        }
+      });
+    }
+
+    // Insights (brand-scoped only; persona filter doesn't apply)
+    if (!personaId) {
+      const insQ = await pool.query(`
+        SELECT id, title, body, category, severity, created_at AS at
+        FROM competitor_insights
+        WHERE brand_id = $1
+      `, [id]);
+      for (const i of insQ.rows) {
+        rows.push({
+          kind: 'insight', at: i.at, actor: 'you',
+          persona_name: null, persona_segment: null,
+          data: {
+            insight_id: i.id, title: i.title, body: i.body,
+            category: i.category, severity: i.severity
+          }
+        });
+      }
+    }
+
+    // Sort reverse-chronological, tolerate null timestamps (shouldn't happen but safe)
+    rows.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+
+    res.json({ events: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/competitor-intel/investigations/:id/timeline', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const limit = parseInt(req.query.limit || '60', 10);
+    const rows = [];
+
+    const stepsQ = await pool.query(`
+      SELECT ps.id, ps.step_order, ps.action, ps.notes, ps.status, ps.executed_at AS at,
+             b.id AS brand_id, b.name AS brand_name, p.name AS persona_name
+      FROM competitor_playbook_steps ps
+      JOIN competitor_brands b ON b.id = ps.brand_id
+      JOIN competitor_personas p ON p.id = ps.persona_id
+      WHERE b.investigation_id = $1 AND ps.status IN ('done','skipped') AND ps.executed_at IS NOT NULL
+      ORDER BY ps.executed_at DESC LIMIT $2
+    `, [id, limit]);
+    for (const s of stepsQ.rows) {
+      rows.push({
+        kind: 'step_done', at: s.at, actor: 'you',
+        brand_id: s.brand_id, brand_name: s.brand_name, persona_name: s.persona_name,
+        data: { step_id: s.id, step_order: s.step_order, status: s.status, action: s.action, notes: s.notes }
+      });
+    }
+
+    const emailsQ = await pool.query(`
+      SELECT e.id, e.subject, e.sender_email, e.received_at AS at, e.classification,
+             b.id AS brand_id, b.name AS brand_name, p.name AS persona_name
+      FROM competitor_emails e
+      LEFT JOIN competitor_brands b ON b.id = e.brand_id
+      JOIN competitor_personas p ON p.id = e.persona_id
+      WHERE p.investigation_id = $1
+      ORDER BY e.received_at DESC LIMIT $2
+    `, [id, limit]);
+    for (const e of emailsQ.rows) {
+      rows.push({
+        kind: 'email_received', at: e.at, actor: 'brand',
+        brand_id: e.brand_id, brand_name: e.brand_name || 'Unclassified',
+        persona_name: e.persona_name,
+        data: { email_id: e.id, subject: e.subject, sender_email: e.sender_email, type: e.classification?.type || null }
+      });
+    }
+
+    const engQ = await pool.query(`
+      SELECT g.id, g.event_type, g.link_url, g.occurred_at AS at,
+             e.subject, b.id AS brand_id, b.name AS brand_name, p.name AS persona_name
+      FROM competitor_email_engagement g
+      JOIN competitor_emails e ON e.id = g.email_id
+      LEFT JOIN competitor_brands b ON b.id = e.brand_id
+      JOIN competitor_personas p ON p.id = e.persona_id
+      WHERE p.investigation_id = $1
+      ORDER BY g.occurred_at DESC LIMIT $2
+    `, [id, limit]);
+    for (const g of engQ.rows) {
+      rows.push({
+        kind: g.event_type, at: g.at, actor: 'system',
+        brand_id: g.brand_id, brand_name: g.brand_name || 'Unclassified', persona_name: g.persona_name,
+        data: { engagement_id: g.id, link_url: g.link_url, subject: g.subject }
+      });
+    }
+
+    const insQ = await pool.query(`
+      SELECT i.id, i.title, i.body, i.category, i.severity, i.created_at AS at,
+             b.id AS brand_id, b.name AS brand_name
+      FROM competitor_insights i
+      LEFT JOIN competitor_brands b ON b.id = i.brand_id
+      WHERE (b.investigation_id = $1 OR i.brand_id IS NULL)
+      ORDER BY i.created_at DESC LIMIT $2
+    `, [id, limit]);
+    for (const i of insQ.rows) {
+      rows.push({
+        kind: 'insight', at: i.at, actor: 'you',
+        brand_id: i.brand_id, brand_name: i.brand_name || 'Cross-brand', persona_name: null,
+        data: { insight_id: i.id, title: i.title, body: i.body, category: i.category, severity: i.severity }
+      });
+    }
+
+    rows.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+    res.json({ events: rows.slice(0, limit) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 process.on('uncaughtException', (err) => {
     console.error('[Server] Uncaught exception (keeping process alive):', err.message);
 });

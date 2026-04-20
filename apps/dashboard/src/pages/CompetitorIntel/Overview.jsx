@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import BrandCard from './components/BrandCard.jsx';
 import SubNav from './components/SubNav.jsx';
+import Timeline from './components/Timeline.jsx';
 
 const API = import.meta.env.VITE_API_URL || '/api';
 
@@ -20,11 +21,12 @@ export default function Overview() {
     const [data, setData] = useState(null);
 
     async function load() {
-        const [a, b] = await Promise.all([
+        const [a, b, tl] = await Promise.all([
             fetch(`${API}/competitor-intel/investigations/${id}/overview`).then((r) => r.json()),
             fetch(`${API}/competitor-intel/investigations/${id}`).then((r) => r.json()),
+            fetch(`${API}/competitor-intel/investigations/${id}/timeline?limit=50`).then((r) => r.json()),
         ]);
-        setData({ ...a, investigation: b.investigation, personas: b.personas || [] });
+        setData({ ...a, investigation: b.investigation, personas: b.personas || [], timeline: tl.events || [] });
     }
     useEffect(() => {
         load();
@@ -75,26 +77,12 @@ export default function Overview() {
                     ))}
                 </div>
 
-                <aside className="ci-activity">
-                    <h4>Activity</h4>
-                    {data.activity.length === 0 ? (
-                        <p className="ci-activity-empty">
-                            No activity yet. Connect a Gmail persona to start ingesting emails.
-                        </p>
-                    ) : (
-                        <ul>
-                            {data.activity.map((a) => (
-                                <li key={a.kind + a.id}>
-                                    <div className="ci-activity-meta">
-                                        <time>{fmtTime(a.at)}</time>
-                                        <strong>{a.brand_name || 'Unclassified'}</strong>
-                                        <span>→ {a.persona_name}</span>
-                                    </div>
-                                    <div className="ci-activity-title">{a.title}</div>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
+                <aside className="ci-activity ci-activity--timeline">
+                    <h4>Timeline</h4>
+                    {data.timeline?.length
+                        ? <Timeline events={data.timeline} compact showBrand />
+                        : <p className="ci-activity-empty">No activity yet. Mark a playbook step or wait for the ingestion worker (5 min).</p>
+                    }
                 </aside>
             </div>
         </div>
