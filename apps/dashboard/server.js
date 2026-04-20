@@ -49,6 +49,7 @@ import * as competitorIntelOAuth from '../../packages/core/competitor-intel/gmai
 import * as competitorIntelIngestion from '../../packages/core/competitor-intel/gmail-ingestion.js';
 import * as competitorIntelClassifierLLM from '../../packages/core/competitor-intel/classifier-llm.js';
 import * as competitorIntelEngagement from '../../packages/core/competitor-intel/engagement.js';
+import * as competitorIntelScoring from '../../packages/core/competitor-intel/scoring.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -9900,6 +9901,16 @@ app.get('/api/competitor-intel/personas/:id', async (req, res) => {
     `, [id])).rows;
     res.json({ persona, gmail, emails });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/competitor-intel/brands/:id/score/auto', async (req, res) => {
+  try { res.json(await competitorIntelScoring.computeBrandScores(parseInt(req.params.id, 10))); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/competitor-intel/brands/:id/score', async (req, res) => {
+  try { res.json(await competitorIntelScoring.setBrandScoreManual(parseInt(req.params.id, 10), req.body)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 process.on('uncaughtException', (err) => {
