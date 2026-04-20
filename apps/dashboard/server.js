@@ -8840,6 +8840,24 @@ app.post('/api/competitor-intel/ingest-now', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/competitor-intel/personas/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const persona = (await pool.query('SELECT * FROM competitor_personas WHERE id = $1', [id])).rows[0];
+    if (!persona) return res.status(404).json({ error: 'not found' });
+    const gmail = (await pool.query('SELECT email, last_sync_at FROM competitor_persona_gmail WHERE persona_id = $1', [id])).rows[0] || null;
+    const emails = (await pool.query(`
+      SELECT e.*, b.name AS brand_name
+      FROM competitor_emails e
+      LEFT JOIN competitor_brands b ON b.id = e.brand_id
+      WHERE e.persona_id = $1
+      ORDER BY e.received_at DESC NULLS LAST
+      LIMIT 200
+    `, [id])).rows;
+    res.json({ persona, gmail, emails });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 process.on('uncaughtException', (err) => {
     console.error('[Server] Uncaught exception (keeping process alive):', err.message);
 });
