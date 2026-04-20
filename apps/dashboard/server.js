@@ -9834,7 +9834,12 @@ app.get('/api/competitor-intel/investigations/:id', async (req, res) => {
     const inv = await pool.query('SELECT * FROM competitor_investigations WHERE id = $1', [id]);
     if (!inv.rows[0]) return res.status(404).json({ error: 'not found' });
     const brands = await pool.query('SELECT * FROM competitor_brands WHERE investigation_id = $1 ORDER BY name', [id]);
-    const personas = await pool.query('SELECT * FROM competitor_personas WHERE investigation_id = $1 ORDER BY name', [id]);
+    const personas = await pool.query(`
+      SELECT p.*, (g.persona_id IS NOT NULL) AS gmail_connected, g.email AS gmail_email
+      FROM competitor_personas p
+      LEFT JOIN competitor_persona_gmail g ON g.persona_id = p.id
+      WHERE p.investigation_id = $1 ORDER BY p.name
+    `, [id]);
     res.json({ investigation: inv.rows[0], brands: brands.rows, personas: personas.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
