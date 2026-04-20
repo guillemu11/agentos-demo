@@ -43,6 +43,7 @@ export default function Layout({ user, onLogout }) {
                 { to: '/app/campaign-creation', icon: icons.campaignCreation, label: t('layout.campaignCreation') },
                 { to: '/app/preview-test', icon: icons.previewTest, label: t('layout.previewTest') },
                 { to: '/app/competitor-analysis', icon: icons.competitorAnalysis, label: t('layout.competitorAnalysis') },
+                { to: '/app/competitor-intel', icon: icons.competitorIntel, label: t('layout.competitorIntel') },
                 { to: '/app/brand-guardian', icon: icons.brandGuardian, label: t('layout.brandGuardian') },
                 { to: '/app/research', icon: icons.intelligence, label: t('layout.autoResearch') },
             ],

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import BrandCard from './components/BrandCard.jsx';
+import SubNav from './components/SubNav.jsx';
 
 const API = import.meta.env.VITE_API_URL || '/api';
 
@@ -38,6 +39,7 @@ export default function Overview() {
 
     return (
         <div className="ci-page ci-fade-in">
+            <SubNav />
             <header className="ci-page-header">
                 <div>
                     <p className="ci-eyebrow">Competitor Intel · Investigation</p>

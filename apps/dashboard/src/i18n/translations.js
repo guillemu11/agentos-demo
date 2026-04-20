@@ -28,6 +28,7 @@ export const translations = {
       campaignCreation: 'Creacion de Campana',
       previewTest: 'Vista Previa y Test',
       competitorAnalysis: 'Analisis Competitivo',
+      competitorIntel: 'Competitor Intel',
       brandAudit: 'Brand Audit (QA)',
       brandGuardian: 'Brand Guardian',
       emailStudio: 'Email Studio',
@@ -2393,6 +2394,27 @@ export const translations = {
     competitorIntel: {
       title: 'Competitor Intel',
       loading: 'Cargando...',
+      // Navigation
+      overview: 'Vista general',
+      comparative: 'Comparativa',
+      insights: 'Insights',
+      gap: 'Gap vs Emirates',
+      // Brand page tabs
+      playbook: 'Playbook',
+      inbox: 'Bandeja',
+      scoring: 'Puntuación',
+      // Actions
+      connectGmail: 'Conectar Gmail',
+      markDone: 'Marcar hecho',
+      skip: 'Omitir',
+      save: 'Guardar',
+      autoScore: 'Auto-puntuar desde emails',
+      saveScoring: 'Guardar puntuación',
+      exportDocx: 'Exportar Analysis 5 (.docx)',
+      reingestAnalysis4: 'Re-ingerir Analysis 4',
+      // Comparative
+      timeToFirstTouch: 'Tiempo al primer email útil',
+      lifecycleDepth: 'Profundidad del lifecycle',
     },
   },
 
@@ -2424,6 +2446,7 @@ export const translations = {
       campaignCreation: 'Campaign Creation',
       previewTest: 'Preview & Test',
       competitorAnalysis: 'Competitor Analysis',
+      competitorIntel: 'Competitor Intel',
       brandAudit: 'Brand Audit (QA)',
       brandGuardian: 'Brand Guardian',
       emailStudio: 'Email Studio',
@@ -4755,7 +4778,28 @@ export const translations = {
 
     competitorIntel: {
       title: 'Competitor Intel',
-      loading: 'Loading...',
+      loading: 'Loading…',
+      // Navigation
+      overview: 'Overview',
+      comparative: 'Comparative',
+      insights: 'Insights',
+      gap: 'Emirates gap',
+      // Brand page tabs
+      playbook: 'Playbook',
+      inbox: 'Inbox',
+      scoring: 'Scoring',
+      // Actions
+      connectGmail: 'Connect Gmail',
+      markDone: 'Mark done',
+      skip: 'Skip',
+      save: 'Save',
+      autoScore: 'Auto-score from emails',
+      saveScoring: 'Save scoring',
+      exportDocx: 'Export Analysis 5 (.docx)',
+      reingestAnalysis4: 'Re-ingest Analysis 4',
+      // Comparative
+      timeToFirstTouch: 'Time to first useful email',
+      lifecycleDepth: 'Lifecycle depth',
     },
   },
 };

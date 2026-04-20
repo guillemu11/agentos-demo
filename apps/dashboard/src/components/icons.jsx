@@ -41,6 +41,7 @@ export const NavIcons = {
   campaignCreation: <Rocket size={20} />,
   previewTest: <TestTube size={20} />,
   competitorAnalysis: <Eye size={20} />,
+  competitorIntel: <Target size={20} />,
   brandAudit: <Shield size={20} />,
   brandGuardian: <ShieldCheck size={20} />,
   emailStudio: <Code2 size={20} />,
