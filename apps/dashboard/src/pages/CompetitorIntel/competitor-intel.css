@@ -1015,3 +1015,92 @@
 @media (max-width: 960px) {
     .ci-ttft { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ─── Insights page ─── */
+.ci-insights-form {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: var(--space-6);
+    margin-bottom: var(--space-8);
+    display: grid;
+    gap: var(--space-4);
+}
+.ci-insights-form h3 { margin: 0; }
+.ci-form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: var(--space-4);
+}
+.ci-insights-form label { display: grid; gap: var(--space-1); font-size: 0.85rem; }
+.ci-insights-form label > span { margin-bottom: 2px; }
+.ci-insights-form input[type="text"],
+.ci-insights-form select,
+.ci-insights-form textarea {
+    padding: var(--space-3);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    background: var(--bg-main);
+    color: inherit;
+    font-family: inherit;
+    font-size: 0.9rem;
+    width: 100%;
+}
+.ci-insights-form input[type="text"]:focus,
+.ci-insights-form select:focus,
+.ci-insights-form textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+.ci-insights-form textarea { resize: vertical; min-height: 80px; }
+
+.ci-insights-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: var(--space-3);
+}
+.ci-insights-list li {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5) var(--space-6);
+    display: grid;
+    gap: var(--space-2);
+    transition: border-color 0.15s ease;
+}
+.ci-insights-list li:hover { border-color: var(--primary); }
+.ci-insight-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-4);
+}
+.ci-insight-head strong {
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--text-main);
+    margin-top: 2px;
+    display: block;
+}
+.ci-insight-meta {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.ci-insight-body {
+    margin: 0;
+    font-size: 0.9rem;
+    line-height: 1.55;
+    color: var(--text-main);
+}
+.ci-btn-sm {
+    padding: var(--space-1) var(--space-3);
+    font-size: 0.75rem;
+}

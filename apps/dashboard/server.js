@@ -50,6 +50,7 @@ import * as competitorIntelIngestion from '../../packages/core/competitor-intel/
 import * as competitorIntelClassifierLLM from '../../packages/core/competitor-intel/classifier-llm.js';
 import * as competitorIntelEngagement from '../../packages/core/competitor-intel/engagement.js';
 import * as competitorIntelScoring from '../../packages/core/competitor-intel/scoring.js';
+import * as competitorIntelDocx from '../../packages/core/competitor-intel/docx-export.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -9948,6 +9949,50 @@ app.post('/api/competitor-intel/brands/:id/score/auto', async (req, res) => {
 app.put('/api/competitor-intel/brands/:id/score', async (req, res) => {
   try { res.json(await competitorIntelScoring.setBrandScoreManual(parseInt(req.params.id, 10), req.body)); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/competitor-intel/investigations/:id/insights', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const r = await pool.query(`
+      SELECT i.*, b.name AS brand_name
+      FROM competitor_insights i
+      LEFT JOIN competitor_brands b ON b.id = i.brand_id
+      WHERE (b.investigation_id = $1 OR (i.brand_id IS NULL
+             AND EXISTS (SELECT 1 FROM competitor_investigations ci WHERE ci.id = $1)))
+      ORDER BY i.created_at DESC
+    `, [id]);
+    res.json({ insights: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/competitor-intel/insights', async (req, res) => {
+  try {
+    const { brand_id, category, severity, title, body, evidence_email_ids } = req.body || {};
+    if (!title) return res.status(400).json({ error: 'title required' });
+    const r = await pool.query(`
+      INSERT INTO competitor_insights(brand_id, category, severity, title, body, evidence_email_ids)
+      VALUES ($1,$2,$3,$4,$5,$6) RETURNING *
+    `, [brand_id || null, category || null, severity || null, title, body || null, evidence_email_ids || []]);
+    res.json({ insight: r.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/competitor-intel/insights/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM competitor_insights WHERE id = $1', [parseInt(req.params.id, 10)]);
+    res.json({ deleted: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/competitor-intel/investigations/:id/export.docx', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const buf = await competitorIntelDocx.exportDocx(id);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', 'attachment; filename="Analysis_5_DERTOUR_Lifecycle.docx"');
+    res.send(buf);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/competitor-intel/investigations/:id/comparative', async (req, res) => {
