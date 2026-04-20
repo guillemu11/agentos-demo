@@ -6,6 +6,7 @@
  */
 
 import { GoogleGenAI } from '@google/genai';
+import sharp from 'sharp';
 
 let _client = null;
 let _apiKey = null;
@@ -213,27 +214,39 @@ export function isGeminiReady() {
  * @param {number} [options.numberOfImages=1] - 1-4
  * @returns {Promise<string[]>} - Array of data URIs (data:image/png;base64,...)
  */
-export async function generateImage(prompt, { aspectRatio = '16:9', numberOfImages = 1 } = {}) {
-    if (!_apiKey) throw new Error('Gemini not initialized. Call initGemini() first.');
-    const model = 'imagen-4.0-generate-001';
-    console.log(`[Gemini:imagen] model=${model} prompt="${prompt.slice(0, 60)}..."`);
-    const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${_apiKey}`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                instances: [{ prompt }],
-                parameters: { sampleCount: numberOfImages, aspectRatio },
-            }),
+export async function generateImage(prompt, { aspectRatio = '16:9', numberOfImages = 1, targetWidth, targetHeight } = {}) {
+    if (!_client) throw new Error('Gemini not initialized. Call initGemini() first.');
+    const model = 'gemini-2.5-flash-image';
+    console.log(`[Gemini:flash-img] model=${model} ratio=${aspectRatio} target=${targetWidth}x${targetHeight} prompt="${prompt.slice(0, 60)}..."`);
+
+    const urls = [];
+    for (let i = 0; i < numberOfImages; i++) {
+        const dataUri = await withRetry(async () => {
+            const response = await _client.models.generateContent({
+                model,
+                contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                config: { responseModalities: ['IMAGE', 'TEXT'] },
+            });
+            const imgPart = response.candidates?.[0]?.content?.parts?.find(
+                p => p.inlineData?.mimeType?.startsWith('image/')
+            );
+            if (!imgPart) throw new Error('No image part in Gemini response');
+            return `data:${imgPart.inlineData.mimeType};base64,${imgPart.inlineData.data}`;
+        });
+
+        // Crop + resize to exact target dimensions if provided
+        if (targetWidth && targetHeight) {
+            const base64 = dataUri.split(',')[1];
+            const cropped = await sharp(Buffer.from(base64, 'base64'))
+                .resize(targetWidth, targetHeight, { fit: 'cover', position: 'centre' })
+                .jpeg({ quality: 85 })
+                .toBuffer();
+            urls.push(`data:image/jpeg;base64,${cropped.toString('base64')}`);
+            console.log(`[Gemini:flash-img] cropped to ${targetWidth}x${targetHeight} (${Math.round(cropped.length/1024)}KB)`);
+        } else {
+            urls.push(dataUri);
         }
-    );
-    if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`Imagen API ${res.status}: ${err.slice(0, 200)}`);
     }
-    const data = await res.json();
-    const urls = (data.predictions || []).map(p => `data:${p.mimeType};base64,${p.bytesBase64Encoded}`);
-    console.log(`[Gemini:imagen] success images=${urls.length}`);
+    console.log(`[Gemini:flash-img] success images=${urls.length}`);
     return urls;
 }

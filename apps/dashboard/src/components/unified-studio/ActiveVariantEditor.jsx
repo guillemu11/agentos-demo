@@ -1,10 +1,28 @@
 import React, { useState } from 'react';
 import { useLanguage } from '../../i18n/LanguageContext.jsx';
+import AIInlineTip from '../ai-proposals/AIInlineTip.jsx';
+import { AI_PROPOSALS } from '../../data/aiProposals.js';
 
 const MARKETS = ['en', 'es', 'ar', 'ru'];
 const TIERS = ['economy', 'economy_premium', 'business', 'first_class'];
 
-export default function ActiveVariantEditor({ variant, onChange }) {
+function buildPreviewHtml(templateShell, fullHtml, t) {
+    const blocksHtml = fullHtml || '';
+    if (templateShell) {
+        // Inject blocks at the Emirates slot div, replacing its content
+        const slotRe = /<div\s[^>]*data-type="slot"[^>]*>[\s\S]*?<\/div>/;
+        if (slotRe.test(templateShell)) {
+            return templateShell.replace(slotRe, blocksHtml);
+        }
+        // Fallback: inject before </body>
+        if (templateShell.includes('</body>')) {
+            return templateShell.replace('</body>', `${blocksHtml}</body>`);
+        }
+    }
+    return blocksHtml || `<div style="padding:24px;font-family:sans-serif;color:#64748b">${t('unifiedStudio.previewHint')}</div>`;
+}
+
+export default function ActiveVariantEditor({ variant, onChange, templateShell = '' }) {
     const { t } = useLanguage();
     const [tab, setTab] = useState('copy');
 
@@ -40,6 +58,11 @@ export default function ActiveVariantEditor({ variant, onChange }) {
             <div className="us-editor-body">
                 {tab === 'copy' && (
                     <div className="us-form">
+                        {AI_PROPOSALS.studio.inlineTips
+                            .filter(tip => !variant?.market || tip.marketFilter === variant.market)
+                            .map(tip => (
+                                <AIInlineTip key={tip.id} message={tip.message} />
+                            ))}
                         <div className="us-form-row">
                             <label className="us-label">{t('unifiedStudio.fields.label')}</label>
                             <input
@@ -106,7 +129,7 @@ export default function ActiveVariantEditor({ variant, onChange }) {
                         <iframe
                             title="preview"
                             className="us-preview-frame"
-                            srcDoc={variant.html?.fullHtml || `<div style="padding:24px;font-family:sans-serif;color:#64748b">${t('unifiedStudio.previewHint')}</div>`}
+                            srcDoc={buildPreviewHtml(templateShell, variant.html?.fullHtml, t)}
                         />
                     </div>
                 )}

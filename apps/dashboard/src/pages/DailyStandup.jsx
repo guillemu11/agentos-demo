@@ -6,7 +6,7 @@ import DailyCoverageAlert from '../components/DailyCoverageAlert.jsx';
 import DailyTrends from '../components/DailyTrends.jsx';
 import DailyAiSummary from '../components/DailyAiSummary.jsx';
 import { MoodIcons, StandupIcons, DailyTabIcons, StatusIcons, AgentAvatar } from '../components/icons.jsx';
-import { Loader2 } from 'lucide-react';
+import { Loader2, PartyPopper } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -411,7 +411,7 @@ export default function DailyStandup() {
                         </div>
 
                         {/* Blocked */}
-                        <div className="standup-column standup-col-blocked">
+                        <div className={`standup-column standup-col-blocked ${standup.blocked.length === 0 ? 'standup-col-blocked--clear' : 'standup-col-blocked--has'}`}>
                             <div className="standup-col-header">
                                 <span className="standup-col-icon">{StandupIcons.blocked}</span>
                                 <h3>{t('daily.blockedLabel')}</h3>
@@ -432,7 +432,15 @@ export default function DailyStandup() {
                                         </div>
                                     );
                                 })}
-                                {standup.blocked.length === 0 && <p className="standup-empty">{t('daily.noBlockers')} {StandupIcons.celebrate}</p>}
+                                {standup.blocked.length === 0 && (
+                                    <div className="standup-clear-celebration">
+                                        <div className="standup-clear-icon" aria-hidden="true">
+                                            <PartyPopper size={40} strokeWidth={1.75} />
+                                        </div>
+                                        <p className="standup-clear-title">{t('daily.noBlockersTitle')}</p>
+                                        <p className="standup-clear-desc">{t('daily.noBlockersDesc')}</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>

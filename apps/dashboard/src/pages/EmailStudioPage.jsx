@@ -10,7 +10,9 @@ import EmailBlocksPanel from '../components/EmailBlocksPanel.jsx';
 import VariantPreviewModal from '../components/VariantPreviewModal.jsx';
 import { injectIntoSlot, mergeAiHtmlIntoTemplate, fetchEmailTemplate, splitIntoBlocks } from '../utils/emailTemplate.js';
 import { substituteForPreview } from '../utils/emailMockSubstitute.js';
-import { Pencil, FlaskConical, Star, Trash2 } from 'lucide-react';
+import { Pencil, FlaskConical, Star, Trash2, Check } from 'lucide-react';
+import Button from '../components/ui/Button.jsx';
+import { useToast } from '../components/ui/ToastProvider.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const AGENT_ID = 'html-developer';
@@ -101,7 +103,7 @@ function TemplateCard({ template, contentReady, contentVariants, projectId, dele
             className="email-template-btn email-template-btn--edit"
             onClick={() => onEdit(template)}
           >
-            <Pencil size={13} style={{ verticalAlign: 'middle' }} /> {t('studio.templateEdit')}
+            <Pencil size={14} className="email-studio-btn-icon" /> {t('studio.templateEdit')}
           </button>
           <button
             className="email-template-btn email-template-btn--test"
@@ -109,24 +111,26 @@ function TemplateCard({ template, contentReady, contentVariants, projectId, dele
             disabled={!contentReady}
             title={!contentReady ? t('emailBuilder.waitingVariants') : t('emailBuilder.previewTest')}
           >
-            <FlaskConical size={13} style={{ verticalAlign: 'middle' }} /> {t('emailBuilder.previewTest')}
+            <FlaskConical size={14} className="email-studio-btn-icon" /> {t('emailBuilder.previewTest')}
           </button>
           {!isFinal ? (
             <button className="email-template-btn email-template-btn--use" onClick={setAsFinal}>
-              <Star size={13} style={{ verticalAlign: 'middle' }} /> {t('studio.templateUseThis')}
+              <Star size={14} className="email-studio-btn-icon" /> {t('studio.templateUseThis')}
             </button>
           ) : (
-            <span className="email-template-btn email-template-btn--chosen">✓ {t('studio.templateUseThis')}</span>
+            <span className="email-template-btn email-template-btn--chosen">
+              <Check size={14} strokeWidth={2} className="email-studio-btn-icon" /> {t('studio.templateUseThis')}
+            </span>
           )}
           {deletingId === template.id ? (
             <>
-              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{t('studio.templateDeleteConfirm')}</span>
+              <span className="email-template-delete-confirm email-studio-muted">{t('studio.templateDeleteConfirm')}</span>
               <button className="email-template-btn email-template-btn--danger" onClick={deleteTemplate}>{t('studio.templateDeleteYes')}</button>
               <button className="email-template-btn" onClick={() => setDeletingId(null)}>{t('studio.templateDeleteNo')}</button>
             </>
           ) : (
             <button className="email-template-btn email-template-btn--delete" onClick={() => setDeletingId(template.id)}>
-              <Trash2 size={13} />
+              <Trash2 size={14} />
             </button>
           )}
         </div>
@@ -147,6 +151,7 @@ export default function EmailStudioPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { t } = useLanguage();
+  const toast = useToast();
   const ticketId = searchParams.get('ticketId');
 
   const [agent, setAgent] = useState(null);
@@ -233,8 +238,7 @@ export default function EmailStudioPage() {
     }
     setEditingTemplate({ id: template.id, name: template.variant_name || '' });
     setActiveTab('chat');
-    setBuilderStatus(`Cargado: ${template.variant_name || 'template'}`);
-    setTimeout(() => setBuilderStatus(''), 3000);
+    toast.success(t('studio.toast.loaded').replace('{name}', template.variant_name || 'template'));
   }
 
   // Fetch content variants when project changes
@@ -327,7 +331,6 @@ export default function EmailStudioPage() {
 
   const tabs = [
     { id: 'chat',      label: t('studio.chat') },
-    { id: 'blocks',    label: t('studio.blockLibrary') },
     { id: 'templates', label: t('studio.templates') },
     { id: 'tickets',   label: t('tickets.tab'), count: pipeline.tickets.length, urgent: pipeline.hasUrgentTickets },
   ];
@@ -354,25 +357,25 @@ export default function EmailStudioPage() {
     } catch {}
   }
 
-  if (!agent) return <div className="studio-page studio-loading">Loading...</div>;
+  if (!agent) return <div className="studio-page studio-loading">{t('studio.loading')}</div>;
 
   return (
     <div className="studio-page">
       {/* Top bar */}
       <div className="studio-topbar">
-        <button className="studio-back-btn" onClick={() => navigate('/app/workspace/agent/html-developer')}>
+        <Button variant="ghost" size="sm" onClick={() => navigate('/app/workspace/agent/html-developer')}>
           {t('studio.backToAgent')}
-        </button>
+        </Button>
         {pipeline.selectedTicket && (
           <span className="studio-campaign-badge">{pipeline.selectedTicket.project_name}</span>
         )}
-        <span className="studio-status-chip studio-status-building">● {t('studio.building')}</span>
+        <span className="studio-status-chip studio-status-building">{t('studio.status.building')}</span>
         <div className="studio-topbar-actions">
           <input
             ref={importFileRef}
             type="file"
             accept=".html,text/html"
-            style={{ display: 'none' }}
+            className="ui-hidden-file-input"
             onChange={handleImportHtml}
           />
           <button
@@ -432,6 +435,7 @@ export default function EmailStudioPage() {
                   externalInput={chatInput}
                   onExternalInputConsumed={() => setChatInput('')}
                   currentHtml={builderHtml}
+                  canvasBlocks={blocks}
                   onHtmlGenerated={(html) => {
                     const merged = mergeAiHtmlIntoTemplate(templateHtml, html);
                     const parsed = splitIntoBlocks(merged);
@@ -444,8 +448,7 @@ export default function EmailStudioPage() {
                       setBlocks([]);
                     }
                     setPatchedBlock(null);
-                    setBuilderStatus('Email generado');
-                    setTimeout(() => setBuilderStatus(''), 3000);
+                    toast.success(t('studio.toast.generated'));
                   }}
                   onHtmlPatched={(blockName, fullPatchedHtml) => {
                     setBlocks(prev => {
@@ -457,13 +460,12 @@ export default function EmailStudioPage() {
                       });
                     });
                     setPatchedBlock(blockName);
-                    setBuilderStatus(`${blockName} actualizado`);
-                    setTimeout(() => { setPatchedBlock(null); setBuilderStatus(''); }, 2000);
+                    toast.success(t('studio.toast.updated').replace('{name}', blockName));
+                    setTimeout(() => setPatchedBlock(null), 2000);
                   }}
                   onHtmlBlock={(block) => {
                     addBlock(block.title, block.htmlSource);
-                    setBuilderStatus(`${block.title} añadido`);
-                    setTimeout(() => setBuilderStatus(''), 3000);
+                    toast.success(t('studio.toast.added').replace('{name}', block.title));
                   }}
                 />
               </div>
@@ -481,11 +483,10 @@ export default function EmailStudioPage() {
               projectId={pipeline.selectedTicket?.project_id}
               contentVariants={contentVariants}
               contentReady={contentReady}
-              onBlockClick={(blockName) => setChatInput(`[bloque: ${blockName}] `)}
+              onBlockClick={(blockName) => setChatInput(t('studio.blockPrefix').replace('{name}', blockName))}
               onBlockDrop={(block) => {
                 addBlock(block.name, block.html);
-                setBuilderStatus(t('emailBlocks.added').replace('{name}', block.name));
-                setTimeout(() => setBuilderStatus(''), 3000);
+                toast.success(t('emailBlocks.added').replace('{name}', block.name));
               }}
               editingTemplate={editingTemplate}
               onTemplateSaved={() => { setEditingTemplate(null); fetchTemplates(); setActiveTab('templates'); }}
@@ -506,18 +507,9 @@ export default function EmailStudioPage() {
             />
           </div>
         )}
-        {activeTab === 'blocks' && (
-          <div className="studio-full-panel" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-            <p style={{ marginBottom: 12 }}>Vuelve al agente para acceder a este panel.</p>
-            <button className="studio-back-btn" onClick={() => navigate('/app/workspace/agent/html-developer')}>
-              {t('studio.backToAgent')}
-            </button>
-          </div>
-        )}
-
         {activeTab === 'templates' && (
           <div className="studio-full-panel email-templates-panel">
-            {templatesLoading && <p style={{ color: 'var(--text-muted)', padding: 24 }}>{t('studio.templatesLoading')}</p>}
+            {templatesLoading && <p className="email-studio-templates-loading">{t('studio.templatesLoading')}</p>}
             {!templatesLoading && templates.length === 0 && (
               <p className="email-templates-empty">{t('studio.noTemplates')}</p>
             )}

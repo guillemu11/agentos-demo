@@ -1,24 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { useOutletContext } from 'react-router-dom';
+import { Folder, X } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
+import { useToast } from '../components/ui/ToastProvider.jsx';
+import Button from '../components/ui/Button.jsx';
+import ConfirmDialog from '../components/ui/ConfirmDialog.jsx';
+import FormField from '../components/ui/FormField.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
-
-function Toast({ message, onDone }) {
-    useEffect(() => {
-        const timer = setTimeout(onDone, 3000);
-        return () => clearTimeout(timer);
-    }, [onDone]);
-    return <div className="settings-toast">{message}</div>;
-}
+// Note: '#3b82f6' default below is required because <input type="color"> only accepts hex.
 
 // ─── Workspace Tab ───────────────────────────────────────────────────────────
 
 function WorkspaceTab({ t }) {
+    const toast = useToast();
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
     const [saving, setSaving] = useState(false);
-    const [toast, setToast] = useState(null);
 
     useEffect(() => {
         fetch(`${API_URL}/api/settings/workspace`, { credentials: 'include' })
@@ -40,9 +38,9 @@ function WorkspaceTab({ t }) {
                 body: JSON.stringify({ workspace_name: name, workspace_description: description }),
             });
             if (!res.ok) throw new Error('Failed to save');
-            setToast(t('settings.saved'));
+            toast.success(t('settings.saved'));
         } catch {
-            setToast(t('common.error'));
+            toast.error(t('common.error'));
         } finally {
             setSaving(false);
         }
@@ -50,28 +48,25 @@ function WorkspaceTab({ t }) {
 
     return (
         <div className="settings-section">
-            {toast && <Toast message={toast} onDone={() => setToast(null)} />}
-            <div className="settings-form-group">
-                <label>{t('settings.workspaceName')}</label>
+            <FormField label={t('settings.workspaceName')}>
                 <input
                     type="text"
                     value={name}
                     onChange={e => setName(e.target.value)}
                     placeholder={t('settings.workspaceNamePlaceholder')}
                 />
-            </div>
-            <div className="settings-form-group">
-                <label>{t('settings.workspaceDescription')}</label>
+            </FormField>
+            <FormField label={t('settings.workspaceDescription')}>
                 <textarea
                     rows={4}
                     value={description}
                     onChange={e => setDescription(e.target.value)}
                     placeholder={t('settings.workspaceDescPlaceholder')}
                 />
-            </div>
-            <button className="settings-save-btn" onClick={handleSave} disabled={saving}>
+            </FormField>
+            <Button variant="primary" onClick={handleSave} disabled={saving}>
                 {saving ? t('settings.saving') : t('settings.saveChanges')}
-            </button>
+            </Button>
         </div>
     );
 }
@@ -79,12 +74,13 @@ function WorkspaceTab({ t }) {
 // ─── Departments Tab ─────────────────────────────────────────────────────────
 
 function DepartmentsTab({ t }) {
+    const toast = useToast();
     const [departments, setDepartments] = useState({});
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [toast, setToast] = useState(null);
     const [adding, setAdding] = useState(false);
-    const [newDept, setNewDept] = useState({ id: '', name: '', emoji: '📁', color: '#3b82f6', description: '' });
+    const [confirmState, setConfirmState] = useState(null);
+    const [newDept, setNewDept] = useState({ id: '', name: '', emoji: 'folder', color: '#3b82f6', description: '' });
 
     useEffect(() => {
         fetch(`${API_URL}/api/settings/departments`, { credentials: 'include' })
@@ -104,16 +100,15 @@ function DepartmentsTab({ t }) {
             });
             if (!res.ok) throw new Error('Failed');
             setDepartments(updated);
-            setToast(t('settings.saved'));
+            toast.success(t('settings.saved'));
         } catch {
-            setToast(t('common.error'));
+            toast.error(t('common.error'));
         } finally {
             setSaving(false);
         }
     };
 
-    const handleDelete = (deptId) => {
-        if (!confirm(t('settings.confirmDeleteDept'))) return;
+    const performDelete = (deptId) => {
         const updated = { ...departments };
         delete updated[deptId];
         handleSave(updated);
@@ -127,7 +122,7 @@ function DepartmentsTab({ t }) {
             [id]: { name: newDept.name, emoji: newDept.emoji, color: newDept.color, description: newDept.description },
         };
         handleSave(updated);
-        setNewDept({ id: '', name: '', emoji: '📁', color: '#3b82f6', description: '' });
+        setNewDept({ id: '', name: '', emoji: 'folder', color: '#3b82f6', description: '' });
         setAdding(false);
     };
 
@@ -146,19 +141,18 @@ function DepartmentsTab({ t }) {
 
     return (
         <div className="settings-section">
-            {toast && <Toast message={toast} onDone={() => setToast(null)} />}
-
             <div className="dept-list">
                 {Object.entries(departments).map(([id, dept]) => (
                     <div key={id} className="dept-card">
                         <div className="dept-card-header">
                             <span className="dept-color-swatch" style={{ backgroundColor: dept.color }} />
-                            <input
-                                className="dept-inline-input dept-emoji-input"
-                                value={dept.emoji}
-                                onChange={e => handleFieldChange(id, 'emoji', e.target.value)}
-                                onBlur={handleBlurSave}
-                            />
+                            <span
+                                className="dept-icon-slot"
+                                title={t('settings.deptIcon')}
+                                aria-label={t('settings.deptIcon')}
+                            >
+                                <Folder size={16} />
+                            </span>
                             <input
                                 className="dept-inline-input dept-name-input"
                                 value={dept.name}
@@ -173,9 +167,15 @@ function DepartmentsTab({ t }) {
                                 onChange={e => handleFieldChange(id, 'color', e.target.value)}
                                 onBlur={handleBlurSave}
                             />
-                            <button className="dept-delete-btn" onClick={() => handleDelete(id)} title={t('common.delete')}>
-                                &times;
-                            </button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setConfirmState({ id, name: dept.name })}
+                                title={t('common.delete')}
+                                aria-label={t('common.delete')}
+                            >
+                                <X size={16} />
+                            </Button>
                         </div>
                         <input
                             className="dept-inline-input dept-desc-input"
@@ -191,62 +191,66 @@ function DepartmentsTab({ t }) {
             {adding ? (
                 <div className="dept-add-form">
                     <div className="dept-add-row">
-                        <div className="settings-form-group" style={{ flex: 1 }}>
-                            <label>{t('settings.deptId')}</label>
+                        <FormField label={t('settings.deptId')} className="settings-form-grow">
                             <input
                                 type="text"
                                 value={newDept.id}
                                 onChange={e => setNewDept({ ...newDept, id: e.target.value })}
                                 placeholder={t('settings.deptIdPlaceholder')}
                             />
-                        </div>
-                        <div className="settings-form-group" style={{ flex: 1 }}>
-                            <label>{t('settings.deptName')}</label>
+                        </FormField>
+                        <FormField label={t('settings.deptName')} className="settings-form-grow">
                             <input
                                 type="text"
                                 value={newDept.name}
                                 onChange={e => setNewDept({ ...newDept, name: e.target.value })}
                             />
-                        </div>
-                        <div className="settings-form-group" style={{ width: 70 }}>
-                            <label>{t('settings.deptEmoji')}</label>
-                            <input
-                                type="text"
-                                value={newDept.emoji}
-                                onChange={e => setNewDept({ ...newDept, emoji: e.target.value })}
-                            />
-                        </div>
-                        <div className="settings-form-group" style={{ width: 60 }}>
-                            <label>{t('settings.deptColor')}</label>
+                        </FormField>
+                        <FormField label={t('settings.deptIcon')} className="settings-form-icon">
+                            <span className="dept-icon-slot" aria-label={t('settings.deptIcon')}>
+                                <Folder size={16} />
+                            </span>
+                        </FormField>
+                        <FormField label={t('settings.deptColor')} className="settings-form-color">
                             <input
                                 type="color"
                                 value={newDept.color}
                                 onChange={e => setNewDept({ ...newDept, color: e.target.value })}
                             />
-                        </div>
+                        </FormField>
                     </div>
-                    <div className="settings-form-group">
-                        <label>{t('settings.deptDescription')}</label>
+                    <FormField label={t('settings.deptDescription')}>
                         <input
                             type="text"
                             value={newDept.description}
                             onChange={e => setNewDept({ ...newDept, description: e.target.value })}
                         />
-                    </div>
+                    </FormField>
                     <div className="dept-add-actions">
-                        <button className="settings-save-btn" onClick={handleAdd} disabled={saving}>
+                        <Button variant="primary" onClick={handleAdd} disabled={saving}>
                             {saving ? t('settings.saving') : t('common.save')}
-                        </button>
-                        <button className="settings-cancel-btn" onClick={() => setAdding(false)}>
+                        </Button>
+                        <Button variant="ghost" onClick={() => setAdding(false)}>
                             {t('common.cancel')}
-                        </button>
+                        </Button>
                     </div>
                 </div>
             ) : (
-                <button className="settings-add-btn" onClick={() => setAdding(true)}>
+                <Button variant="secondary" onClick={() => setAdding(true)}>
                     + {t('settings.addDepartment')}
-                </button>
+                </Button>
             )}
+
+            <ConfirmDialog
+                open={!!confirmState}
+                title={t('settings.confirmDelete')}
+                message={t('settings.confirmDeleteDeptMsg').replace('{name}', confirmState?.name || '')}
+                variant="danger"
+                confirmLabel={t('common.delete')}
+                cancelLabel={t('common.cancel')}
+                onConfirm={() => { performDelete(confirmState.id); setConfirmState(null); }}
+                onCancel={() => setConfirmState(null)}
+            />
         </div>
     );
 }
@@ -254,6 +258,7 @@ function DepartmentsTab({ t }) {
 // ─── API Keys Tab ────────────────────────────────────────────────────────────
 
 function ApiKeysTab({ t }) {
+    const toast = useToast();
     const services = [
         { key: 'anthropic', label: t('settings.anthropicKey'), placeholder: t('settings.apiKeyPlaceholder'), hint: t('settings.apiKeyHint'), type: 'password' },
         { key: 'gemini', label: t('settings.geminiKey'), placeholder: 'AIza...', hint: t('settings.geminiKeyHint'), type: 'password' },
@@ -271,7 +276,8 @@ function ApiKeysTab({ t }) {
     const [maskedKeys, setMaskedKeys] = useState({});
     const [newValues, setNewValues] = useState({});
     const [savingKey, setSavingKey] = useState(null);
-    const [toast, setToast] = useState(null);
+    const [clearingKey, setClearingKey] = useState(null);
+    const [confirmClear, setConfirmClear] = useState(null);
 
     useEffect(() => {
         fetch(`${API_URL}/api/settings/api-keys`, { credentials: 'include' })
@@ -294,43 +300,97 @@ function ApiKeysTab({ t }) {
             if (!res.ok) throw new Error('Failed');
             setMaskedKeys(prev => ({ ...prev, [serviceKey]: '••••' + value.slice(-4) }));
             setNewValues(prev => ({ ...prev, [serviceKey]: '' }));
-            setToast(t('settings.saved'));
+            toast.success(t('settings.saved'));
         } catch {
-            setToast(t('common.error'));
+            toast.error(t('common.error'));
         } finally {
             setSavingKey(null);
         }
     };
 
+    const handleClear = async (serviceKey) => {
+        setClearingKey(serviceKey);
+        try {
+            // TODO: backend endpoint added at DELETE /api/settings/api-keys/:service
+            const res = await fetch(`${API_URL}/api/settings/api-keys/${serviceKey}`, {
+                method: 'DELETE',
+                credentials: 'include',
+            });
+            if (!res.ok) throw new Error('Failed');
+            setMaskedKeys(prev => {
+                const next = { ...prev };
+                delete next[serviceKey];
+                return next;
+            });
+            toast.success(t('settings.keyCleared'));
+        } catch {
+            toast.error(t('common.error'));
+        } finally {
+            setClearingKey(null);
+            setConfirmClear(null);
+        }
+    };
+
+    const isSavedKey = (val) => typeof val === 'string' && val.length > 0;
+
     return (
         <div className="settings-section">
-            {toast && <Toast message={toast} onDone={() => setToast(null)} />}
+            {services.map(({ key, label, placeholder, hint, type }) => {
+                const masked = maskedKeys[key];
+                const saved = isSavedKey(masked);
+                return (
+                    <div className="api-key-card" key={key}>
+                        <div className="api-key-header">
+                            <strong>{label}</strong>
+                            <span className={`api-key-status ${saved ? 'set' : 'not-set'}`}>
+                                {saved ? t('settings.apiKeySet') : t('settings.apiKeyNotSet')}
+                            </span>
+                        </div>
+                        {saved && (
+                            <div className="api-key-masked">{masked}</div>
+                        )}
+                        <p className="api-key-hint">{hint}</p>
+                        <div className="api-key-form">
+                            <input
+                                type={type}
+                                value={newValues[key] || ''}
+                                onChange={e => setNewValues(prev => ({ ...prev, [key]: e.target.value }))}
+                                placeholder={placeholder}
+                                aria-label={label}
+                            />
+                            <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() => handleUpdate(key)}
+                                disabled={savingKey === key || !newValues[key]}
+                            >
+                                {savingKey === key ? t('settings.saving') : t('settings.updateKey')}
+                            </Button>
+                            {saved && (
+                                <Button
+                                    variant="danger-outline"
+                                    size="sm"
+                                    onClick={() => setConfirmClear({ service: key, label })}
+                                    disabled={clearingKey === key}
+                                >
+                                    {t('settings.clearKey')}
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+                );
+            })}
 
-            {services.map(({ key, label, placeholder, hint, type }) => (
-                <div className="api-key-card" key={key}>
-                    <div className="api-key-header">
-                        <strong>{label}</strong>
-                        <span className={`api-key-status ${maskedKeys[key] ? 'set' : 'not-set'}`}>
-                            {maskedKeys[key] ? t('settings.apiKeySet') : t('settings.apiKeyNotSet')}
-                        </span>
-                    </div>
-                    {maskedKeys[key] && (
-                        <div className="api-key-masked">{maskedKeys[key]}</div>
-                    )}
-                    <p className="api-key-hint">{hint}</p>
-                    <div className="api-key-form">
-                        <input
-                            type={type}
-                            value={newValues[key] || ''}
-                            onChange={e => setNewValues(prev => ({ ...prev, [key]: e.target.value }))}
-                            placeholder={placeholder}
-                        />
-                        <button className="settings-save-btn" onClick={() => handleUpdate(key)} disabled={savingKey === key || !newValues[key]}>
-                            {savingKey === key ? t('settings.saving') : t('settings.updateKey')}
-                        </button>
-                    </div>
-                </div>
-            ))}
+            <ConfirmDialog
+                open={!!confirmClear}
+                title={t('settings.confirmClearKey')}
+                message={t('settings.confirmClearKeyMsg').replace('{name}', confirmClear?.label || '')}
+                variant="danger"
+                confirmLabel={t('settings.clearKey')}
+                cancelLabel={t('common.cancel')}
+                onConfirm={() => handleClear(confirmClear.service)}
+                onCancel={() => setConfirmClear(null)}
+            />
         </div>
     );
 }
@@ -338,10 +398,11 @@ function ApiKeysTab({ t }) {
 // ─── Users Tab ───────────────────────────────────────────────────────────────
 
 function UsersTab({ t, currentUser }) {
+    const toast = useToast();
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [toast, setToast] = useState(null);
     const [adding, setAdding] = useState(false);
+    const [confirmState, setConfirmState] = useState(null);
     const [newUser, setNewUser] = useState({ email: '', password: '', name: '', role: 'member' });
 
     const canManage = ['owner', 'admin'].includes(currentUser.role);
@@ -369,15 +430,15 @@ function UsersTab({ t, currentUser }) {
             });
             const data = await res.json();
             if (!res.ok) {
-                setToast(data.error === 'Email already exists' ? t('settings.emailExists') : data.error);
+                toast.error(data.error === 'Email already exists' ? t('settings.emailExists') : data.error);
                 return;
             }
             setUsers(prev => [...prev, data]);
             setNewUser({ email: '', password: '', name: '', role: 'member' });
             setAdding(false);
-            setToast(t('settings.userCreated'));
+            toast.success(t('settings.userCreated'));
         } catch {
-            setToast(t('common.error'));
+            toast.error(t('common.error'));
         }
     };
 
@@ -390,17 +451,15 @@ function UsersTab({ t, currentUser }) {
                 body: JSON.stringify({ role: newRole }),
             });
             const data = await res.json();
-            if (!res.ok) { setToast(data.error); return; }
+            if (!res.ok) { toast.error(data.error); return; }
             setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
-            setToast(t('settings.roleChanged'));
+            toast.success(t('settings.roleChanged'));
         } catch {
-            setToast(t('common.error'));
+            toast.error(t('common.error'));
         }
     };
 
-    const handleDelete = async (userId) => {
-        if (userId === currentUser.id) { setToast(t('settings.cannotDeleteSelf')); return; }
-        if (!confirm(t('settings.confirmDeleteUser'))) return;
+    const performDelete = async (userId) => {
         try {
             const res = await fetch(`${API_URL}/api/settings/users/${userId}`, {
                 method: 'DELETE',
@@ -408,22 +467,28 @@ function UsersTab({ t, currentUser }) {
             });
             if (!res.ok) {
                 const data = await res.json();
-                setToast(data.error);
+                toast.error(data.error);
                 return;
             }
             setUsers(prev => prev.filter(u => u.id !== userId));
-            setToast(t('settings.userDeleted'));
+            toast.success(t('settings.userDeleted'));
         } catch {
-            setToast(t('common.error'));
+            toast.error(t('common.error'));
         }
+    };
+
+    const requestDelete = (user) => {
+        if (user.id === currentUser.id) {
+            toast.warning(t('settings.cannotDeleteSelf'));
+            return;
+        }
+        setConfirmState({ id: user.id, name: user.name || user.email });
     };
 
     if (loading) return <div>{t('common.loading')}</div>;
 
     return (
         <div className="settings-section">
-            {toast && <Toast message={toast} onDone={() => setToast(null)} />}
-
             <table className="settings-user-table">
                 <thead>
                     <tr>
@@ -454,9 +519,15 @@ function UsersTab({ t, currentUser }) {
                             </td>
                             <td>
                                 {u.id !== currentUser.id && (
-                                    <button className="dept-delete-btn" onClick={() => handleDelete(u.id)} title={t('common.delete')}>
-                                        &times;
-                                    </button>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => requestDelete(u)}
+                                        title={t('common.delete')}
+                                        aria-label={t('common.delete')}
+                                    >
+                                        <X size={16} />
+                                    </Button>
                                 )}
                             </td>
                         </tr>
@@ -467,52 +538,59 @@ function UsersTab({ t, currentUser }) {
             {adding ? (
                 <div className="dept-add-form" style={{ marginTop: 16 }}>
                     <div className="dept-add-row">
-                        <div className="settings-form-group" style={{ flex: 1 }}>
-                            <label>{t('settings.userName')}</label>
+                        <FormField label={t('settings.userName')} className="settings-form-grow">
                             <input
                                 type="text"
                                 value={newUser.name}
                                 onChange={e => setNewUser({ ...newUser, name: e.target.value })}
                             />
-                        </div>
-                        <div className="settings-form-group" style={{ flex: 1 }}>
-                            <label>{t('settings.userEmail')}</label>
+                        </FormField>
+                        <FormField label={t('settings.userEmail')} className="settings-form-grow">
                             <input
                                 type="email"
                                 value={newUser.email}
                                 onChange={e => setNewUser({ ...newUser, email: e.target.value })}
                             />
-                        </div>
-                        <div className="settings-form-group" style={{ flex: 1 }}>
-                            <label>{t('settings.userPassword')}</label>
+                        </FormField>
+                        <FormField label={t('settings.userPassword')} className="settings-form-grow">
                             <input
                                 type="password"
                                 value={newUser.password}
                                 onChange={e => setNewUser({ ...newUser, password: e.target.value })}
                             />
-                        </div>
-                        <div className="settings-form-group" style={{ width: 130 }}>
-                            <label>{t('settings.userRole')}</label>
+                        </FormField>
+                        <FormField label={t('settings.userRole')} className="settings-form-role">
                             <select value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })}>
                                 <option value="admin">{t('settings.roleAdmin')}</option>
                                 <option value="member">{t('settings.roleMember')}</option>
                             </select>
-                        </div>
+                        </FormField>
                     </div>
                     <div className="dept-add-actions">
-                        <button className="settings-save-btn" onClick={handleAddUser}>
+                        <Button variant="primary" onClick={handleAddUser}>
                             {t('common.save')}
-                        </button>
-                        <button className="settings-cancel-btn" onClick={() => setAdding(false)}>
+                        </Button>
+                        <Button variant="ghost" onClick={() => setAdding(false)}>
                             {t('common.cancel')}
-                        </button>
+                        </Button>
                     </div>
                 </div>
             ) : (
-                <button className="settings-add-btn" onClick={() => setAdding(true)} style={{ marginTop: 16 }}>
+                <Button variant="secondary" onClick={() => setAdding(true)} className="settings-add-spaced">
                     + {t('settings.addUser')}
-                </button>
+                </Button>
             )}
+
+            <ConfirmDialog
+                open={!!confirmState}
+                title={t('settings.confirmDelete')}
+                message={t('settings.confirmDeleteUserMsg').replace('{name}', confirmState?.name || '')}
+                variant="danger"
+                confirmLabel={t('common.delete')}
+                cancelLabel={t('common.cancel')}
+                onConfirm={() => { performDelete(confirmState.id); setConfirmState(null); }}
+                onCancel={() => setConfirmState(null)}
+            />
         </div>
     );
 }

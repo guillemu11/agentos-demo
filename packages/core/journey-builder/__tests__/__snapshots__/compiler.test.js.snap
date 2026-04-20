@@ -4,46 +4,58 @@ exports[`compileDslToInteraction > snapshots the full compiled output 1`] = `
 {
   "activities": [
     {
+      "arguments": [],
       "configurationArguments": {
         "waitDuration": 2,
         "waitUnit": "Days",
       },
-      "key": "wait_1",
+      "key": "WAITBYDURATION-1",
+      "metaData": {
+        "isConfigured": true,
+      },
       "name": "wait_1",
       "outcomes": [
         {
           "arguments": {},
-          "key": "wait_1-out",
-          "next": "split_1",
+          "key": "WAITBYDURATION-1-out",
+          "metaData": {},
+          "next": "MULTICRITERIADECISION-1",
         },
       ],
       "type": "WAITBYDURATION",
     },
     {
+      "arguments": [],
       "configurationArguments": {},
-      "key": "split_1",
+      "key": "MULTICRITERIADECISION-1",
+      "metaData": {
+        "isConfigured": true,
+      },
       "name": "split_1",
       "outcomes": [
         {
-          "arguments": {
-            "criteriaDescription": "Gold",
-            "expression": "tier == 'Gold'",
+          "arguments": {},
+          "key": "MULTICRITERIADECISION-1-br-0",
+          "metaData": {
+            "criteriaDescription": "tier == 'Gold'",
+            "label": "Gold",
           },
-          "key": "split_1-br-0",
-          "next": "send_gold",
+          "next": "EMAILV2-1",
         },
         {
-          "arguments": {
-            "criteriaDescription": "Silver",
-            "expression": "tier == 'Silver'",
+          "arguments": {},
+          "key": "MULTICRITERIADECISION-1-br-1",
+          "metaData": {
+            "criteriaDescription": "tier == 'Silver'",
+            "label": "Silver",
           },
-          "key": "split_1-br-1",
-          "next": "send_silver",
+          "next": "EMAILV2-3",
         },
       ],
       "type": "MULTICRITERIADECISION",
     },
     {
+      "arguments": [],
       "configurationArguments": {
         "triggeredSend": {
           "autoAddSubscribers": true,
@@ -52,55 +64,70 @@ exports[`compileDslToInteraction > snapshots the full compiled output 1`] = `
           "name": "Gold_Shell",
         },
       },
-      "key": "send_gold",
-      "name": "send_gold",
+      "key": "EMAILV2-1",
+      "metaData": {
+        "isConfigured": true,
+      },
+      "name": "Gold_Shell",
       "outcomes": [
         {
           "arguments": {},
-          "key": "send_gold-out",
-          "next": "wait_engage",
+          "key": "EMAILV2-1-out",
+          "metaData": {},
+          "next": "WAITBYEVENT-1",
         },
       ],
       "type": "EMAILV2",
     },
     {
+      "arguments": [],
       "configurationArguments": {
         "event": "email_opened",
-        "targetActivityKey": "send_gold",
+        "targetActivityKey": "EMAILV2-1",
         "timeoutHours": 120,
       },
-      "key": "wait_engage",
+      "key": "WAITBYEVENT-1",
+      "metaData": {
+        "isConfigured": true,
+      },
       "name": "wait_engage",
       "outcomes": [
         {
-          "arguments": {
-            "path": "event",
+          "arguments": {},
+          "key": "WAITBYEVENT-1-event",
+          "metaData": {
+            "label": "event",
           },
-          "key": "wait_engage-event",
-          "next": "engage_split",
+          "next": "ENGAGEMENTSPLIT-1",
         },
       ],
       "type": "WAITBYEVENT",
     },
     {
+      "arguments": [],
       "configurationArguments": {
         "metric": "opened",
-        "sendActivityKey": "send_gold",
+        "sendActivityKey": "EMAILV2-1",
       },
-      "key": "engage_split",
+      "key": "ENGAGEMENTSPLIT-1",
+      "metaData": {
+        "isConfigured": true,
+      },
       "name": "engage_split",
       "outcomes": [
         {
-          "arguments": {
-            "path": "yes",
+          "arguments": {},
+          "key": "ENGAGEMENTSPLIT-1-yes",
+          "metaData": {
+            "label": "Yes",
           },
-          "key": "engage_split-yes",
-          "next": "send_followup",
+          "next": "EMAILV2-2",
         },
       ],
       "type": "ENGAGEMENTSPLIT",
     },
     {
+      "arguments": [],
       "configurationArguments": {
         "triggeredSend": {
           "autoAddSubscribers": true,
@@ -109,12 +136,22 @@ exports[`compileDslToInteraction > snapshots the full compiled output 1`] = `
           "name": "Followup_Shell",
         },
       },
-      "key": "send_followup",
-      "name": "send_followup",
-      "outcomes": [],
+      "key": "EMAILV2-2",
+      "metaData": {
+        "isConfigured": true,
+      },
+      "name": "Followup_Shell",
+      "outcomes": [
+        {
+          "arguments": {},
+          "key": "EMAILV2-2-out",
+          "metaData": {},
+        },
+      ],
       "type": "EMAILV2",
     },
     {
+      "arguments": [],
       "configurationArguments": {
         "triggeredSend": {
           "autoAddSubscribers": true,
@@ -123,9 +160,18 @@ exports[`compileDslToInteraction > snapshots the full compiled output 1`] = `
           "name": "Silver_Shell",
         },
       },
-      "key": "send_silver",
-      "name": "send_silver",
-      "outcomes": [],
+      "key": "EMAILV2-3",
+      "metaData": {
+        "isConfigured": true,
+      },
+      "name": "Silver_Shell",
+      "outcomes": [
+        {
+          "arguments": {},
+          "key": "EMAILV2-3-out",
+          "metaData": {},
+        },
+      ],
       "type": "EMAILV2",
     },
   ],

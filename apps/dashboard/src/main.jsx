@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import './index.css'
 import { LanguageProvider } from './i18n/LanguageContext.jsx'
+import { ToastProvider } from './components/ui/ToastProvider.jsx'
 import Layout from './components/Layout.jsx'
 import App from './App.jsx'
 import WorkspaceOverview from './pages/WorkspaceOverview.jsx'
@@ -34,6 +35,7 @@ import CampaignCreationPage from './pages/CampaignCreationPage.jsx';
 import PreviewTestPage from './pages/PreviewTestPage.jsx';
 import CompetitorAnalysisPage from './pages/CompetitorAnalysisPage.jsx';
 import BrandAuditPage from './pages/BrandAuditPage.jsx';
+import BrandGuardianPage from './pages/BrandGuardianPage.jsx';
 import JourneysListPage from './pages/JourneysListPage.jsx';
 import JourneyBuilderPage from './pages/JourneyBuilderPage.jsx';
 import CampaignCalendarPage from './pages/CampaignCalendarPage.jsx';
@@ -46,12 +48,12 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'Inter, sans-serif' }}>
-          <h2 style={{ color: '#0f172a' }}>Something went wrong</h2>
-          <pre style={{ color: '#ef4444', fontSize: '0.85rem' }}>{this.state.error?.message}</pre>
+        <div style={{ padding: 'var(--space-10)', textAlign: 'center', fontFamily: 'Inter, sans-serif' }}>
+          <h2 style={{ color: 'var(--text-main)' }}>Something went wrong</h2>
+          <pre style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{this.state.error?.message}</pre>
           <button
             onClick={() => window.location.reload()}
-            style={{ marginTop: '16px', padding: '8px 24px', borderRadius: '9999px', border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer' }}
+            style={{ marginTop: 'var(--space-4)', padding: 'var(--space-2) var(--space-6)', borderRadius: 'var(--radius-full)', border: '1px solid var(--border-light)', background: 'var(--bg-elevated)', cursor: 'pointer' }}
           >
             Reload
           </button>
@@ -81,7 +83,7 @@ function AuthGate({ children }) {
 
   if (checking) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'Inter, sans-serif', color: '#64748b' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'Inter, sans-serif', color: 'var(--text-muted)' }}>
         Loading...
       </div>
     );
@@ -98,6 +100,7 @@ createRoot(document.getElementById('root')).render(
   <StrictMode>
     <ErrorBoundary>
       <LanguageProvider>
+        <ToastProvider>
         <BrowserRouter>
           <Routes>
             {/* Redirect root to dashboard */}
@@ -136,6 +139,7 @@ createRoot(document.getElementById('root')).render(
                       <Route path="/preview-test" element={<PreviewTestPage />} />
                       <Route path="/competitor-analysis" element={<CompetitorAnalysisPage />} />
                       <Route path="/brand-audit" element={<BrandAuditPage />} />
+                      <Route path="/brand-guardian" element={<BrandGuardianPage />} />
                       <Route path="/journeys" element={<JourneysListPage />} />
                       <Route path="/calendar" element={<CampaignCalendarPage />} />
                       <Route path="/settings" element={<SettingsPage />} />
@@ -152,6 +156,7 @@ createRoot(document.getElementById('root')).render(
             } />
           </Routes>
         </BrowserRouter>
+        </ToastProvider>
       </LanguageProvider>
     </ErrorBoundary>
   </StrictMode>,

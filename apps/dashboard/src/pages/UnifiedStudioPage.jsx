@@ -50,6 +50,7 @@ export default function UnifiedStudioPage() {
     const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error
     const [saveError, setSaveError] = useState(null);
     const [conflict, setConflict] = useState(null); // { variantId, localHtml, remoteHtml, remoteEtag }
+    const [templateShell, setTemplateShell] = useState('');
     const hydrated = useRef(false);
 
     useEffect(() => {
@@ -59,6 +60,10 @@ export default function UnifiedStudioPage() {
             setActiveId(persisted.activeId || persisted.variants[0]?.id || null);
         }
         hydrated.current = true;
+        fetch(`${API_URL}/api/email-template`, { credentials: 'include' })
+            .then(r => r.ok ? r.text() : '')
+            .then(html => { if (html) setTemplateShell(html); })
+            .catch(() => {});
     }, []);
 
     useEffect(() => {
@@ -347,7 +352,7 @@ export default function UnifiedStudioPage() {
                         onRemove={removeVariant}
                         onCreate={createVariant}
                     />
-                    <ActiveVariantEditor variant={active} onChange={updateActive} />
+                    <ActiveVariantEditor variant={active} onChange={updateActive} templateShell={templateShell} />
                 </div>
 
                 <UnifiedChatPanel activeVariant={active} onApplyPatch={applyChatPatch} />

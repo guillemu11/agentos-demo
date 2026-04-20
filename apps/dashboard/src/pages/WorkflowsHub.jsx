@@ -1,10 +1,20 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { StatusIcons, PageHeaderIcons } from '../components/icons.jsx';
-import { Zap } from 'lucide-react';
+import { Workflow, Activity, CheckCircle2, Clock, Inbox } from 'lucide-react';
 import WORKFLOWS from '../data/workflows.js';
+import HubHero from '../components/ui/HubHero.jsx';
+import { HubStats, HubStatCard } from '../components/ui/HubStats.jsx';
+import Button from '../components/ui/Button.jsx';
+import Modal from '../components/ui/Modal.jsx';
+import ConfirmDialog from '../components/ui/ConfirmDialog.jsx';
+import FormField from '../components/ui/FormField.jsx';
+import EmptyState from '../components/ui/EmptyState.jsx';
+import Skeleton from '../components/ui/Skeleton.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function timeAgo(dateStr) {
     if (!dateStr) return null;
@@ -45,15 +55,16 @@ export function ActivePipelinesList({ onSelectPipeline }) {
                 <div key={p.id} className="active-pipeline-card" onClick={() => onSelectPipeline?.(p.project_id)}>
                     <div className="pipeline-info">
                         <h4>{p.project_name}</h4>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        <span className="workflows-hub__pipeline-meta">
                             {p.project_department} • {p.active_stages?.map(s => s.stage_name).join(', ') || 'No active stages'}
                         </span>
                     </div>
                     <div className="pipeline-progress">
                         <div className="progress-bar">
+                            {/* Width is data-driven (completed / total) — inline style is the right tool here */}
                             <div className="progress-fill" style={{ width: `${(p.completed_stages / p.total_stages) * 100}%` }} />
                         </div>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        <span className="workflows-hub__pipeline-meta">
                             {p.completed_stages}/{p.total_stages}
                         </span>
                         <span className={`pipeline-status-badge ${p.status}`}>
@@ -74,10 +85,9 @@ export default function WorkflowsHub() {
     const [selectedWorkflow, setSelectedWorkflow] = useState(null);
     const [triggeringId, setTriggeringId] = useState(null);
     const [confirmId, setConfirmId] = useState(null);
-    const [promptWorkflow, setPromptWorkflow] = useState(null);
-    const [promptText, setPromptText] = useState('');
+    // Consolidated prompt modal state
+    const [promptState, setPromptState] = useState({ workflow: null, text: '', projectId: '' });
     const [campaignProjects, setCampaignProjects] = useState([]);
-    const [selectedProjectId, setSelectedProjectId] = useState('');
     const [loadingCampaigns, setLoadingCampaigns] = useState(false);
     const [loading, setLoading] = useState(true);
     const [bauFilter, setBauFilter] = useState('all');
@@ -111,19 +121,23 @@ export default function WorkflowsHub() {
         return () => clearInterval(interval);
     }, [runs, fetchData]);
 
-    const getLastRun = (workflowId) => {
-        return runs.find(r => r.workflow_id === workflowId);
-    };
+    const getLastRun = (workflowId) => runs.find(r => r.workflow_id === workflowId);
+    const getWorkflowRuns = (workflowId) => runs.filter(r => r.workflow_id === workflowId);
 
-    const getWorkflowRuns = (workflowId) => {
-        return runs.filter(r => r.workflow_id === workflowId);
-    };
+    // Decision-relevant stats: in-flight, completed this week, last run
+    const completedThisWeek = useMemo(() => {
+        const cutoff = Date.now() - 7 * DAY_MS;
+        return runs.filter(r => r.status === 'completed' && r.started_at && new Date(r.started_at).getTime() >= cutoff).length;
+    }, [runs]);
+
+    const closePromptModal = useCallback(() => {
+        setPromptState({ workflow: null, text: '', projectId: '' });
+        setCampaignProjects([]);
+    }, []);
 
     const handleTrigger = async (wf) => {
         if (wf.promptConfig) {
-            setPromptWorkflow(wf);
-            setPromptText('');
-            setSelectedProjectId('');
+            setPromptState({ workflow: wf, text: '', projectId: '' });
             setLoadingCampaigns(true);
             try {
                 const res = await fetch(`${API_URL}/projects/campaigns/eligible`);
@@ -139,9 +153,7 @@ export default function WorkflowsHub() {
 
     const doTrigger = async (workflowId, prompt = null, projectId = null) => {
         setConfirmId(null);
-        setPromptWorkflow(null);
-        setSelectedProjectId('');
-        setCampaignProjects([]);
+        closePromptModal();
         setTriggeringId(workflowId);
         try {
             const body = { workflow_id: workflowId };
@@ -178,12 +190,93 @@ export default function WorkflowsHub() {
         }
     };
 
+    // ── Shared prompt modal (single instance; rendered once at the bottom) ──
+    const promptModal = (
+        <Modal
+            open={Boolean(promptState.workflow)}
+            onClose={closePromptModal}
+            title={promptState.workflow?.name || ''}
+            size="md"
+        >
+            <p className="workflows-hub__prompt-desc">
+                {t('workflows.promptDescription')}
+            </p>
+            <FormField label={t('workflows.campaignProject')}>
+                {loadingCampaigns ? (
+                    <Skeleton height={36} />
+                ) : (
+                    <select
+                        className="workflow-campaign-select"
+                        value={promptState.projectId}
+                        onChange={(e) => setPromptState(p => ({ ...p, projectId: e.target.value }))}
+                    >
+                        <option value="">{t('workflows.noCampaignSelected')}</option>
+                        {campaignProjects.map((p) => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                    </select>
+                )}
+            </FormField>
+            <FormField label={t('workflows.promptDescription')}>
+                <textarea
+                    className="workflow-prompt-textarea"
+                    rows={5}
+                    placeholder={promptState.workflow ? t(promptState.workflow.promptConfig.placeholderKey) : ''}
+                    value={promptState.text}
+                    onChange={(e) => setPromptState(p => ({ ...p, text: e.target.value }))}
+                    autoFocus
+                />
+            </FormField>
+            <div className="workflow-confirm-actions">
+                <Button variant="ghost" onClick={closePromptModal}>
+                    {t('workflows.cancel')}
+                </Button>
+                <Button
+                    variant="primary"
+                    onClick={() => promptState.workflow && doTrigger(
+                        promptState.workflow.id,
+                        promptState.text,
+                        promptState.projectId || null,
+                    )}
+                    disabled={!promptState.text.trim()}
+                >
+                    {t('workflows.run')}
+                </Button>
+            </div>
+        </Modal>
+    );
+
+    // ── Confirm dialog (replaces the homegrown overlay) ──
+    const confirmWorkflow = WORKFLOWS.find(w => w.id === confirmId);
+    const confirmDialog = (
+        <ConfirmDialog
+            open={Boolean(confirmId)}
+            title={t('workflows.triggerWorkflow')}
+            message={`${t('workflows.confirmTrigger')} ${confirmWorkflow?.name || ''}?`}
+            confirmLabel={t('workflows.confirm')}
+            cancelLabel={t('workflows.cancel')}
+            variant="primary"
+            onCancel={() => setConfirmId(null)}
+            onConfirm={() => confirmId && doTrigger(confirmId)}
+        />
+    );
+
     if (loading) {
         return (
-            <div className="dashboard-container animate-fade-in" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
-                <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '2rem', marginBottom: '16px' }}>{PageHeaderIcons.workflows}</div>
-                    <p className="subtitle">{t('workflows.loading')}</p>
+            <div className="dashboard-container animate-fade-in">
+                <div className="workflows-hub__loading">
+                    <Skeleton height={160} radius="var(--radius-lg)" />
+                    <div className="workflows-hub__loading-stats">
+                        <Skeleton height={88} radius="var(--radius-lg)" />
+                        <Skeleton height={88} radius="var(--radius-lg)" />
+                        <Skeleton height={88} radius="var(--radius-lg)" />
+                    </div>
+                    <Skeleton height={48} radius="var(--radius-md)" />
+                    <div className="workflows-hub__loading-grid">
+                        <Skeleton height={220} radius="var(--radius-lg)" />
+                        <Skeleton height={220} radius="var(--radius-lg)" />
+                        <Skeleton height={220} radius="var(--radius-lg)" />
+                    </div>
                 </div>
             </div>
         );
@@ -204,24 +297,24 @@ export default function WorkflowsHub() {
                     </button>
                 </div>
 
-                <div className="card" style={{ marginBottom: '32px' }}>
+                <div className="card workflows-hub__detail-card">
                     <div className="workflow-detail-header">
                         <span className="workflow-detail-icon">{wf.icon}</span>
-                        <div style={{ flex: 1 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
-                                <h2 style={{ fontSize: '1.3rem', fontWeight: 800 }}>{wf.name}</h2>
+                        <div className="workflows-hub__detail-info">
+                            <div className="workflows-hub__detail-title-row">
+                                <h2 className="workflows-hub__detail-title">{wf.name}</h2>
                                 <span className="workflow-category-tag">{t(`workflows.${wf.category}`)}</span>
                                 <span className="workflow-category-tag">{wf.automatable ? t('workflows.automatable') : t('workflows.manual')}</span>
                             </div>
                             <p className="subtitle">{wf.description}</p>
                         </div>
-                        <button
-                            className={`workflow-trigger-btn ${triggeringId === wf.id ? 'running' : ''}`}
+                        <Button
+                            variant="primary"
                             onClick={() => handleTrigger(wf)}
                             disabled={triggeringId === wf.id}
                         >
                             {triggeringId === wf.id ? t('workflows.running') : t('workflows.run')}
-                        </button>
+                        </Button>
                     </div>
 
                     {/* Pipeline steps */}
@@ -240,32 +333,33 @@ export default function WorkflowsHub() {
 
                     {/* Active run: action buttons (pending or running) */}
                     {latestActive && (
-                        <div style={{ marginTop: '20px', padding: '16px', background: latestActive.status === 'running' ? 'rgba(99,102,241,0.1)' : 'rgba(212,175,55,0.1)', borderRadius: '12px', border: `1px solid ${latestActive.status === 'running' ? 'rgba(99,102,241,0.25)' : 'rgba(212,175,55,0.25)'}` }}>
-                            <p style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '12px' }}>
+                        <div className={`workflows-hub__active-banner workflows-hub__active-banner--${latestActive.status}`}>
+                            <p className="workflows-hub__active-banner-title">
                                 {latestActive.status === 'running' ? t('workflows.running') : t('workflows.stepsChecklist')}
                             </p>
-                            <div style={{ display: 'flex', gap: '10px' }}>
-                                <button className="workflow-trigger-btn" onClick={() => handleUpdateRun(latestActive.id, 'completed')}>
+                            <div className="workflows-hub__active-banner-actions">
+                                <Button variant="primary" onClick={() => handleUpdateRun(latestActive.id, 'completed')}>
                                     {t('workflows.markCompleted')}
-                                </button>
-                                <button className="workflow-cancel-btn" onClick={() => handleUpdateRun(latestActive.id, 'failed')}>
+                                </Button>
+                                <Button variant="danger" onClick={() => handleUpdateRun(latestActive.id, 'failed')}>
                                     {t('workflows.markFailed')}
-                                </button>
+                                </Button>
                             </div>
                         </div>
                     )}
                 </div>
 
                 {/* Run history for this workflow */}
-                <h3 style={{ fontSize: '1rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '16px', color: 'var(--text-muted)' }}>
+                <h3 className="workflows-hub__section-title">
                     {t('workflows.runHistory')}
                 </h3>
 
                 {wfRuns.length === 0 ? (
-                    <div className="card" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-                        <p>{t('workflows.noRuns')}</p>
-                        <p style={{ fontSize: '0.8rem', marginTop: '8px' }}>{t('workflows.noRunsHint')}</p>
-                    </div>
+                    <EmptyState
+                        icon={<Inbox size={28} />}
+                        title={t('workflows.noRuns')}
+                        description={t('workflows.noRunsHint')}
+                    />
                 ) : (
                     <div className="audit-timeline">
                         {wfRuns.map((run) => (
@@ -278,37 +372,37 @@ export default function WorkflowsHub() {
                                     <div className="audit-timeline-line"></div>
                                 </div>
                                 <div className="card audit-event-card">
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                                        <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{wf.name}</span>
+                                    <div className="workflows-hub__run-head">
+                                        <span className="workflows-hub__run-name">{wf.name}</span>
                                         <span className={`workflow-run-status ${run.status}`}>{run.status}</span>
                                     </div>
-                                    <div style={{ display: 'flex', gap: '16px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                    <div className="workflows-hub__run-meta">
                                         <span>{t('workflows.duration')}: {formatDuration(run.duration_ms)}</span>
                                         <span>{t('workflows.triggeredBy')}: {run.triggered_by}</span>
                                     </div>
                                     {run.prompt && (
-                                        <p style={{ fontSize: '0.8rem', marginTop: '8px', padding: '8px 12px', background: 'rgba(212,175,55,0.08)', borderRadius: '8px', color: 'var(--text-muted)', fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>
+                                        <p className="workflows-hub__run-prompt">
                                             {run.prompt.slice(0, 300)}
                                         </p>
                                     )}
                                     {run.output_summary && (
-                                        <p style={{ fontSize: '0.8rem', marginTop: '8px', color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }}>
+                                        <p className="workflows-hub__run-summary">
                                             {run.output_summary.slice(0, 200)}
                                         </p>
                                     )}
                                     {run.error && (
-                                        <p style={{ fontSize: '0.8rem', marginTop: '8px', color: '#EF4444' }}>
+                                        <p className="workflows-hub__run-error">
                                             {run.error.slice(0, 200)}
                                         </p>
                                     )}
                                     {(run.status === 'pending' || run.status === 'running') && (
-                                        <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                                            <button className="workflow-trigger-btn" style={{ fontSize: '0.75rem', padding: '6px 14px' }} onClick={() => handleUpdateRun(run.id, 'completed')}>
+                                        <div className="workflows-hub__run-actions">
+                                            <Button size="sm" variant="primary" onClick={() => handleUpdateRun(run.id, 'completed')}>
                                                 {t('workflows.markCompleted')}
-                                            </button>
-                                            <button className="workflow-cancel-btn" style={{ fontSize: '0.75rem', padding: '6px 14px' }} onClick={() => handleUpdateRun(run.id, 'failed')}>
+                                            </Button>
+                                            <Button size="sm" variant="danger" onClick={() => handleUpdateRun(run.id, 'failed')}>
                                                 {t('workflows.markFailed')}
-                                            </button>
+                                            </Button>
                                         </div>
                                     )}
                                 </div>
@@ -317,61 +411,9 @@ export default function WorkflowsHub() {
                     </div>
                 )}
 
-                {/* Prompt modal (needed here because detail view is an early return) */}
-                {promptWorkflow && (
-                    <div className="workflow-confirm-overlay" onClick={() => { setPromptWorkflow(null); setSelectedProjectId(''); setCampaignProjects([]); }}>
-                        <div className="workflow-prompt-card" onClick={(e) => e.stopPropagation()}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
-                                <span style={{ fontSize: '1.5rem' }}>{promptWorkflow.icon}</span>
-                                <p style={{ fontSize: '1.1rem', fontWeight: 700 }}>{promptWorkflow.name}</p>
-                            </div>
-                            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '16px' }}>
-                                {t('workflows.promptDescription')}
-                            </p>
-                            <div style={{ marginBottom: '16px' }}>
-                                <label className="workflow-campaign-label">
-                                    {t('workflows.campaignProject')}
-                                </label>
-                                {loadingCampaigns ? (
-                                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                        {t('workflows.loadingCampaigns')}
-                                    </p>
-                                ) : (
-                                    <select
-                                        className="workflow-campaign-select"
-                                        value={selectedProjectId}
-                                        onChange={(e) => setSelectedProjectId(e.target.value)}
-                                    >
-                                        <option value="">{t('workflows.noCampaignSelected')}</option>
-                                        {campaignProjects.map((p) => (
-                                            <option key={p.id} value={p.id}>{p.name}</option>
-                                        ))}
-                                    </select>
-                                )}
-                            </div>
-                            <textarea
-                                className="workflow-prompt-textarea"
-                                rows={5}
-                                placeholder={t(promptWorkflow.promptConfig.placeholderKey)}
-                                value={promptText}
-                                onChange={(e) => setPromptText(e.target.value)}
-                                autoFocus
-                            />
-                            <div className="workflow-confirm-actions">
-                                <button className="workflow-cancel-btn" onClick={() => { setPromptWorkflow(null); setSelectedProjectId(''); setCampaignProjects([]); }}>
-                                    {t('workflows.cancel')}
-                                </button>
-                                <button
-                                    className="workflow-trigger-btn"
-                                    onClick={() => doTrigger(promptWorkflow.id, promptText, selectedProjectId || null)}
-                                    disabled={!promptText.trim()}
-                                >
-                                    {t('workflows.run')}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
+                {/* Shared modals */}
+                {promptModal}
+                {confirmDialog}
             </div>
         );
     }
@@ -379,150 +421,168 @@ export default function WorkflowsHub() {
     // Main view
     return (
         <div className="dashboard-container animate-fade-in">
-            {/* Header */}
-            <header>
-                <div>
-                    <h1>{PageHeaderIcons.workflows} {t('workflows.title')}</h1>
-                    <p className="subtitle">{t('workflows.subtitle')}</p>
-                </div>
-            </header>
+            <HubHero
+                eyebrow={<>
+                    <Workflow size={14} strokeWidth={2.5} />
+                    <span>{t('workflows.hero.eyebrow')}</span>
+                </>}
+                title={t('workflows.title')}
+                subtitle={t('workflows.hero.subtitle')}
+            />
 
-            {/* Stats bar */}
-            <section className="workspace-stats-bar">
-                <div className="stat-chip">
-                    <span className="stat-chip-value">{WORKFLOWS.length}</span>
-                    <span className="stat-chip-label">{t('workflows.totalWorkflows')}</span>
-                </div>
-                <div className="stat-chip">
-                    <span className="stat-chip-value">{stats.total_runs}</span>
-                    <span className="stat-chip-label">{t('workflows.totalRuns')}</span>
-                </div>
-                <div className="stat-chip">
-                    <span className="stat-chip-value">{stats.completed}</span>
-                    <span className="stat-chip-label">{t('workflows.completed')}</span>
-                </div>
-                <div className="stat-chip">
-                    <span className="stat-chip-value">{stats.failed}</span>
-                    <span className="stat-chip-label">{t('workflows.failed')}</span>
-                </div>
-                <div className="stat-chip stat-chip-active">
-                    <span className="stat-chip-value">{stats.active}</span>
-                    <span className="stat-chip-label">{t('workflows.activeRuns')}</span>
-                </div>
-                <div className="stat-chip">
-                    <span className="stat-chip-value">{stats.last_run_at ? timeAgo(stats.last_run_at) : '-'}</span>
-                    <span className="stat-chip-label">{t('workflows.lastRun')}</span>
-                </div>
-            </section>
+            <HubStats>
+                <HubStatCard
+                    icon={<Activity size={16} strokeWidth={2} />}
+                    label={t('workflows.stats.active')}
+                    value={stats.active || 0}
+                    tone="emerald"
+                />
+                <HubStatCard
+                    icon={<CheckCircle2 size={16} strokeWidth={2} />}
+                    label={t('workflows.stats.completedThisWeek')}
+                    value={completedThisWeek}
+                    tone="neutral"
+                />
+                <HubStatCard
+                    icon={<Clock size={16} strokeWidth={2} />}
+                    label={t('workflows.stats.lastRun')}
+                    value={stats.last_run_at ? timeAgo(stats.last_run_at) : '—'}
+                    tone="amber"
+                />
+            </HubStats>
 
-            {/* Tab toggle */}
-            <div className="weekly-view-toggle" style={{ marginBottom: '32px' }}>
-                <button className={`weekly-toggle-btn ${view === 'catalog' ? 'active' : ''}`} onClick={() => setView('catalog')}>
+            {/* Tab toggle (matches CampaignsHub pattern) */}
+            <div className="weekly-view-toggle workflows-hub__tabs">
+                <button
+                    type="button"
+                    className={`weekly-toggle-btn ${view === 'catalog' ? 'active' : ''}`}
+                    onClick={() => setView('catalog')}
+                >
                     {t('workflows.catalog')}
                 </button>
-                <button className={`weekly-toggle-btn ${view === 'history' ? 'active' : ''}`} onClick={() => setView('history')}>
+                <button
+                    type="button"
+                    className={`weekly-toggle-btn ${view === 'history' ? 'active' : ''}`}
+                    onClick={() => setView('history')}
+                >
                     {t('workflows.history')}
                 </button>
-                <button className={`weekly-toggle-btn ${view === 'pipelines' ? 'active' : ''}`} onClick={() => setView('pipelines')}>
+                <button
+                    type="button"
+                    className={`weekly-toggle-btn ${view === 'pipelines' ? 'active' : ''}`}
+                    onClick={() => setView('pipelines')}
+                >
                     {t('pipeline.activePipelines')}
                 </button>
             </div>
 
             {/* Category filter */}
             {view === 'catalog' && (
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' }}>
-                    {['all', 'execution', 'strategy', 'control'].map(cat => (
-                        <button
-                            key={cat}
-                            className={`workflow-category-tag ${bauFilter === cat ? 'active' : ''}`}
-                            style={{ cursor: 'pointer', padding: '6px 14px', borderRadius: '20px', border: bauFilter === cat ? '2px solid var(--primary)' : '1px solid var(--border-light)', background: bauFilter === cat ? 'rgba(99,102,241,0.15)' : 'transparent', fontWeight: 600, fontSize: '0.8rem' }}
-                            onClick={() => setBauFilter(cat)}
-                        >
-                            {cat === 'all' ? t('workflows.allCategories') : t(`workflows.${cat}`)}
-                        </button>
-                    ))}
+                <div className="campaigns-hub__cat-chips">
+                    {['all', 'execution', 'strategy', 'control'].map(cat => {
+                        const active = bauFilter === cat;
+                        return (
+                            <button
+                                key={cat}
+                                type="button"
+                                className={`campaigns-hub__cat-chip ${active ? 'is-active' : ''}`}
+                                onClick={() => setBauFilter(cat)}
+                            >
+                                {cat === 'all' ? t('workflows.allCategories') : t(`workflows.${cat}`)}
+                            </button>
+                        );
+                    })}
                 </div>
             )}
 
             {/* Catalog view */}
             {view === 'catalog' && (
-                <div className="workflows-hub-grid">
-                    {filteredWorkflows.map((wf) => {
-                        const lastRun = getLastRun(wf.id);
-                        const isRunning = triggeringId === wf.id || (lastRun && lastRun.status === 'running');
+                filteredWorkflows.length === 0 ? (
+                    <EmptyState
+                        icon={<Inbox size={28} />}
+                        title={t('workflows.empty.title')}
+                        description={t('workflows.empty.description')}
+                    />
+                ) : (
+                    <div className="workflows-hub-grid">
+                        {filteredWorkflows.map((wf) => {
+                            const lastRun = getLastRun(wf.id);
+                            const isRunning = triggeringId === wf.id || (lastRun && lastRun.status === 'running');
 
-                        return (
-                            <div
-                                key={wf.id}
-                                className="card workflow-card animate-fade-in"
-                                style={{ cursor: 'pointer' }}
-                                onClick={() => setSelectedWorkflow(wf.id)}
-                            >
-                                {/* Header */}
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                        <span style={{ fontSize: '1.3rem' }}>{wf.icon}</span>
-                                        <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>{wf.name}</h3>
-                                    </div>
-                                    <div style={{ display: 'flex', gap: '6px' }}>
-                                        <span className="workflow-category-tag">{t(`workflows.${wf.category}`)}</span>
-                                        {lastRun && <span className={`workflow-run-status ${lastRun.status}`}>{lastRun.status}</span>}
-                                    </div>
-                                </div>
-
-                                <p className="subtitle" style={{ fontSize: '0.85rem', marginBottom: '12px' }}>{wf.description}</p>
-
-                                {/* Agent badges */}
-                                <div className="workflow-agents">
-                                    {wf.agents.map((a) => (
-                                        <span key={a} className="workflow-agent-badge">{a}</span>
-                                    ))}
-                                </div>
-
-                                {/* Pipeline steps */}
-                                <div className="workflow-steps">
-                                    {wf.steps.map((step, i) => (
-                                        <div key={i} className="workflow-step">
-                                            <div className="workflow-step-dot"></div>
-                                            {i < wf.steps.length - 1 && <div className="workflow-step-line"></div>}
-                                            <div className="workflow-step-content">
-                                                <span className="workflow-step-agent">{step.agent}</span>
-                                                <span className="workflow-step-action">{step.action}</span>
-                                            </div>
+                            return (
+                                <div
+                                    key={wf.id}
+                                    className="card workflow-card workflows-hub__card animate-fade-in"
+                                    onClick={() => setSelectedWorkflow(wf.id)}
+                                >
+                                    {/* Header */}
+                                    <div className="workflows-hub__card-header">
+                                        <div className="workflows-hub__card-title">
+                                            <span className="workflows-hub__card-icon">{wf.icon}</span>
+                                            <h3 className="workflows-hub__card-name">{wf.name}</h3>
                                         </div>
-                                    ))}
-                                </div>
+                                        <div className="workflows-hub__card-tags">
+                                            <span className="workflow-category-tag">{t(`workflows.${wf.category}`)}</span>
+                                            {lastRun && <span className={`workflow-run-status ${lastRun.status}`}>{lastRun.status}</span>}
+                                        </div>
+                                    </div>
 
-                                {/* Footer */}
-                                <div className="workflow-card-footer">
-                                    <span className="workflow-last-run">
-                                        {lastRun
-                                            ? `${t('workflows.lastRun')}: ${timeAgo(lastRun.started_at)}`
-                                            : t('workflows.never')
-                                        }
-                                    </span>
-                                    <button
-                                        className={`workflow-trigger-btn ${isRunning ? 'running' : ''}`}
-                                        onClick={(e) => { e.stopPropagation(); handleTrigger(wf); }}
-                                        disabled={isRunning}
-                                    >
-                                        {isRunning ? t('workflows.running') : wf.automatable ? t('workflows.run') : t('workflows.run')}
-                                    </button>
+                                    <p className="subtitle workflows-hub__card-desc">{wf.description}</p>
+
+                                    {/* Agent badges */}
+                                    <div className="workflow-agents">
+                                        {wf.agents.map((a) => (
+                                            <span key={a} className="workflow-agent-badge">{a}</span>
+                                        ))}
+                                    </div>
+
+                                    {/* Pipeline steps */}
+                                    <div className="workflow-steps">
+                                        {wf.steps.map((step, i) => (
+                                            <div key={i} className="workflow-step">
+                                                <div className="workflow-step-dot"></div>
+                                                {i < wf.steps.length - 1 && <div className="workflow-step-line"></div>}
+                                                <div className="workflow-step-content">
+                                                    <span className="workflow-step-agent">{step.agent}</span>
+                                                    <span className="workflow-step-action">{step.action}</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Footer */}
+                                    <div className="workflow-card-footer">
+                                        <span className="workflow-last-run">
+                                            {lastRun
+                                                ? `${t('workflows.lastRun')}: ${timeAgo(lastRun.started_at)}`
+                                                : t('workflows.never')
+                                            }
+                                        </span>
+                                        <Button
+                                            variant="primary"
+                                            size="sm"
+                                            onClick={(e) => { e.stopPropagation(); handleTrigger(wf); }}
+                                            disabled={isRunning}
+                                        >
+                                            {isRunning ? t('workflows.running') : t('workflows.run')}
+                                        </Button>
+                                    </div>
                                 </div>
-                            </div>
-                        );
-                    })}
-                </div>
+                            );
+                        })}
+                    </div>
+                )
             )}
 
             {/* History view */}
             {view === 'history' && (
                 <div>
                     {runs.length === 0 ? (
-                        <div className="card" style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
-                            <p style={{ fontSize: '1.1rem', marginBottom: '8px' }}>{t('workflows.noRuns')}</p>
-                            <p style={{ fontSize: '0.85rem' }}>{t('workflows.noRunsHint')}</p>
-                        </div>
+                        <EmptyState
+                            icon={<Inbox size={28} />}
+                            title={t('workflows.noRuns')}
+                            description={t('workflows.noRunsHint')}
+                        />
                     ) : (
                         <div className="audit-timeline">
                             {runs.map((run) => {
@@ -537,26 +597,26 @@ export default function WorkflowsHub() {
                                             <div className="audit-timeline-line"></div>
                                         </div>
                                         <div className="card audit-event-card">
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                                                <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{wf?.name || run.workflow_id}</span>
+                                            <div className="workflows-hub__run-head">
+                                                <span className="workflows-hub__run-name">{wf?.name || run.workflow_id}</span>
                                                 <span className={`workflow-run-status ${run.status}`}>{run.status}</span>
                                             </div>
-                                            <div style={{ display: 'flex', gap: '16px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                                            <div className="workflows-hub__run-meta">
                                                 <span>{t('workflows.duration')}: {formatDuration(run.duration_ms)}</span>
                                                 <span>{t('workflows.triggeredBy')}: {run.triggered_by}</span>
                                             </div>
                                             {run.prompt && (
-                                                <p style={{ fontSize: '0.8rem', marginTop: '8px', padding: '8px 12px', background: 'rgba(212,175,55,0.08)', borderRadius: '8px', color: 'var(--text-muted)', fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>
+                                                <p className="workflows-hub__run-prompt">
                                                     {run.prompt.slice(0, 300)}
                                                 </p>
                                             )}
                                             {run.output_summary && (
-                                                <p style={{ fontSize: '0.8rem', marginTop: '8px', color: 'var(--text-muted)' }}>
+                                                <p className="workflows-hub__run-summary">
                                                     {run.output_summary.slice(0, 200)}
                                                 </p>
                                             )}
                                             {run.error && (
-                                                <p style={{ fontSize: '0.8rem', marginTop: '8px', color: '#EF4444' }}>
+                                                <p className="workflows-hub__run-error">
                                                     {run.error.slice(0, 200)}
                                                 </p>
                                             )}
@@ -574,81 +634,9 @@ export default function WorkflowsHub() {
                 <ActivePipelinesList />
             )}
 
-            {/* Confirmation modal */}
-            {confirmId && (
-                <div className="workflow-confirm-overlay" onClick={() => setConfirmId(null)}>
-                    <div className="workflow-confirm-card" onClick={(e) => e.stopPropagation()}>
-                        <p style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '8px' }}>{t('workflows.triggerWorkflow')}</p>
-                        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                            {t('workflows.confirmTrigger')} <strong>{WORKFLOWS.find(w => w.id === confirmId)?.name}</strong>?
-                        </p>
-                        <div className="workflow-confirm-actions">
-                            <button className="workflow-cancel-btn" onClick={() => setConfirmId(null)}>
-                                {t('workflows.cancel')}
-                            </button>
-                            <button className="workflow-trigger-btn" onClick={() => doTrigger(confirmId)}>
-                                {t('workflows.confirm')}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Prompt modal for workflows that need a brief */}
-            {promptWorkflow && (
-                <div className="workflow-confirm-overlay" onClick={() => { setPromptWorkflow(null); setSelectedProjectId(''); setCampaignProjects([]); }}>
-                    <div className="workflow-prompt-card" onClick={(e) => e.stopPropagation()}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
-                            <span style={{ fontSize: '1.5rem' }}>{promptWorkflow.icon}</span>
-                            <p style={{ fontSize: '1.1rem', fontWeight: 700 }}>{promptWorkflow.name}</p>
-                        </div>
-                        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '16px' }}>
-                            {t('workflows.promptDescription')}
-                        </p>
-                        <div style={{ marginBottom: '16px' }}>
-                            <label className="workflow-campaign-label">
-                                {t('workflows.campaignProject')}
-                            </label>
-                            {loadingCampaigns ? (
-                                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                                    {t('workflows.loadingCampaigns')}
-                                </p>
-                            ) : (
-                                <select
-                                    className="workflow-campaign-select"
-                                    value={selectedProjectId}
-                                    onChange={(e) => setSelectedProjectId(e.target.value)}
-                                >
-                                    <option value="">{t('workflows.noCampaignSelected')}</option>
-                                    {campaignProjects.map((p) => (
-                                        <option key={p.id} value={p.id}>{p.name}</option>
-                                    ))}
-                                </select>
-                            )}
-                        </div>
-                        <textarea
-                            className="workflow-prompt-textarea"
-                            rows={5}
-                            placeholder={t(promptWorkflow.promptConfig.placeholderKey)}
-                            value={promptText}
-                            onChange={(e) => setPromptText(e.target.value)}
-                            autoFocus
-                        />
-                        <div className="workflow-confirm-actions">
-                            <button className="workflow-cancel-btn" onClick={() => { setPromptWorkflow(null); setSelectedProjectId(''); setCampaignProjects([]); }}>
-                                {t('workflows.cancel')}
-                            </button>
-                            <button
-                                className="workflow-trigger-btn"
-                                onClick={() => doTrigger(promptWorkflow.id, promptText, selectedProjectId || null)}
-                                disabled={!promptText.trim()}
-                            >
-                                {t('workflows.run')}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* Shared modals */}
+            {promptModal}
+            {confirmDialog}
         </div>
     );
 }
