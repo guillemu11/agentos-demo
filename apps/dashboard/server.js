@@ -47,6 +47,7 @@ import { getOrEnrich as enrichCalendarInsights, clearCache as clearCalendarCache
 import * as competitorIntelRecon from '../../packages/core/competitor-intel/recon.js';
 import * as competitorIntelOAuth from '../../packages/core/competitor-intel/gmail-oauth.js';
 import * as competitorIntelIngestion from '../../packages/core/competitor-intel/gmail-ingestion.js';
+import * as competitorIntelClassifierLLM from '../../packages/core/competitor-intel/classifier-llm.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -9872,6 +9873,11 @@ app.post('/api/competitor-intel/ingest-now', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/competitor-intel/classify-phase2', async (req, res) => {
+  try { res.json({ results: await competitorIntelClassifierLLM.runPhase2Batch({ limit: 50 }) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/competitor-intel/personas/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -9900,6 +9906,10 @@ process.on('unhandledRejection', (reason) => {
 if (process.env.COMPETITOR_INTEL_ENABLE_WORKER !== 'false') {
   competitorIntelIngestion.startWorker({ intervalMs: 5 * 60 * 1000 });
   console.log('[competitor-intel] Gmail ingestion worker started (5 min interval)');
+  setInterval(() => {
+    competitorIntelClassifierLLM.runPhase2Batch({ limit: 25 }).catch(e => console.error('[ci phase2]', e.message));
+  }, 15 * 60 * 1000);
+  console.log('[competitor-intel] Phase-2 LLM classifier started (15 min interval)');
 }
 
 server.listen(port, () => {
