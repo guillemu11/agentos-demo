@@ -2389,6 +2389,11 @@ export const translations = {
         analyzeAnother: 'Analizar otro email',
       },
     },
+
+    competitorIntel: {
+      title: 'Competitor Intel',
+      loading: 'Cargando...',
+    },
   },
 
   en: {
@@ -4746,6 +4751,11 @@ export const translations = {
         tableEmpty: 'No issues found — email is compliant.',
         analyzeAnother: 'Analyze another email',
       },
+    },
+
+    competitorIntel: {
+      title: 'Competitor Intel',
+      loading: 'Loading...',
     },
   },
 };

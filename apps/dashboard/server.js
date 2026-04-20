@@ -44,6 +44,9 @@ import {
 } from '../../packages/core/journey-builder/mutators.js';
 import { deployJourney } from '../../packages/core/journey-builder/deploy.js';
 import { getOrEnrich as enrichCalendarInsights, clearCache as clearCalendarCache } from './server-calendar-ai.js';
+import * as competitorIntelRecon from '../../packages/core/competitor-intel/recon.js';
+import * as competitorIntelOAuth from '../../packages/core/competitor-intel/gmail-oauth.js';
+import * as competitorIntelIngestion from '../../packages/core/competitor-intel/gmail-ingestion.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -9772,12 +9775,127 @@ app.post('/api/brand-guardian/analyze', requireAuth, async (req, res) => {
     res.end();
 });
 
+// ==================== Competitor Intel ====================
+app.post('/api/competitor-intel/brands/:id/recon', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const notes = await competitorIntelRecon.reconBrand(id);
+    res.json({ recon: notes });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/competitor-intel/investigations/:id/recon-all', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const results = await competitorIntelRecon.reconInvestigation(id);
+    res.json({ results });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/competitor-intel/investigations', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT id, name, description, status, created_at FROM competitor_investigations ORDER BY created_at DESC');
+    res.json({ investigations: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/competitor-intel/investigations/:id/overview', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const brands = await pool.query(`
+      SELECT
+        b.id, b.name, b.website, b.category, b.positioning, b.recon_notes,
+        s.lifecycle_maturity, s.email_sophistication, s.journey_depth, s.personalisation, s.overall,
+        (SELECT COUNT(*)::int FROM competitor_emails e WHERE e.brand_id = b.id) AS emails_count,
+        (SELECT MAX(received_at)  FROM competitor_emails e WHERE e.brand_id = b.id) AS last_email_at,
+        (SELECT COUNT(*)::int FROM competitor_playbook_steps ps WHERE ps.brand_id = b.id AND ps.status = 'done') AS steps_done,
+        (SELECT COUNT(*)::int FROM competitor_playbook_steps ps WHERE ps.brand_id = b.id) AS steps_total
+      FROM competitor_brands b
+      LEFT JOIN competitor_brand_scores s ON s.brand_id = b.id
+      WHERE b.investigation_id = $1
+      ORDER BY b.name
+    `, [id]);
+    const activity = await pool.query(`
+      SELECT 'email' AS kind, e.id, e.subject AS title, e.received_at AS at, b.name AS brand_name, p.name AS persona_name
+      FROM competitor_emails e
+      LEFT JOIN competitor_brands b ON b.id = e.brand_id
+      LEFT JOIN competitor_personas p ON p.id = e.persona_id
+      WHERE p.investigation_id = $1
+      ORDER BY e.received_at DESC NULLS LAST
+      LIMIT 20
+    `, [id]);
+    res.json({ brands: brands.rows, activity: activity.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/competitor-intel/investigations/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const inv = await pool.query('SELECT * FROM competitor_investigations WHERE id = $1', [id]);
+    if (!inv.rows[0]) return res.status(404).json({ error: 'not found' });
+    const brands = await pool.query('SELECT * FROM competitor_brands WHERE investigation_id = $1 ORDER BY name', [id]);
+    const personas = await pool.query('SELECT * FROM competitor_personas WHERE investigation_id = $1 ORDER BY name', [id]);
+    res.json({ investigation: inv.rows[0], brands: brands.rows, personas: personas.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/oauth/google/authorize', (req, res) => {
+  const { persona_id } = req.query;
+  if (!persona_id) return res.status(400).json({ error: 'persona_id required' });
+  const url = competitorIntelOAuth.buildAuthUrl({
+    clientId: process.env.GOOGLE_OAUTH_CLIENT_ID,
+    redirectUri: process.env.GOOGLE_OAUTH_REDIRECT_URI,
+    state: `persona_id=${persona_id}`
+  });
+  res.redirect(url);
+});
+
+app.get('/api/oauth/google/callback', async (req, res) => {
+  try {
+    const { code, state } = req.query;
+    const personaId = parseInt(new URLSearchParams(state).get('persona_id'), 10);
+    const { email } = await competitorIntelOAuth.exchangeCodeAndStore({ personaId, code });
+    res.redirect(`/app/competitor-intel?gmail_connected=${encodeURIComponent(email)}&persona_id=${personaId}`);
+  } catch (e) {
+    res.status(500).send('OAuth error: ' + e.message);
+  }
+});
+
+app.post('/api/competitor-intel/ingest-now', async (req, res) => {
+  try {
+    res.json({ results: await competitorIntelIngestion.ingestAll() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/competitor-intel/personas/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const persona = (await pool.query('SELECT * FROM competitor_personas WHERE id = $1', [id])).rows[0];
+    if (!persona) return res.status(404).json({ error: 'not found' });
+    const gmail = (await pool.query('SELECT email, last_sync_at FROM competitor_persona_gmail WHERE persona_id = $1', [id])).rows[0] || null;
+    const emails = (await pool.query(`
+      SELECT e.*, b.name AS brand_name
+      FROM competitor_emails e
+      LEFT JOIN competitor_brands b ON b.id = e.brand_id
+      WHERE e.persona_id = $1
+      ORDER BY e.received_at DESC NULLS LAST
+      LIMIT 200
+    `, [id])).rows;
+    res.json({ persona, gmail, emails });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 process.on('uncaughtException', (err) => {
     console.error('[Server] Uncaught exception (keeping process alive):', err.message);
 });
 process.on('unhandledRejection', (reason) => {
     console.error('[Server] Unhandled rejection (keeping process alive):', reason?.message || reason);
 });
+
+if (process.env.COMPETITOR_INTEL_ENABLE_WORKER !== 'false') {
+  competitorIntelIngestion.startWorker({ intervalMs: 5 * 60 * 1000 });
+  console.log('[competitor-intel] Gmail ingestion worker started (5 min interval)');
+}
 
 server.listen(port, () => {
     console.log(`AgentOS API running at http://localhost:${port}`);
