@@ -48,6 +48,7 @@ import * as competitorIntelRecon from '../../packages/core/competitor-intel/reco
 import * as competitorIntelOAuth from '../../packages/core/competitor-intel/gmail-oauth.js';
 import * as competitorIntelIngestion from '../../packages/core/competitor-intel/gmail-ingestion.js';
 import * as competitorIntelClassifierLLM from '../../packages/core/competitor-intel/classifier-llm.js';
+import * as competitorIntelEngagement from '../../packages/core/competitor-intel/engagement.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -9878,6 +9879,11 @@ app.post('/api/competitor-intel/classify-phase2', async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/api/competitor-intel/emails/:id/engage', async (req, res) => {
+  try { res.json(await competitorIntelEngagement.simulateEngagementForEmail(parseInt(req.params.id, 10))); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/competitor-intel/personas/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -9910,6 +9916,10 @@ if (process.env.COMPETITOR_INTEL_ENABLE_WORKER !== 'false') {
     competitorIntelClassifierLLM.runPhase2Batch({ limit: 25 }).catch(e => console.error('[ci phase2]', e.message));
   }, 15 * 60 * 1000);
   console.log('[competitor-intel] Phase-2 LLM classifier started (15 min interval)');
+  setInterval(() => {
+    competitorIntelEngagement.autoEngageRecent({ sinceMinutes: 30 }).catch(e => console.error('[ci engage]', e.message));
+  }, 10 * 60 * 1000);
+  console.log('[competitor-intel] Engagement simulator started (10 min interval)');
 }
 
 server.listen(port, () => {
