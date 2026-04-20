@@ -426,15 +426,62 @@ export default function AutoResearch() {
                                                 <div className="email-gen-progress-bar" style={{ width: `${selectedSession.progress || 0}%` }} />
                                                 <span className="email-gen-progress-label">{selectedSession.progress || 0}%</span>
                                             </div>
-                                            <div className="research-stream-log research-stream-log--hero">
-                                                {streamEvents.map((ev, i) => (
-                                                    <div key={i} className="research-stream-event">
-                                                        {ev.type === 'query' && <span><Search size={12} /> {t('research.searching')}: {ev.value}</span>}
-                                                        {ev.type === 'source' && <span>{ev.value?.type === 'web' ? <Globe size={12} /> : <Database size={12} />} {t('research.found')}: {ev.value?.title || ev.value?.query}</span>}
-                                                        {ev.type === 'phase' && <span><Zap size={12} /> {ev.value}</span>}
-                                                    </div>
-                                                ))}
-                                            </div>
+                                            {(() => {
+                                                const sources = streamEvents
+                                                    .filter(ev => ev.type === 'source' && ev.value)
+                                                    .map(ev => ev.value);
+                                                const nonSources = streamEvents.filter(ev => ev.type !== 'source');
+                                                return (
+                                                    <>
+                                                        <div className="research-stream-log research-stream-log--hero">
+                                                            {nonSources.map((ev, i) => (
+                                                                <div key={i} className="research-stream-event">
+                                                                    {ev.type === 'query' && <span><Search size={12} /> {t('research.searching')}: {ev.value}</span>}
+                                                                    {ev.type === 'phase' && <span><Zap size={12} /> {ev.value}</span>}
+                                                                </div>
+                                                            ))}
+                                                            {nonSources.length === 0 && sources.length > 0 && (
+                                                                <span className="research-stream-event research-stream-event--muted">
+                                                                    <Zap size={12} /> {t('research.gatheringSources')}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        {sources.length > 0 && (
+                                                            <div className="research-sources-section">
+                                                                <div className="research-sources-head">
+                                                                    <span className="research-sources-label">{t('research.sourcesFoundLabel')}</span>
+                                                                    <span className="research-sources-count">{sources.length}</span>
+                                                                </div>
+                                                                <div className="research-sources-grid">
+                                                                    {sources.map((src, i) => {
+                                                                        const isWeb = src.type === 'web';
+                                                                        let host = '';
+                                                                        try { host = src.url ? new URL(src.url).hostname.replace(/^www\./, '') : ''; } catch { host = ''; }
+                                                                        return (
+                                                                            <a
+                                                                                key={i}
+                                                                                href={src.url || '#'}
+                                                                                target={src.url ? '_blank' : undefined}
+                                                                                rel="noopener noreferrer"
+                                                                                className={`research-source-card research-source-card--${isWeb ? 'web' : 'kb'}`}
+                                                                                title={src.title || src.query || host}
+                                                                            >
+                                                                                <span className="research-source-icon">
+                                                                                    {isWeb ? <Globe size={14} /> : <Database size={14} />}
+                                                                                </span>
+                                                                                <span className="research-source-body">
+                                                                                    <span className="research-source-title">{src.title || src.query || t('research.untitledSource')}</span>
+                                                                                    {host && <span className="research-source-host">{host}</span>}
+                                                                                </span>
+                                                                            </a>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                );
+                                            })()}
                                         </div>
                                     )}
 

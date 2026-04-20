@@ -21834,3 +21834,260 @@ button.card {
   padding-top: var(--space-2);
   border-top: 1px solid var(--border-light);
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   OLA 6 — DailyStandup: elevate the blockers column.
+   When empty → celebrate. When populated → emphasize urgency.
+   ═══════════════════════════════════════════════════════════════════ */
+.standup-col-blocked--clear {
+  background: linear-gradient(180deg, var(--success-soft) 0%, transparent 70%);
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  transition: border-color 200ms ease;
+}
+.standup-col-blocked--has {
+  background: linear-gradient(180deg, var(--danger-soft) 0%, transparent 60%);
+  border: 1px solid transparent;
+  border-top: 2px solid var(--danger);
+  border-radius: var(--radius-lg);
+}
+.standup-col-blocked--has .standup-col-count {
+  background: var(--danger);
+  color: #fff;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+  font-weight: 600;
+}
+
+.standup-clear-celebration {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-4) var(--space-6);
+}
+.standup-clear-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-full);
+  background: var(--success-soft);
+  color: var(--success);
+  animation: standup-clear-pulse 2.4s ease-in-out infinite;
+}
+@keyframes standup-clear-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 var(--success-soft); }
+  50% { transform: scale(1.04); box-shadow: 0 0 0 10px transparent; }
+}
+.standup-clear-title {
+  margin: var(--space-2) 0 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-main);
+}
+.standup-clear-desc {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  max-width: 240px;
+  line-height: 1.5;
+}
+@media (prefers-reduced-motion: reduce) {
+  .standup-clear-icon { animation: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   OLA 6 — KnowledgeBase: Namespace tiles as first-class upload zones.
+   "Teach your agents" instead of "upload documents".
+   ═══════════════════════════════════════════════════════════════════ */
+.kb-ns-section {
+  margin-bottom: var(--space-6);
+}
+.kb-ns-section-head {
+  margin-bottom: var(--space-4);
+}
+.kb-ns-section-sub {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+.kb-ns-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
+}
+.kb-ns-tile {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+.kb-ns-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+.kb-ns-tile:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.kb-ns-tile-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+}
+.kb-ns-tile-name {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--text-main);
+  text-transform: capitalize;
+  margin-bottom: 2px;
+}
+.kb-ns-tile-meta {
+  display: flex;
+  gap: var(--space-1);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+.kb-ns-tile-sep { opacity: 0.5; }
+.kb-ns-tile-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  background: var(--theme-graphite-soft);
+  color: var(--text-muted);
+  transition: background 150ms ease, color 150ms ease;
+}
+.kb-ns-tile:hover .kb-ns-tile-cta {
+  background: var(--primary);
+  color: #fff;
+}
+/* Tones per namespace */
+.kb-ns-tile--emerald .kb-ns-tile-icon { background: var(--success-soft); color: var(--success); }
+.kb-ns-tile--info    .kb-ns-tile-icon { background: var(--info-soft);    color: var(--info);    }
+.kb-ns-tile--amber   .kb-ns-tile-icon { background: var(--warning-soft); color: var(--warning); }
+.kb-ns-tile--warning .kb-ns-tile-icon { background: var(--warning-soft); color: var(--warning); }
+.kb-ns-tile--neutral .kb-ns-tile-icon { background: var(--theme-graphite-soft); color: var(--text-muted); }
+.kb-ns-tile:hover { border-color: var(--primary); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   OLA 6 — AutoResearch: source cards materializing in the stream.
+   Each source the agent discovers appears as a card with a fade-in.
+   ═══════════════════════════════════════════════════════════════════ */
+.research-sources-section {
+  margin-top: var(--space-4);
+}
+.research-sources-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.research-sources-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.research-sources-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 var(--space-2);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: var(--radius-full);
+}
+.research-sources-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-2);
+}
+.research-source-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  color: var(--text-main);
+  text-decoration: none;
+  font-size: 0.8125rem;
+  transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+  animation: research-source-in 260ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  min-width: 0;
+}
+.research-source-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+.research-source-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.research-source-card--web .research-source-icon {
+  background: var(--info-soft);
+  color: var(--info);
+}
+.research-source-card--kb .research-source-icon {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.research-source-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.research-source-title {
+  font-weight: 500;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.research-source-host {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.research-stream-event--muted { color: var(--text-muted); font-style: italic; }
+@keyframes research-source-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .research-source-card { animation: none; }
+}

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import {
     Brain,
     Database,
@@ -15,6 +14,12 @@ import {
     FolderOpen,
     Layers,
     Activity,
+    Megaphone,
+    Mail,
+    ImageIcon,
+    TrendingUp,
+    Search as SearchIcon,
+    Palette,
 } from 'lucide-react';
 import KBChat from '../components/KBChat.jsx';
 import HubHero from '../components/ui/HubHero.jsx';
@@ -30,6 +35,15 @@ import { useToast } from '../components/ui/ToastProvider.jsx';
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 const NAMESPACES = ['campaigns', 'emails', 'images', 'kpis', 'research', 'brand'];
+
+const NAMESPACE_META = {
+    campaigns: { Icon: Megaphone, tone: 'emerald' },
+    emails:    { Icon: Mail,      tone: 'info'    },
+    images:    { Icon: ImageIcon, tone: 'amber'   },
+    kpis:      { Icon: TrendingUp,tone: 'neutral' },
+    research:  { Icon: SearchIcon,tone: 'info'    },
+    brand:     { Icon: Palette,   tone: 'warning' },
+};
 
 export default function KnowledgeBase() {
     const { t } = useLanguage();
@@ -225,21 +239,47 @@ export default function KnowledgeBase() {
             {/* Overview Tab */}
             {tab === 'overview' && (
                 <div>
-                    {/* Namespace chart */}
-                    {nsData.length > 0 && (
-                        <div className="card" style={{ padding: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
+                    {/* Namespace tiles — "teach your agents" */}
+                    <div className="kb-ns-section">
+                        <div className="kb-ns-section-head">
                             <h3 className="kb-section-title">{t('knowledge.byNamespace')}</h3>
-                            <ResponsiveContainer width="100%" height={200}>
-                                <BarChart data={nsData}>
-                                    <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
-                                    <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={false} tickLine={false} />
-                                    <Tooltip contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)', borderRadius: 8, fontSize: '0.8rem' }} />
-                                    <Bar dataKey="docs" fill="var(--primary)" radius={[4, 4, 0, 0]} name={t('knowledge.documents')} />
-                                    <Bar dataKey="chunks" fill="var(--text-muted)" radius={[4, 4, 0, 0]} name="Chunks" opacity={0.4} />
-                                </BarChart>
-                            </ResponsiveContainer>
+                            <p className="kb-ns-section-sub">{t('knowledge.nsTilesHint')}</p>
                         </div>
-                    )}
+                        <div className="kb-ns-grid">
+                            {NAMESPACES.map(ns => {
+                                const meta = NAMESPACE_META[ns] || { Icon: FolderOpen, tone: 'neutral' };
+                                const Icon = meta.Icon;
+                                const data = status?.namespaces?.[ns];
+                                const docs = data?.indexed || 0;
+                                const chunks = data?.chunks || 0;
+                                return (
+                                    <button
+                                        key={ns}
+                                        type="button"
+                                        className={`kb-ns-tile kb-ns-tile--${meta.tone}`}
+                                        onClick={() => {
+                                            setUploadNamespace(ns);
+                                            document.getElementById('kb-file-input')?.click();
+                                        }}
+                                        title={t('knowledge.nsTeach').replace('{ns}', ns)}
+                                    >
+                                        <div className="kb-ns-tile-icon"><Icon size={20} strokeWidth={2} /></div>
+                                        <div className="kb-ns-tile-body">
+                                            <div className="kb-ns-tile-name">{ns}</div>
+                                            <div className="kb-ns-tile-meta">
+                                                <span>{docs} {t('knowledge.documents').toLowerCase()}</span>
+                                                <span className="kb-ns-tile-sep">·</span>
+                                                <span>{chunks} chunks</span>
+                                            </div>
+                                        </div>
+                                        <div className="kb-ns-tile-cta">
+                                            <Upload size={14} strokeWidth={2} />
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
 
                     {/* Upload */}
                     <div className="card" style={{ padding: 'var(--space-4)', marginBottom: 'var(--space-4)' }}>
