@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { ArrowRight } from 'lucide-react';
 import { useLanguage } from '../i18n/LanguageContext.jsx';
 import { HomeIcons } from '../components/icons.jsx';
 
@@ -15,9 +16,9 @@ const EXECUTION_AGENTS = ['orgAgentContent', 'orgAgentHtml', 'orgAgentSegmentati
 const CONTROL_AGENTS = ['orgAgentQa', 'orgAgentBrand', 'orgAgentLegal', 'orgAgentDoc'];
 
 const STAGES = [
-  { key: 1, icon: HomeIcons.copilot, color: 'var(--info, #74b9ff)' },
+  { key: 1, icon: HomeIcons.copilot, color: 'var(--info)' },
   { key: 2, icon: HomeIcons.automation, color: 'var(--primary)' },
-  { key: 3, icon: HomeIcons.agentic, color: 'var(--success, #00b894)' },
+  { key: 3, icon: HomeIcons.agentic, color: 'var(--success)' },
 ];
 
 const WORKFLOWS = [
@@ -134,7 +135,7 @@ export default function HomePage() {
                 <p>{t(`home.stage${s.key}Desc`)}</p>
               </div>
               {i < STAGES.length - 1 && (
-                <div className="home-evolution-arrow">→</div>
+                <div className="home-evolution-arrow" aria-hidden="true"><ArrowRight size={20} strokeWidth={2.25} /></div>
               )}
             </div>
           ))}

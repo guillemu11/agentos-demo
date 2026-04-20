@@ -48,12 +48,12 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ padding: '40px', textAlign: 'center', fontFamily: 'Inter, sans-serif' }}>
-          <h2 style={{ color: '#0f172a' }}>Something went wrong</h2>
-          <pre style={{ color: '#ef4444', fontSize: '0.85rem' }}>{this.state.error?.message}</pre>
+        <div style={{ padding: 'var(--space-10)', textAlign: 'center', fontFamily: 'Inter, sans-serif' }}>
+          <h2 style={{ color: 'var(--text-main)' }}>Something went wrong</h2>
+          <pre style={{ color: 'var(--danger)', fontSize: '0.85rem' }}>{this.state.error?.message}</pre>
           <button
             onClick={() => window.location.reload()}
-            style={{ marginTop: '16px', padding: '8px 24px', borderRadius: '9999px', border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer' }}
+            style={{ marginTop: 'var(--space-4)', padding: 'var(--space-2) var(--space-6)', borderRadius: 'var(--radius-full)', border: '1px solid var(--border-light)', background: 'var(--bg-elevated)', cursor: 'pointer' }}
           >
             Reload
           </button>
@@ -83,7 +83,7 @@ function AuthGate({ children }) {
 
   if (checking) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'Inter, sans-serif', color: '#64748b' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'Inter, sans-serif', color: 'var(--text-muted)' }}>
         Loading...
       </div>
     );
