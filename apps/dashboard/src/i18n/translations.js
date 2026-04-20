@@ -2076,6 +2076,11 @@ export const translations = {
         engagement_split: 'Split por engagement',
       },
     },
+
+    competitorIntel: {
+      title: 'Competitor Intel',
+      loading: 'Cargando...',
+    },
   },
 
   en: {
@@ -4120,6 +4125,11 @@ export const translations = {
         wait_until_event: 'Wait until event',
         engagement_split: 'Engagement split',
       },
+    },
+
+    competitorIntel: {
+      title: 'Competitor Intel',
+      loading: 'Loading...',
     },
   },
 };

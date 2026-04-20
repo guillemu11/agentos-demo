@@ -8745,6 +8745,25 @@ async function persistJourneyDsl(pool, journeyId, dsl) {
     return rows[0];
 }
 
+// ==================== Competitor Intel ====================
+app.get('/api/competitor-intel/investigations', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT id, name, description, status, created_at FROM competitor_investigations ORDER BY created_at DESC');
+    res.json({ investigations: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/competitor-intel/investigations/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const inv = await pool.query('SELECT * FROM competitor_investigations WHERE id = $1', [id]);
+    if (!inv.rows[0]) return res.status(404).json({ error: 'not found' });
+    const brands = await pool.query('SELECT * FROM competitor_brands WHERE investigation_id = $1 ORDER BY name', [id]);
+    const personas = await pool.query('SELECT * FROM competitor_personas WHERE investigation_id = $1 ORDER BY name', [id]);
+    res.json({ investigation: inv.rows[0], brands: brands.rows, personas: personas.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 process.on('uncaughtException', (err) => {
     console.error('[Server] Uncaught exception (keeping process alive):', err.message);
 });

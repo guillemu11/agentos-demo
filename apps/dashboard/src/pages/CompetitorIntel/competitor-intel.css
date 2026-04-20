@@ -1,0 +1,6 @@
+.ci-page { padding: var(--space-lg); }
+.ci-loading { padding: var(--space-lg); color: var(--text-muted); }
+.ci-investigation-list { list-style: none; padding: 0; }
+.ci-investigation-list li { padding: var(--space-md); border: 1px solid var(--border); border-radius: var(--radius-md); margin-bottom: var(--space-sm); background: var(--surface); }
+.ci-investigation-list a { font-weight: 600; text-decoration: none; color: inherit; display: block; }
+.ci-investigation-list small { color: var(--text-muted); }
