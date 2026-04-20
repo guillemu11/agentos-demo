@@ -2,7 +2,11 @@ import { google } from 'googleapis';
 import pool from '../db/pool.js';
 import { encrypt, decrypt } from '../crypto/aes-gcm.js';
 
-const SCOPES = ['https://www.googleapis.com/auth/gmail.readonly'];
+const SCOPES = [
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'openid',
+];
 
 function client() {
   return new google.auth.OAuth2(
