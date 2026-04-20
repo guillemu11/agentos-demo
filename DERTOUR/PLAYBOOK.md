@@ -98,9 +98,15 @@ Lo que sigue expande el playbook genérico con **detalles específicos descubier
 - **Inmediatamente después**: marca step 2 `done` en el dashboard con timestamp preciso (esto sirve para el "time to first useful email"). Añade nota: `"Signed up via footer, [HH:MM]"`.
 - Puede NO haber newsletter clásica en Kuoni — muchas marcas luxury no tienen. Si no hay form de newsletter explícito, marca step 2 como `skipped` con nota `"No newsletter form — Kuoni uses enquiry-only model"` y pasa a step 7 directo.
 
-**Step 3 — Double opt-in** (cuando llegue)
+**Step 3 — Double opt-in + progressive profiling** (cuando llegue)
 - Si recibes email de confirmación, clica el link.
-- Marca step 3 `done` con la hora.
+- **OJO — patrón a observar:** algunas marcas NO hacen un "confirm click" simple, sino que el link te lleva a una **landing de preferencias** donde te piden más datos (nombre, intereses, destinos). Kuoni lo hace así via Microsoft Dynamics 365 Marketing.
+- **Si te aparece una landing de preferencias:**
+  - Rellena CON LOS DATOS DE LA PERSONA — intereses de Sarah: Honeymoons / Luxury / Beach. Destinos: Maldives, Seychelles, Mauritius, Caribbean.
+  - Acepta marketing.
+  - Nota el ESP inferido por la URL (ej. `assets-eur.mkt.dynamics.com` → D365, `.exacttarget.com` → SFMC, `.emarsys.net` → Emarsys). Esto es oro para Analysis 5.
+  - Captura **un insight** en el dashboard inmediatamente (`/competitor-intel/2/insights`): brand, category `email`, severity `high`, título tipo `"[Brand] — progressive profiling via post-signup landing on [ESP detected]"`.
+- Marca step 3 `done` con nota detallada: `"Double opt-in → landing de prefs [ESP]. Captured: [list fields filled]"`.
 
 **Step 4 — Wait 24h**
 - Silencio total. Observa qué llega solo.
