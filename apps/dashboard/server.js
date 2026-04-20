@@ -46,6 +46,7 @@ import { deployJourney } from '../../packages/core/journey-builder/deploy.js';
 import { getOrEnrich as enrichCalendarInsights } from './server-calendar-ai.js';
 import * as competitorIntelRecon from '../../packages/core/competitor-intel/recon.js';
 import * as competitorIntelOAuth from '../../packages/core/competitor-intel/gmail-oauth.js';
+import * as competitorIntelIngestion from '../../packages/core/competitor-intel/gmail-ingestion.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -8804,12 +8805,23 @@ app.get('/api/oauth/google/callback', async (req, res) => {
   }
 });
 
+app.post('/api/competitor-intel/ingest-now', async (req, res) => {
+  try {
+    res.json({ results: await competitorIntelIngestion.ingestAll() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 process.on('uncaughtException', (err) => {
     console.error('[Server] Uncaught exception (keeping process alive):', err.message);
 });
 process.on('unhandledRejection', (reason) => {
     console.error('[Server] Unhandled rejection (keeping process alive):', reason?.message || reason);
 });
+
+if (process.env.COMPETITOR_INTEL_ENABLE_WORKER !== 'false') {
+  competitorIntelIngestion.startWorker({ intervalMs: 5 * 60 * 1000 });
+  console.log('[competitor-intel] Gmail ingestion worker started (5 min interval)');
+}
 
 server.listen(port, () => {
     console.log(`AgentOS API running at http://localhost:${port}`);
