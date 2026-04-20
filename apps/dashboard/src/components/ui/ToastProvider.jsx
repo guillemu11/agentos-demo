@@ -10,12 +10,15 @@ export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
 
   const dismiss = useCallback((id) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+    setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 180);
   }, []);
 
   const show = useCallback((msg, opts = {}) => {
     const id = ++toastId;
-    const toast = { id, msg, tone: opts.tone || 'info', duration: opts.duration ?? 3500 };
+    const toast = { id, msg, tone: opts.tone || 'info', duration: opts.duration ?? 3500, leaving: false };
     setToasts((prev) => [...prev, toast]);
     if (toast.duration > 0) {
       setTimeout(() => dismiss(id), toast.duration);
@@ -50,7 +53,7 @@ export function ToastProvider({ children }) {
 function ToastItem({ toast, onDismiss }) {
   const Icon = toneIcon(toast.tone);
   return (
-    <div className={`ui-toast ui-toast--${toast.tone}`} role="status">
+    <div className={`ui-toast ui-toast--${toast.tone} ${toast.leaving ? 'is-leaving' : ''}`.trim()} role="status">
       <Icon size={16} className="ui-toast__icon" />
       <div className="ui-toast__msg">{toast.msg}</div>
       <button type="button" className="ui-toast__close" onClick={onDismiss} aria-label="Dismiss">

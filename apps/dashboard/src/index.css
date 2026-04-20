@@ -18716,11 +18716,12 @@ body.sidebar-collapsed > .inbox-drawer {
 .jl__hero-eyebrow svg { color: var(--jl-red); }
 .jl__hero-title {
   font-size: clamp(28px, 4vw, 42px);
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   letter-spacing: -0.025em;
   line-height: 1.05;
   color: var(--jl-ink);
   margin: 0 0 14px;
+  text-wrap: balance;
 }
 .jl__hero-title-accent { color: var(--jl-red); }
 .jl__hero-subtitle {
@@ -18729,6 +18730,7 @@ body.sidebar-collapsed > .inbox-drawer {
   color: var(--jl-ink-muted);
   max-width: 540px;
   margin: 0 0 24px;
+  text-wrap: pretty;
 }
 .jl__hero-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 
@@ -21360,6 +21362,7 @@ body.sidebar-collapsed > .inbox-drawer {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-4);
   padding: var(--space-5) var(--space-6);
   border-bottom: 1px solid var(--border-light);
 }
@@ -21376,9 +21379,13 @@ body.sidebar-collapsed > .inbox-drawer {
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  padding: var(--space-1);
+  padding: var(--space-2);
   border-radius: var(--radius-sm);
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .ui-modal__close:hover { background: var(--theme-graphite-soft); color: var(--text-main); }
@@ -21386,6 +21393,15 @@ body.sidebar-collapsed > .inbox-drawer {
 .ui-modal__body {
   padding: var(--space-5) var(--space-6);
   overflow-y: auto;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-light) transparent;
+}
+.ui-modal__body::-webkit-scrollbar { width: 8px; }
+.ui-modal__body::-webkit-scrollbar-track { background: transparent; }
+.ui-modal__body::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: var(--radius-full);
 }
 
 /* ConfirmDialog */
@@ -21611,12 +21627,14 @@ body.sidebar-collapsed > .inbox-drawer {
   line-height: var(--lh-tight);
   letter-spacing: -0.005em;
   color: var(--text-main);
+  text-wrap: balance;
 }
 .ui-empty__desc {
   margin: 0;
   max-width: 360px;
   font-size: var(--fs-base);
   line-height: var(--lh-normal);
+  text-wrap: pretty;
 }
 .ui-empty__action { margin-top: var(--space-3); }
 
@@ -22210,3 +22228,44 @@ button.card {
 @media (prefers-reduced-motion: reduce) {
   .research-source-card { animation: none; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   OLA 7d — Polish: global reduced-motion guard rail.
+   Users who opt out of motion get a much gentler experience without
+   losing the state indicators they still need (opacity, color).
+   ═══════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* Keep opacity transitions — they aid comprehension */
+  .ui-toast,
+  .ui-modal,
+  .ui-modal-backdrop {
+    transition: opacity var(--dur-fast) ease !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Focus ring utility — use .focus-ring on any interactive element
+   that doesn't fit the primitive ring rule above.
+   ═══════════════════════════════════════════════════════════════════ */
+.focus-ring:focus-visible,
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+/* Don't double-ring primitives that already define their own */
+.ui-btn:focus-visible,
+.ui-tab:focus-visible,
+.ui-modal__close:focus-visible,
+.ui-toast__close:focus-visible,
+.kb-ns-tile:focus-visible,
+.jl__card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
