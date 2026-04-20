@@ -8772,6 +8772,35 @@ app.get('/api/competitor-intel/investigations', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/competitor-intel/investigations/:id/overview', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const brands = await pool.query(`
+      SELECT
+        b.id, b.name, b.website, b.category, b.positioning, b.recon_notes,
+        s.lifecycle_maturity, s.email_sophistication, s.journey_depth, s.personalisation, s.overall,
+        (SELECT COUNT(*)::int FROM competitor_emails e WHERE e.brand_id = b.id) AS emails_count,
+        (SELECT MAX(received_at)  FROM competitor_emails e WHERE e.brand_id = b.id) AS last_email_at,
+        (SELECT COUNT(*)::int FROM competitor_playbook_steps ps WHERE ps.brand_id = b.id AND ps.status = 'done') AS steps_done,
+        (SELECT COUNT(*)::int FROM competitor_playbook_steps ps WHERE ps.brand_id = b.id) AS steps_total
+      FROM competitor_brands b
+      LEFT JOIN competitor_brand_scores s ON s.brand_id = b.id
+      WHERE b.investigation_id = $1
+      ORDER BY b.name
+    `, [id]);
+    const activity = await pool.query(`
+      SELECT 'email' AS kind, e.id, e.subject AS title, e.received_at AS at, b.name AS brand_name, p.name AS persona_name
+      FROM competitor_emails e
+      LEFT JOIN competitor_brands b ON b.id = e.brand_id
+      LEFT JOIN competitor_personas p ON p.id = e.persona_id
+      WHERE p.investigation_id = $1
+      ORDER BY e.received_at DESC NULLS LAST
+      LIMIT 20
+    `, [id]);
+    res.json({ brands: brands.rows, activity: activity.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/competitor-intel/investigations/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);

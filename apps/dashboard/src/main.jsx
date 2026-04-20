@@ -140,8 +140,7 @@ createRoot(document.getElementById('root')).render(
                       <Route path="/journeys" element={<JourneysListPage />} />
                       <Route path="/calendar" element={<CampaignCalendarPage />} />
                       <Route path="/settings" element={<SettingsPage />} />
-                      <Route path="/competitor-intel" element={<CompetitorIntelPage />} />
-                      <Route path="/competitor-intel/:id" element={<CompetitorIntelPage />} />
+                      <Route path="/competitor-intel/*" element={<CompetitorIntelPage />} />
                     </Route>
                     {/* Journey builder — full-screen */}
                     <Route path="/journeys/:id" element={<JourneyBuilderPage />} />
