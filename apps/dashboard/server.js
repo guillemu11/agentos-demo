@@ -9903,6 +9903,43 @@ app.get('/api/competitor-intel/personas/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/competitor-intel/brands/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const brand = (await pool.query('SELECT * FROM competitor_brands WHERE id = $1', [id])).rows[0];
+    if (!brand) return res.status(404).json({ error: 'not found' });
+    const scores = (await pool.query('SELECT * FROM competitor_brand_scores WHERE brand_id = $1', [id])).rows[0] || null;
+    const steps = (await pool.query(`
+      SELECT ps.*, p.name AS persona_name, p.profile AS persona_profile
+      FROM competitor_playbook_steps ps
+      JOIN competitor_personas p ON p.id = ps.persona_id
+      WHERE ps.brand_id = $1
+      ORDER BY p.name, ps.step_order
+    `, [id])).rows;
+    const emails = (await pool.query(`
+      SELECT e.*, p.name AS persona_name FROM competitor_emails e
+      JOIN competitor_personas p ON p.id = e.persona_id
+      WHERE e.brand_id = $1 ORDER BY e.received_at DESC NULLS LAST
+    `, [id])).rows;
+    res.json({ brand, scores, steps, emails });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/competitor-intel/playbook-steps/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { status, notes } = req.body || {};
+    const r = await pool.query(`
+      UPDATE competitor_playbook_steps
+      SET status = COALESCE($1, status),
+          notes = COALESCE($2, notes),
+          executed_at = CASE WHEN $1 = 'done' THEN NOW() ELSE executed_at END
+      WHERE id = $3 RETURNING *
+    `, [status || null, notes ?? null, id]);
+    res.json({ step: r.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/competitor-intel/brands/:id/score/auto', async (req, res) => {
   try { res.json(await competitorIntelScoring.computeBrandScores(parseInt(req.params.id, 10))); }
   catch (e) { res.status(500).json({ error: e.message }); }
