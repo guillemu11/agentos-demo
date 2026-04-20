@@ -44,6 +44,7 @@ import {
 } from '../../packages/core/journey-builder/mutators.js';
 import { deployJourney } from '../../packages/core/journey-builder/deploy.js';
 import { getOrEnrich as enrichCalendarInsights } from './server-calendar-ai.js';
+import * as competitorIntelRecon from '../../packages/core/competitor-intel/recon.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -8746,6 +8747,22 @@ async function persistJourneyDsl(pool, journeyId, dsl) {
 }
 
 // ==================== Competitor Intel ====================
+app.post('/api/competitor-intel/brands/:id/recon', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const notes = await competitorIntelRecon.reconBrand(id);
+    res.json({ recon: notes });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/competitor-intel/investigations/:id/recon-all', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const results = await competitorIntelRecon.reconInvestigation(id);
+    res.json({ results });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/competitor-intel/investigations', async (req, res) => {
   try {
     const r = await pool.query('SELECT id, name, description, status, created_at FROM competitor_investigations ORDER BY created_at DESC');

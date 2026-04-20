@@ -1,3 +1,2 @@
-// packages/core/competitor-intel/index.js
-// Public surface. Each export added incrementally in later tasks.
-module.exports = {};
+export * from './seed.js';
+export * from './recon.js';
