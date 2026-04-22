@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   ArrowLeft, ArrowRight, Sparkles, Rocket, Check, CheckCircle2,
   Image as ImageIcon, Upload, Plus, Smartphone, Monitor,
@@ -223,6 +223,18 @@ const styles = `
   padding: 3px 10px; border-radius: var(--radius-full);
   font-size: 11px; font-weight: 600;
 }
+.cc2-save-status {
+  font-size: 11px; font-weight: 500;
+  padding: 3px 10px; border-radius: var(--radius-full);
+  color: var(--text-muted);
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  min-width: 90px; text-align: center;
+  font-family: inherit;
+}
+.cc2-save-status--saving { color: var(--accent-yellow, #d97706); border-color: rgba(217, 119, 6, 0.3); background: rgba(217, 119, 6, 0.08); }
+.cc2-save-status--saved  { color: var(--accent-green, #10b981); border-color: rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.08); }
+.cc2-save-status--error  { color: #dc2626; border-color: rgba(220, 38, 38, 0.3); background: rgba(220, 38, 38, 0.08); }
 .cc2-chip {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 3px 10px; border-radius: var(--radius-full);
@@ -3259,6 +3271,10 @@ export default function CampaignCreationV2Page({ briefId } = {}) {
   const [state, setState] = useState(DEFAULT_STATE);
   const [brief, setBrief] = useState(null);
   const [briefError, setBriefError] = useState(null);
+  const [saveStatus, setSaveStatus] = useState('idle');   // 'idle'|'saving'|'saved'|'error'
+  const [savedAt, setSavedAt] = useState(null);
+  const saveTimerRef = useRef(null);
+  const skipSaveRef = useRef(true);  // skip the initial hydration from triggering a save
 
   useEffect(() => {
     if (!briefId) return;
@@ -3270,11 +3286,44 @@ export default function CampaignCreationV2Page({ briefId } = {}) {
         const b = (briefs || []).find(x => x.id === briefId);
         if (!b) { setBriefError('Brief not found'); return; }
         setBrief(b);
-        setState(stateFromBrief(b));
+        skipSaveRef.current = true;  // next setState is hydration, not a user edit
+        // Resume from saved wizard_state when available; otherwise seed from brief.
+        setState(b.wizard_state && typeof b.wizard_state === 'object' && Object.keys(b.wizard_state).length > 0
+          ? b.wizard_state
+          : stateFromBrief(b));
       })
       .catch(err => { if (!cancelled) setBriefError(err.message); });
     return () => { cancelled = true; };
   }, [briefId]);
+
+  // Debounced auto-save of wizard state. First render after hydration is skipped.
+  useEffect(() => {
+    if (!briefId || !brief) return;
+    if (skipSaveRef.current) { skipSaveRef.current = false; return; }
+    clearTimeout(saveTimerRef.current);
+    setSaveStatus('saving');
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `${import.meta.env.VITE_API_URL || '/api'}/campaign-briefs/${briefId}`,
+          {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ wizard_state: state }),
+          },
+        );
+        if (!res.ok) throw new Error(`${res.status}`);
+        setSaveStatus('saved');
+        setSavedAt(new Date());
+      } catch (err) {
+        console.error('[cc2] autosave failed', err);
+        setSaveStatus('error');
+      }
+    }, 400);
+    return () => clearTimeout(saveTimerRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, briefId, brief]);
 
   return (
     <div className="cc2-root">
@@ -3335,7 +3384,23 @@ export default function CampaignCreationV2Page({ briefId } = {}) {
 
         <div className="cc2-top-right">
           <span className="cc2-ai-chip"><Sparkles size={10} /> AI active</span>
-          <button className="cc2-btn cc2-btn-soft cc2-btn-sm">Save draft</button>
+          {briefId ? (
+            <span
+              className={`cc2-save-status cc2-save-status--${saveStatus}`}
+              title={savedAt ? `Last saved: ${savedAt.toLocaleTimeString()}` : ''}
+            >
+              {saveStatus === 'saving' && 'Saving…'}
+              {saveStatus === 'saved'  && `Saved ${savedAt ? savedAt.toLocaleTimeString() : ''}`}
+              {saveStatus === 'error'  && 'Save failed'}
+              {saveStatus === 'idle'   && 'Auto-save on'}
+            </span>
+          ) : (
+            <button
+              className="cc2-btn cc2-btn-soft cc2-btn-sm"
+              disabled
+              title="Launch from a brief to enable auto-save"
+            >Save draft</button>
+          )}
         </div>
       </div>
 

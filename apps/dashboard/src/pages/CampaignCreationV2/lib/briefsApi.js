@@ -32,5 +32,6 @@ export const briefsApi = {
   genOptions: (id)                => request(`/${id}/options/generate`, { method: 'POST' }),
   accept:     (id, optionIndex)   => request(`/${id}/options/accept`,   { method: 'POST', body: JSON.stringify({ optionIndex }) }),
   dismiss:    (id)                => request(`/${id}/dismiss`,          { method: 'POST' }),
+  remove:     (id)                => request(`/${id}`,                   { method: 'DELETE' }),
   regenerateOpportunities: ()     => request('/ai-opportunities/regenerate', { method: 'POST' }),
 };
