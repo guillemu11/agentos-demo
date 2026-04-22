@@ -41,6 +41,7 @@ import JourneysListPage from './pages/JourneysListPage.jsx';
 import JourneyBuilderPage from './pages/JourneyBuilderPage.jsx';
 import CampaignCalendarPage from './pages/CampaignCalendarPage.jsx';
 import CompetitorIntelPage from './pages/CompetitorIntel/index.jsx';
+import CampaignCreationV2Page from './pages/CampaignCreationV2/index.jsx';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   ArrowLeft, ArrowRight, Sparkles, Rocket, Check, CheckCircle2,
   Image as ImageIcon, Upload, Plus, Smartphone, Monitor,
@@ -223,6 +223,18 @@ const styles = `
   padding: 3px 10px; border-radius: var(--radius-full);
   font-size: 11px; font-weight: 600;
 }
+.cc2-save-status {
+  font-size: 11px; font-weight: 500;
+  padding: 3px 10px; border-radius: var(--radius-full);
+  color: var(--text-muted);
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  min-width: 90px; text-align: center;
+  font-family: inherit;
+}
+.cc2-save-status--saving { color: var(--accent-yellow, #d97706); border-color: rgba(217, 119, 6, 0.3); background: rgba(217, 119, 6, 0.08); }
+.cc2-save-status--saved  { color: var(--accent-green, #10b981); border-color: rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.08); }
+.cc2-save-status--error  { color: #dc2626; border-color: rgba(220, 38, 38, 0.3); background: rgba(220, 38, 38, 0.08); }
 .cc2-chip {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 3px 10px; border-radius: var(--radius-full);
@@ -3161,32 +3173,196 @@ function EmailPreview({ blocks, subject, preheader, device }) {
 // Main
 // ============================================================
 
-export default function CampaignCreationV2Page() {
-  const [step, setStep] = useState(1);
-  const [state, setState] = useState({
-    code: 'A350_FR_PE_2026',
-    name: '20260228_FR_A350_PremiumEconomy',
-    template: 'Partner Offer',
-    businessArea: 'E-commerce',
-    deployAt: '2026-02-28T17:00',
-    owner: '',
-    bauCampaign: '',
-    selectedMarkets: ['FR'],
-    selectedLanguages: ['EN', 'EN-US', 'FR'],
-    selectedTiers: ['Gold', 'Silver'],
-    selectedBehaviors: ['highly_engaged', 'dormant_90d', 'abandoned_cart'],
-    manualVariants: [],
+const DEFAULT_STATE = {
+  code: 'A350_FR_PE_2026',
+  name: '20260228_FR_A350_PremiumEconomy',
+  template: 'Partner Offer',
+  businessArea: 'E-commerce',
+  deployAt: '2026-02-28T17:00',
+  owner: '',
+  bauCampaign: '',
+  selectedMarkets: ['FR'],
+  selectedLanguages: ['EN', 'EN-US', 'FR'],
+  selectedTiers: ['Gold', 'Silver'],
+  selectedBehaviors: ['highly_engaged', 'dormant_90d', 'abandoned_cart'],
+  manualVariants: [],
+};
+
+// Turn a campaign_briefs row (+ accepted_option) into the wizard's state shape.
+// Only fills what the brief actually has — leaves the rest as sensible defaults.
+function stateFromBrief(brief) {
+  if (!brief) return DEFAULT_STATE;
+  const opt = brief.accepted_option || {};
+  const markets = Array.isArray(brief.markets) ? brief.markets : [];
+  const languages = Array.isArray(brief.languages) ? brief.languages : [];
+  const plan = Array.isArray(brief.variants_plan) ? brief.variants_plan : [];
+
+  // toLocal datetime string compatible with the <input type="datetime-local"> element
+  const deployAt = brief.send_date
+    ? new Date(brief.send_date).toISOString().slice(0, 16)
+    : DEFAULT_STATE.deployAt;
+
+  // Compose the variants the wizard expects from the brief's variants_plan + accepted copy.
+  const manualVariants = plan.map((v, i) => {
+    const market = (markets[0] || 'FR').toUpperCase();
+    const language = (languages[0] || 'EN').toUpperCase();
+    const tier = v?.tier || '';
+    const behaviors = Array.isArray(v?.behaviors) ? v.behaviors : [];
+    const behavior = behaviors[0] || '';
+    const size = typeof v?.size === 'number' ? v.size : 0;
+
+    return {
+      id: `v${i + 1}`,
+      market,
+      language,
+      tier,
+      behavior,
+      behaviors,
+      airport: '',
+      size,
+      code: buildSegmentCode({
+        name: brief.name || DEFAULT_STATE.name,
+        market, language, tier, behavior,
+      }),
+      status: 'draft',
+      content: {
+        status: 'draft',
+        angle: '',
+        subject:   opt.subject   || '',
+        preheader: opt.preheader || '',
+        blocks: [
+          { id: `b_${Date.now()}_1_${i}`, blockId: 'ebase_header', vars: {} },
+          { id: `b_${Date.now()}_2_${i}`, blockId: 'global_header_title_v2',
+            vars: {
+              main_subheader: 'TRAVEL INSPIRATION',
+              main_header: opt.headline || '',
+            } },
+          { id: `b_${Date.now()}_3_${i}`, blockId: 'global_body_copy_cta_red',
+            vars: {
+              body_copy: opt.body || '',
+              body_cta: opt.cta_label || 'Book now',
+              body_cta_url: opt.cta_url || '',
+            } },
+          { id: `b_${Date.now()}_4_${i}`, blockId: 'global_offer_block',
+            vars: { offer_block_cta_text: opt.cta_label || 'Discover' } },
+          { id: `b_${Date.now()}_5_${i}`, blockId: 'global_footer', vars: {} },
+        ],
+      },
+    };
   });
+
+  return {
+    ...DEFAULT_STATE,
+    code: DEFAULT_STATE.code, // user edits later
+    name: brief.name || DEFAULT_STATE.name,
+    deployAt,
+    selectedMarkets: markets.length ? markets.map(m => m.toUpperCase()) : DEFAULT_STATE.selectedMarkets,
+    selectedLanguages: languages.length ? languages.map(l => l.toUpperCase()) : DEFAULT_STATE.selectedLanguages,
+    selectedTiers: Array.from(new Set(plan.map(v => v?.tier).filter(Boolean))).length
+      ? Array.from(new Set(plan.map(v => v?.tier).filter(Boolean)))
+      : DEFAULT_STATE.selectedTiers,
+    selectedBehaviors: Array.from(new Set(plan.flatMap(v => Array.isArray(v?.behaviors) ? v.behaviors : []))),
+    manualVariants,
+  };
+}
+
+export default function CampaignCreationV2Page({ briefId } = {}) {
+  const [step, setStep] = useState(1);
+  const [state, setState] = useState(DEFAULT_STATE);
+  const [brief, setBrief] = useState(null);
+  const [briefError, setBriefError] = useState(null);
+  const [saveStatus, setSaveStatus] = useState('idle');   // 'idle'|'saving'|'saved'|'error'
+  const [savedAt, setSavedAt] = useState(null);
+  const saveTimerRef = useRef(null);
+  const skipSaveRef = useRef(true);  // skip the initial hydration from triggering a save
+
+  useEffect(() => {
+    if (!briefId) return;
+    let cancelled = false;
+    fetch(`${import.meta.env.VITE_API_URL || '/api'}/campaign-briefs`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`${r.status}`)))
+      .then(({ briefs }) => {
+        if (cancelled) return;
+        const b = (briefs || []).find(x => x.id === briefId);
+        if (!b) { setBriefError('Brief not found'); return; }
+        setBrief(b);
+        skipSaveRef.current = true;  // next setState is hydration, not a user edit
+        // Resume from saved wizard_state when available; otherwise seed from brief.
+        setState(b.wizard_state && typeof b.wizard_state === 'object' && Object.keys(b.wizard_state).length > 0
+          ? b.wizard_state
+          : stateFromBrief(b));
+      })
+      .catch(err => { if (!cancelled) setBriefError(err.message); });
+    return () => { cancelled = true; };
+  }, [briefId]);
+
+  // Debounced auto-save of wizard state. First render after hydration is skipped.
+  useEffect(() => {
+    if (!briefId || !brief) return;
+    if (skipSaveRef.current) { skipSaveRef.current = false; return; }
+    clearTimeout(saveTimerRef.current);
+    setSaveStatus('saving');
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `${import.meta.env.VITE_API_URL || '/api'}/campaign-briefs/${briefId}`,
+          {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ wizard_state: state }),
+          },
+        );
+        if (!res.ok) throw new Error(`${res.status}`);
+        setSaveStatus('saved');
+        setSavedAt(new Date());
+      } catch (err) {
+        console.error('[cc2] autosave failed', err);
+        setSaveStatus('error');
+      }
+    }, 400);
+    return () => clearTimeout(saveTimerRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, briefId, brief]);
 
   return (
     <div className="cc2-root">
       <style>{styles}</style>
 
+      {brief && (
+        <div
+          style={{
+            display: 'flex', gap: 10, alignItems: 'center',
+            background: 'var(--color-ai-soft)',
+            border: '1px solid var(--color-ai)',
+            borderRadius: 8, padding: '10px 14px', margin: '12px 24px 0',
+            fontSize: 13, color: 'var(--text-main)',
+          }}
+        >
+          <Sparkles size={16} style={{ color: 'var(--color-ai)', flexShrink: 0 }} />
+          <span>
+            Pre-filled from brief <strong>"{brief.name || '(unnamed)'}"</strong>.
+            All fields are editable — template is locked to preserve content coherence.
+          </span>
+        </div>
+      )}
+      {briefError && (
+        <div style={{ padding: '10px 24px', color: '#d97706', fontSize: 13 }}>
+          Could not load brief ({briefError}). Showing defaults — you can still create a campaign.
+        </div>
+      )}
+
       {/* Top bar */}
       <div className="cc2-top">
         <div className="cc2-top-left">
-          <button className="cc2-back-btn" onClick={() => window.history.back()}>
-            <ArrowLeft size={14} /> Back
+          <button
+            className="cc2-back-btn"
+            onClick={() => {
+              if (briefId) window.location.assign('/app/campaign-creation-v2');
+              else window.history.back();
+            }}
+          >
+            <ArrowLeft size={14} /> {briefId ? 'Back to briefs' : 'Back'}
           </button>
           <div>
             <div className="cc2-top-title">Create Campaign</div>
@@ -3208,7 +3384,23 @@ export default function CampaignCreationV2Page() {
 
         <div className="cc2-top-right">
           <span className="cc2-ai-chip"><Sparkles size={10} /> AI active</span>
-          <button className="cc2-btn cc2-btn-soft cc2-btn-sm">Save draft</button>
+          {briefId ? (
+            <span
+              className={`cc2-save-status cc2-save-status--${saveStatus}`}
+              title={savedAt ? `Last saved: ${savedAt.toLocaleTimeString()}` : ''}
+            >
+              {saveStatus === 'saving' && 'Saving…'}
+              {saveStatus === 'saved'  && `Saved ${savedAt ? savedAt.toLocaleTimeString() : ''}`}
+              {saveStatus === 'error'  && 'Save failed'}
+              {saveStatus === 'idle'   && 'Auto-save on'}
+            </span>
+          ) : (
+            <button
+              className="cc2-btn cc2-btn-soft cc2-btn-sm"
+              disabled
+              title="Launch from a brief to enable auto-save"
+            >Save draft</button>
+          )}
         </div>
       </div>
 

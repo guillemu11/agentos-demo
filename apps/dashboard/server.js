@@ -45,6 +45,9 @@ import {
 import { deployJourney } from '../../packages/core/journey-builder/deploy.js';
 import { getOrEnrich as enrichCalendarInsights, clearCache as clearCalendarCache } from './server-calendar-ai.js';
 import * as competitorIntelRecon from '../../packages/core/competitor-intel/recon.js';
+import { runChatTurn } from './server/briefs/chatTurn.js';
+import { generateOptions } from './server/briefs/generateOptions.js';
+import { generateOpportunities } from './server/briefs/generateOpportunities.js';
 import * as competitorIntelOAuth from '../../packages/core/competitor-intel/gmail-oauth.js';
 import * as competitorIntelIngestion from '../../packages/core/competitor-intel/gmail-ingestion.js';
 import * as competitorIntelClassifierLLM from '../../packages/core/competitor-intel/classifier-llm.js';
@@ -11698,6 +11701,263 @@ app.get('/api/competitor-intel/investigations/:id/timeline', async (req, res) =>
     rows.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
     res.json({ events: rows.slice(0, limit) });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Campaign Briefs — /api/campaign-briefs
+// Briefs-first flow hub. Human briefs come from the setup chat; AI briefs are
+// generated from mock signals (see apps/dashboard/src/data/mockSignals.js).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// In-memory cache for options not yet accepted. Dies on server restart by design.
+const briefOptionsCache = new Map();
+
+// GET /api/campaign-briefs?source=human|ai&status=draft,active
+app.get('/api/campaign-briefs', requireAuth, async (req, res) => {
+    try {
+        const { source, status } = req.query;
+        const clauses = [];
+        const params = [];
+        if (source) { params.push(source); clauses.push(`source = $${params.length}`); }
+        if (status) {
+            const list = String(status).split(',').filter(Boolean);
+            if (list.length > 0) {
+                params.push(list);
+                clauses.push(`status = ANY($${params.length})`);
+            }
+        }
+        const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+        const { rows } = await pool.query(
+            `SELECT * FROM campaign_briefs ${where} ORDER BY created_at DESC`,
+            params,
+        );
+        res.json({ briefs: rows });
+    } catch (err) {
+        console.error('[briefs] list failed', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/campaign-briefs — create empty draft (human)
+app.post('/api/campaign-briefs', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session?.userId || null;
+        const { rows } = await pool.query(
+            `INSERT INTO campaign_briefs (created_by, source, status)
+             VALUES ($1, 'human', 'draft') RETURNING *`,
+            [userId],
+        );
+        res.json({ brief: rows[0] });
+    } catch (err) {
+        console.error('[briefs] create failed', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PATCH /api/campaign-briefs/:id
+app.patch('/api/campaign-briefs/:id', requireAuth, async (req, res) => {
+    try {
+        const allowed = [
+            'name','objective','send_date','template_id','markets','languages',
+            'variants_plan','audience_summary','status','accepted_option','campaign_id',
+            'wizard_state',
+        ];
+        const jsonbFields = new Set(['markets','languages','variants_plan','accepted_option','wizard_state']);
+        const updates = [];
+        const params = [];
+        for (const key of allowed) {
+            if (key in req.body) {
+                const raw = req.body[key];
+                const v = jsonbFields.has(key) && raw != null ? JSON.stringify(raw) : raw;
+                params.push(v);
+                const cast = jsonbFields.has(key) ? '::jsonb' : '';
+                updates.push(`${key} = $${params.length}${cast}`);
+            }
+        }
+        if (updates.length === 0) return res.status(400).json({ error: 'no fields to update' });
+        params.push(req.params.id);
+        const { rows } = await pool.query(
+            `UPDATE campaign_briefs SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
+            params,
+        );
+        if (!rows[0]) return res.status(404).json({ error: 'not found' });
+        res.json({ brief: rows[0] });
+    } catch (err) {
+        console.error('[briefs] patch failed', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/campaign-briefs/ai-opportunities/regenerate
+app.post('/api/campaign-briefs/ai-opportunities/regenerate', requireAuth, async (req, res) => {
+    try {
+        await pool.query(`DELETE FROM campaign_briefs WHERE source = 'ai' AND status = 'draft'`);
+        const { rows: existing } = await pool.query(
+            `SELECT opportunity_signals FROM campaign_briefs
+             WHERE source = 'ai' AND status IN ('active','in_wizard','sent','dismissed')`,
+        );
+        const exclude = existing.map(r => r.opportunity_signals).filter(Boolean);
+        const briefs = await generateOpportunities({
+            count: 4, exclude, apiKey: process.env.ANTHROPIC_API_KEY,
+        });
+        const inserted = [];
+        for (const b of briefs) {
+            const { rows: [row] } = await pool.query(
+                `INSERT INTO campaign_briefs
+                   (source, status, name, audience_summary, opportunity_reason,
+                    opportunity_signals, preview_image_url, send_date, template_id,
+                    markets, languages)
+                 VALUES ('ai', 'draft', $1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, $9::jsonb)
+                 RETURNING *`,
+                [
+                    b.name, b.audience_summary, b.opportunity_reason,
+                    JSON.stringify(b.opportunity_signals), b.preview_image_url,
+                    b.suggested_send_date, b.template_id,
+                    JSON.stringify(b.markets || []), JSON.stringify(b.languages || []),
+                ],
+            );
+            inserted.push(row);
+        }
+        res.json({ briefs: inserted });
+    } catch (err) {
+        console.error('[briefs] ai-opportunities/regenerate failed', err);
+        res.status(502).json({ error: 'AI service error', detail: err.message });
+    }
+});
+
+// POST /api/campaign-briefs/:id/chat/turn
+app.post('/api/campaign-briefs/:id/chat/turn', requireAuth, async (req, res) => {
+    try {
+        const { message } = req.body || {};
+        if (!message || typeof message !== 'string') {
+            return res.status(400).json({ error: 'message (string) required' });
+        }
+        const { rows: [brief] } = await pool.query(
+            `SELECT * FROM campaign_briefs WHERE id = $1`, [req.params.id],
+        );
+        if (!brief) return res.status(404).json({ error: 'brief not found' });
+
+        const { extracted, assistantMessage, newHistory } = await runChatTurn({
+            brief, userMessage: message, apiKey: process.env.ANTHROPIC_API_KEY,
+        });
+
+        const mergeable = ['name','objective','send_date','template_id','markets',
+                           'languages','variants_plan','audience_summary'];
+        const jsonbFields = new Set(['markets','languages','variants_plan']);
+        const merged = {};
+        for (const key of mergeable) {
+            const v = extracted[key];
+            if (v == null) continue;
+            if (Array.isArray(v) && v.length === 0) continue;
+            if (typeof v === 'string' && v.trim() === '') continue;
+            merged[key] = v;
+        }
+        const status = extracted.is_complete ? 'active' : 'draft';
+
+        const setClauses = [];
+        const params = [];
+        for (const [k, v] of Object.entries(merged)) {
+            const val = jsonbFields.has(k) ? JSON.stringify(v) : v;
+            params.push(val);
+            setClauses.push(`${k} = $${params.length}${jsonbFields.has(k) ? '::jsonb' : ''}`);
+        }
+        params.push(JSON.stringify(newHistory));
+        setClauses.push(`chat_transcript = $${params.length}::jsonb`);
+        params.push(status);
+        setClauses.push(`status = $${params.length}`);
+        params.push(req.params.id);
+
+        const { rows: [updated] } = await pool.query(
+            `UPDATE campaign_briefs SET ${setClauses.join(', ')}
+             WHERE id = $${params.length} RETURNING *`, params,
+        );
+        res.json({ brief: updated, assistantMessage, isComplete: !!extracted.is_complete });
+    } catch (err) {
+        console.error('[briefs] chat/turn failed', err);
+        res.status(502).json({ error: 'AI service error', detail: err.message });
+    }
+});
+
+// POST /api/campaign-briefs/:id/options/generate
+app.post('/api/campaign-briefs/:id/options/generate', requireAuth, async (req, res) => {
+    try {
+        const { rows: [brief] } = await pool.query(
+            `SELECT * FROM campaign_briefs WHERE id = $1`, [req.params.id],
+        );
+        if (!brief) return res.status(404).json({ error: 'brief not found' });
+        const options = await generateOptions({ brief, apiKey: process.env.ANTHROPIC_API_KEY });
+        briefOptionsCache.set(brief.id, options);
+        res.json({ options });
+    } catch (err) {
+        console.error('[briefs] options/generate failed', err);
+        res.status(502).json({ error: 'AI service error', detail: err.message });
+    }
+});
+
+// POST /api/campaign-briefs/:id/options/accept
+app.post('/api/campaign-briefs/:id/options/accept', requireAuth, async (req, res) => {
+    try {
+        const { optionIndex } = req.body || {};
+        if (!Number.isInteger(optionIndex) || optionIndex < 0 || optionIndex > 2) {
+            return res.status(400).json({ error: 'optionIndex must be 0, 1, or 2' });
+        }
+        const options = briefOptionsCache.get(req.params.id);
+        if (!options) return res.status(400).json({ error: 'no options cached — regenerate before accepting' });
+        const accepted = options[optionIndex];
+        if (!accepted) return res.status(400).json({ error: 'option not found at that index' });
+        const { rows: [updated] } = await pool.query(
+            `UPDATE campaign_briefs
+             SET accepted_option = $1::jsonb, status = 'in_wizard'
+             WHERE id = $2 RETURNING *`,
+            [JSON.stringify(accepted), req.params.id],
+        );
+        if (!updated) return res.status(404).json({ error: 'brief not found' });
+        briefOptionsCache.delete(req.params.id);
+        res.json({ brief: updated });
+    } catch (err) {
+        console.error('[briefs] options/accept failed', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/campaign-briefs/:id/dismiss — soft-dismiss an AI brief
+app.post('/api/campaign-briefs/:id/dismiss', requireAuth, async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            `UPDATE campaign_briefs SET status = 'dismissed'
+             WHERE id = $1 AND source = 'ai' RETURNING *`,
+            [req.params.id],
+        );
+        if (!rows[0]) return res.status(404).json({ error: 'not found or not AI' });
+        res.json({ brief: rows[0] });
+    } catch (err) {
+        console.error('[briefs] dismiss failed', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/campaign-briefs/:id
+// Hard-delete. Refuses when the brief is tied to a running or deployed
+// campaign (status=sent, or in_wizard with a non-null campaign_id). Briefs
+// still being drafted in the wizard (no campaign_id yet) CAN be deleted.
+app.delete('/api/campaign-briefs/:id', requireAuth, async (req, res) => {
+    try {
+        const { rows: [existing] } = await pool.query(
+            `SELECT id, status, campaign_id FROM campaign_briefs WHERE id = $1`,
+            [req.params.id],
+        );
+        if (!existing) return res.status(404).json({ error: 'brief not found' });
+        if (existing.status === 'sent' || (existing.status === 'in_wizard' && existing.campaign_id)) {
+            return res.status(409).json({
+                error: `cannot delete a brief with status '${existing.status}' — it is tied to an active or deployed campaign`,
+            });
+        }
+        await pool.query(`DELETE FROM campaign_briefs WHERE id = $1`, [req.params.id]);
+        res.json({ ok: true, id: req.params.id });
+    } catch (err) {
+        console.error('[briefs] delete failed', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 process.on('uncaughtException', (err) => {
