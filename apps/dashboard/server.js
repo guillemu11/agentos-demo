@@ -46,6 +46,7 @@ import { deployJourney } from '../../packages/core/journey-builder/deploy.js';
 import { getOrEnrich as enrichCalendarInsights, clearCache as clearCalendarCache } from './server-calendar-ai.js';
 import * as competitorIntelRecon from '../../packages/core/competitor-intel/recon.js';
 import { runChatTurn } from './server/briefs/chatTurn.js';
+import { generateOptions } from './server/briefs/generateOptions.js';
 import { generateOpportunities } from './server/briefs/generateOpportunities.js';
 import * as competitorIntelOAuth from '../../packages/core/competitor-intel/gmail-oauth.js';
 import * as competitorIntelIngestion from '../../packages/core/competitor-intel/gmail-ingestion.js';
