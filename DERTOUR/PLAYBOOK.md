@@ -336,3 +336,106 @@ Lo que sigue expande el playbook genérico con **detalles específicos descubier
 **Si algo se tuerce, para y dime.** No improvises con los datos de persona — la consistencia es lo que permite que la investigación sea comparable entre marcas.
 
 **Empieza por Kuoni.** 15 minutos. Reloj en mano.
+
+---
+
+## 8. Estado real de ejecución — actualizado 2026-04-22 10:55 BST
+
+Esta sección refleja lo que efectivamente pasó, no la planificación. La planificación de arriba se mantiene como histórico de la estrategia inicial.
+
+### Correcciones al plan original (recon errors detectados)
+
+| Plan original | Realidad verificada |
+|---|---|
+| Kuoni `account_hint: false` | ❌ **FALSO** — Kuoni SÍ tiene cuenta self-service en `/account/login/` (ver insight #42) |
+| Inntravel `account_hint: true` | ❌ **FALSO** — Inntravel NO tiene cuenta (solo brochure + newsletter) |
+| CV Villas portal abierto | ❌ **FALSO** — `/mycv/createaccount` requiere booking previo, rechaza subscribers (insight #45) |
+| Carrier = no automation | ❌ **MATIZ** — Carrier SÍ tiene Typeform quiz segmentación, pero no conectado a email pipeline (insight #18 corregido) |
+| Step 2 Kuoni = simple newsletter | ❌ **MATIZ** — Kuoni welcome dispara D365 preferences landing obligatoria post-welcome |
+
+### Estado steps por persona × marca
+
+| Brand | Persona | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|---|
+| Kuoni | Sarah | ✅ | ✅ | ✅ | ✅ | ✅ | ⏳ | ✅ | ⏳ |
+| Kuoni | Tom | ✅ | ✅ | ✅ | ✅ | ✅ | ⏳ | ✅ | ⏳ |
+| Inntravel | Sarah | ✅ | ✅ | ⊘ | ✅ | ⊘ | ⏳ | ✅ | ⏳ |
+| Inntravel | Tom | ✅ | ✅ | ⊘ | ✅ | ⊘ | ⏳ | ✅ | ⏳ |
+| Explore | Sarah | ✅ | ✅ | ⊘ | ✅ | ⊘ asimétrico | ⏳ | ⏳ | ⏳ |
+| Explore | Tom | ✅ | ✅ | ⊘ | ✅ | ✅ | ⏳ | ⏳ en curso | ⏳ |
+| CV Villas | Sarah | ✅ | ✅ | ✅ | ✅ | ⊘ portal-gated | ⏳ | ✅ | ⏳ |
+| CV Villas | Tom | ✅ | ⊘ | ⊘ | ✅ | ⊘ portal-gated | ⏳ | ✅ enquiry | ⏳ |
+| Carrier | Sarah | ✅ | ✅ | ✅ quiz | ✅ | ⊘ no-portal | ⏳ | ✅ quiz=hi | ⏳ |
+| Carrier | Tom | ✅ | ✅ | ✅ quiz | ✅ | ⊘ no-portal | ⏳ | ✅ quiz=hi | ⏳ |
+
+Leyenda: ✅ done · ⊘ skipped (con justificación) · ⏳ pending
+
+### Hallazgos no anticipados en el plan original
+
+1. **Kuoni usa Microsoft Dynamics 365** (públicamente ubicable por URL `public-eur.mkt.dynamics.com`) — confirmado como único ESP del audit con granularidad de preferencias declaradas (insight 11).
+
+2. **Explore usa Emarsys con plantilla congelada desde Oct 2024** — las UTMs delatan que los welcomes no se renuevan desde hace 6 meses (insight 29).
+
+3. **CV Villas tiene radar.ms survey como post-signup DOI** — tercer dominio (cvvillas.radar.ms) con survey tool, hallazgo sorpresa del análisis de URLs (insight 28).
+
+4. **Inntravel Sarah y Tom reciben welcome IDÉNTICO** — misma campaign UTM `Onboarding+Journey+Email+120250512`, mismo `sc_lid`. Evidencia técnica dura de que no segmentan al T0 (insights 12, 27).
+
+5. **Explore Sarah y Tom también reciben welcome idéntico** (predicción pre-registrada confirmada, insight 39).
+
+6. **Kuoni envía auto-ack de enquiry con ~60min batch delay**, no instantáneo como CV Villas (insight 51). Subject template único "Your adventure, our expertise, coming right up" para honeymoon Y adventure — no adapta al enquiry.
+
+7. **CV Villas tiene stack fragmentado**: marketing DB ≠ commerce DB. Un subscriber NO puede crear portal account (insight 45).
+
+8. **Carrier cero emails** incluso 48h+ post-quiz — quiz es captura de datos sin pipeline de email (insight 18 corregido).
+
+9. **Explore hace RESEND automático** de verify email a T+10h si no clicas (insight 50). Es el único brand del audit con re-engagement transaccional automático.
+
+10. **Kuoni verify-click→success-email es sub-segundo** (insight 49). Two-step flow: verify email → click → success email.
+
+### Números globales (2026-04-22 10:55 BST)
+
+- **Total insights:** 52
+- **Total emails ingestados:** 18 (sobre 10 data points Sarah×5 + Tom×5)
+- **Steps done + skipped + pending:** 80 total (40 Sarah + 40 Tom)
+- **High severity insights:** ~25
+- **Marcas con 2+ personas probadas:** 5/5
+
+### Qué queda para viernes
+
+- **Step 7 Explore Tom** — en curso ahora (cart-to-deposit Torres del Paine Oct-Nov 2026)
+- **Step 6 preference centers** — extraer links de footer y clicar (automatizable)
+- **Step 8 cart abandonment** — Explore Tom ya lo hace implícitamente con el deposit abandon. CV Villas Sarah puede simular con villa Mallorca checkout-to-payment.
+- **Scoring manual por brand** — 4 axes sliders + notes
+- **Rehearsal demo** — viernes AM
+
+### Próximas 24h: qué esperar en inboxes
+
+Ventana crítica 2026-04-22 mediodía → 2026-04-23 mediodía. Esperamos:
+- Kuoni email #2 → Sarah y Tom (primera evidencia de si D365 segmenta)
+- Consultant email personalizado CV Villas → Sarah y/o Tom
+- Inntravel reply a quote requests (Sarah luxury Italy, Tom walking Pyrenees)
+- Explore abandonment journey → Tom (si cart-to-deposit abandono queda registrado)
+- Carrier consultant response → uno de los dos (o silencio persistente)
+
+Toda nueva evidencia se registra automáticamente (ingester cada 5min). Los insights se escriben on-demand cuando hay algo comparativo.
+
+---
+
+## 9. Scripts auxiliares ejecutados durante el audit
+
+Scripts usados y eliminados durante la ejecución (no quedan en repo):
+- `_insights-email-analysis.mjs` — 9 insights iniciales de welcome emails
+- `_analysis-phase2.mjs` — parseo deliverability headers + URL resolution
+- `_analysis-phase3.mjs` — insights de UTM campaign timestamps
+- `_kuoni-tom-signup.mjs` — cross-persona Kuoni Tom
+- `_cv-tom-enquiry.mjs` — CV Villas Tom enquiry
+- `_explore-sarah.mjs` — cross-persona Explore Sarah
+- `_carrier-tom.mjs` — Carrier Tom quiz
+- `_update-21-21h14.mjs` — status refresh end-of-day 21/04
+- `_step5-corrections.mjs` — recon corrections + Inntravel/Carrier skip
+- `_step5-execution.mjs` — Kuoni+Explore accounts + CV Villas portal block
+- `_finalize-asymmetric.mjs` — Explore Sarah asymmetric control
+- `_verify-completions.mjs` — verify-click TTFT analysis
+- `_step7-batch.mjs` — 5 step 7 registrados 22/04 AM
+
+Patrón reusable: crear script `.mjs` temporal → `node DERTOUR/_script.mjs && rm` para mantener repo limpio.

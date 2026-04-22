@@ -32,10 +32,9 @@
 - `apps/dashboard/src/pages/CampaignCreationV2/lib/briefsApi.js` — fetch wrappers
 
 **New files (backend / data):**
-- `apps/dashboard/migrations/2026-04-22-campaign-briefs.sql`
+- `apps/dashboard/migrations/202604220001_campaign-briefs.sql`
 - `apps/dashboard/src/data/mockSignals.js`
-- `apps/dashboard/server/briefs/` — new folder
-  - `apps/dashboard/server/briefs/router.js` — Express router mounted at `/api/campaign-briefs`
+- `apps/dashboard/server/briefs/` — helper modules only (no router — endpoints live inline in server.js per project rule 5)
   - `apps/dashboard/server/briefs/chatTurn.js` — Claude tool-use for setup chat
   - `apps/dashboard/server/briefs/generateOptions.js` — Claude for 3 content options
   - `apps/dashboard/server/briefs/generateOpportunities.js` — mock signals → Claude reasoning
