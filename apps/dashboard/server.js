@@ -11760,8 +11760,9 @@ app.patch('/api/campaign-briefs/:id', requireAuth, async (req, res) => {
         const allowed = [
             'name','objective','send_date','template_id','markets','languages',
             'variants_plan','audience_summary','status','accepted_option','campaign_id',
+            'wizard_state',
         ];
-        const jsonbFields = new Set(['markets','languages','variants_plan','accepted_option']);
+        const jsonbFields = new Set(['markets','languages','variants_plan','accepted_option','wizard_state']);
         const updates = [];
         const params = [];
         for (const key of allowed) {
@@ -11931,6 +11932,30 @@ app.post('/api/campaign-briefs/:id/dismiss', requireAuth, async (req, res) => {
         res.json({ brief: rows[0] });
     } catch (err) {
         console.error('[briefs] dismiss failed', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/campaign-briefs/:id
+// Hard-delete. Refuses when the brief is tied to a running or deployed
+// campaign (status=sent, or in_wizard with a non-null campaign_id). Briefs
+// still being drafted in the wizard (no campaign_id yet) CAN be deleted.
+app.delete('/api/campaign-briefs/:id', requireAuth, async (req, res) => {
+    try {
+        const { rows: [existing] } = await pool.query(
+            `SELECT id, status, campaign_id FROM campaign_briefs WHERE id = $1`,
+            [req.params.id],
+        );
+        if (!existing) return res.status(404).json({ error: 'brief not found' });
+        if (existing.status === 'sent' || (existing.status === 'in_wizard' && existing.campaign_id)) {
+            return res.status(409).json({
+                error: `cannot delete a brief with status '${existing.status}' — it is tied to an active or deployed campaign`,
+            });
+        }
+        await pool.query(`DELETE FROM campaign_briefs WHERE id = $1`, [req.params.id]);
+        res.json({ ok: true, id: req.params.id });
+    } catch (err) {
+        console.error('[briefs] delete failed', err);
         res.status(500).json({ error: err.message });
     }
 });
