@@ -290,3 +290,76 @@
 /* Spinner */
 @keyframes cc2-spin { to { transform: rotate(360deg); } }
 .cc2-spin { animation: cc2-spin 0.9s linear infinite; }
+
+/* Options grid */
+.cc2-options-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+}
+
+.cc2-option-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: 10px; overflow: hidden; padding: 0;
+  color: var(--text-main); text-align: left;
+  font-family: inherit; cursor: pointer;
+  transition: border-color 0.15s, transform 0.05s;
+}
+.cc2-option-card:hover  { border-color: var(--color-ai); }
+.cc2-option-card:active { transform: translateY(1px); }
+
+.cc2-option-card__thumb {
+  height: 160px;
+  position: relative;
+  display: flex; align-items: flex-end; padding: 12px;
+}
+.cc2-option-card__thumb.dir-editorial  { background: linear-gradient(135deg, var(--primary), #4b1d1d); }
+.cc2-option-card__thumb.dir-data-grid  { background: linear-gradient(135deg, #06b6d4, #164e63); }
+.cc2-option-card__thumb.dir-emotional  { background: linear-gradient(135deg, var(--accent-yellow), #78350f); }
+.cc2-option-card__letter {
+  font-size: 36px; font-weight: 800; color: rgba(255,255,255,0.92);
+  line-height: 1;
+}
+
+.cc2-option-card__body { padding: 12px; }
+.cc2-option-card__dir {
+  font-size: 10px; font-weight: 700;
+  color: var(--color-ai); letter-spacing: 0.05em;
+}
+.cc2-option-card__headline {
+  font-size: 14px; font-weight: 600; margin-top: 4px;
+  color: var(--text-main);
+}
+.cc2-option-card__mood {
+  font-size: 12px; color: var(--text-muted); margin-top: 6px;
+  line-height: 1.4;
+}
+
+/* Preview modal */
+.cc2-modal--wide { width: 900px; }
+.cc2-option-preview { display: grid; grid-template-columns: 360px 1fr; gap: 16px; }
+.cc2-option-preview__frame {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 8px; padding: 12px;
+}
+.cc2-option-preview__label {
+  font-size: 10px; color: var(--text-muted);
+  text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.05em;
+}
+.cc2-option-preview__mock {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  padding: 16px; border-radius: 6px;
+}
+.cc2-option-preview__mock h3 {
+  margin: 0 0 8px 0; font-size: 18px; color: var(--text-main);
+}
+.cc2-option-preview__preheader {
+  color: var(--text-muted); font-size: 12px;
+  margin: 0 0 12px 0;
+}
+.cc2-option-preview__mock p {
+  font-size: 13px; line-height: 1.6; color: var(--text-main);
+  margin: 0 0 12px 0;
+}
+.cc2-option-preview__mock--wide { font-size: 14px; }
