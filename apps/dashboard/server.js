@@ -46,6 +46,7 @@ import { deployJourney } from '../../packages/core/journey-builder/deploy.js';
 import { getOrEnrich as enrichCalendarInsights, clearCache as clearCalendarCache } from './server-calendar-ai.js';
 import * as competitorIntelRecon from '../../packages/core/competitor-intel/recon.js';
 import { runChatTurn } from './server/briefs/chatTurn.js';
+import { generateOpportunities } from './server/briefs/generateOpportunities.js';
 import * as competitorIntelOAuth from '../../packages/core/competitor-intel/gmail-oauth.js';
 import * as competitorIntelIngestion from '../../packages/core/competitor-intel/gmail-ingestion.js';
 import * as competitorIntelClassifierLLM from '../../packages/core/competitor-intel/classifier-llm.js';
@@ -10339,9 +10340,53 @@ app.patch('/api/campaign-briefs/:id', requireAuth, async (req, res) => {
     }
 });
 
-// POST /api/campaign-briefs/ai-opportunities/regenerate — phase 5
-app.post('/api/campaign-briefs/ai-opportunities/regenerate', requireAuth, (req, res) => {
-    res.status(501).json({ error: 'not implemented — phase 5' });
+// POST /api/campaign-briefs/ai-opportunities/regenerate
+app.post('/api/campaign-briefs/ai-opportunities/regenerate', requireAuth, async (req, res) => {
+    try {
+        // Clear existing AI drafts — keep activated/dismissed ones untouched
+        await pool.query(`DELETE FROM campaign_briefs WHERE source = 'ai' AND status = 'draft'`);
+
+        // Load signals of already-handled AI briefs so we don't suggest them again
+        const { rows: existing } = await pool.query(
+            `SELECT opportunity_signals FROM campaign_briefs
+             WHERE source = 'ai' AND status IN ('active','in_wizard','sent','dismissed')`,
+        );
+        const exclude = existing.map(r => r.opportunity_signals).filter(Boolean);
+
+        const briefs = await generateOpportunities({
+            count: 4,
+            exclude,
+            apiKey: process.env.ANTHROPIC_API_KEY,
+        });
+
+        const inserted = [];
+        for (const b of briefs) {
+            const { rows: [row] } = await pool.query(
+                `INSERT INTO campaign_briefs
+                   (source, status, name, audience_summary, opportunity_reason,
+                    opportunity_signals, preview_image_url, send_date, template_id,
+                    markets, languages)
+                 VALUES ('ai', 'draft', $1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb, $9::jsonb)
+                 RETURNING *`,
+                [
+                    b.name,
+                    b.audience_summary,
+                    b.opportunity_reason,
+                    JSON.stringify(b.opportunity_signals),
+                    b.preview_image_url,
+                    b.suggested_send_date,
+                    b.template_id,
+                    JSON.stringify(b.markets || []),
+                    JSON.stringify(b.languages || []),
+                ],
+            );
+            inserted.push(row);
+        }
+        res.json({ briefs: inserted });
+    } catch (err) {
+        console.error('[briefs] ai-opportunities/regenerate failed', err);
+        res.status(502).json({ error: 'AI service error', detail: err.message });
+    }
 });
 
 // POST /api/campaign-briefs/:id/chat/turn
