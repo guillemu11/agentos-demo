@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, RefreshCw, Sparkles, User } from 'lucide-react';
 import BriefCard from './components/BriefCard.jsx';
+import BriefDetailModal from './components/BriefDetailModal.jsx';
 import { briefsApi } from './lib/briefsApi.js';
 
 export default function BriefsBoard() {
@@ -103,29 +104,10 @@ export default function BriefsBoard() {
       </section>
 
       {openBriefId && (
-        /* BriefDetailModal lands in Task 2.5. Leaving the slot wired. */
-        <div
-          className="cc2-modal-backdrop"
-          onClick={() => { setOpenBriefId(null); load(); }}
-          style={{ cursor: 'pointer' }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-elevated)',
-              padding: 24,
-              borderRadius: 12,
-              maxWidth: 480,
-              color: 'var(--text-main)',
-              fontSize: 13,
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            Brief detail modal coming in Task 2.5. Click the backdrop to close.
-            <div style={{ marginTop: 8, color: 'var(--text-muted)' }}>
-              id: {openBriefId}
-            </div>
-          </div>
-        </div>
+        <BriefDetailModal
+          briefId={openBriefId}
+          onClose={() => { setOpenBriefId(null); load(); }}
+        />
       )}
     </div>
   );
