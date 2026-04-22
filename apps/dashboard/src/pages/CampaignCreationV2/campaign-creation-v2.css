@@ -574,3 +574,55 @@
 }
 
 .cc2-wiz-review h3 { margin: 0 0 8px 0; color: var(--text-main); }
+
+/* Accepted-option preview mock inside BriefDetailModal */
+.cc2-preview-mock {
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 20px;
+  background: var(--bg-elevated);
+}
+.cc2-preview-mock__label {
+  background: var(--bg-card);
+  padding: 8px 12px;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.05em; color: var(--text-muted);
+  border-bottom: 1px solid var(--border-light);
+}
+.cc2-preview-mock__body { padding: 16px; }
+.cc2-preview-mock__subject {
+  font-size: 15px; font-weight: 600;
+  color: var(--text-main); margin-bottom: 4px;
+}
+.cc2-preview-mock__preheader {
+  font-size: 12px; color: var(--text-muted); margin-bottom: 12px;
+}
+.cc2-preview-mock__headline {
+  margin: 0 0 8px 0; font-size: 18px; color: var(--text-main);
+}
+.cc2-preview-mock__copy {
+  font-size: 13px; color: var(--text-main);
+  line-height: 1.5; margin: 0 0 14px 0; white-space: pre-wrap;
+}
+
+/* Danger button (Delete) — two-click confirm */
+.cc2-btn--danger {
+  color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.3);
+}
+.cc2-btn--danger:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: #dc2626;
+}
+.cc2-btn--danger.is-armed {
+  background: #dc2626;
+  color: #fff;
+  border-color: #dc2626;
+}
+.cc2-btn--danger:disabled {
+  color: var(--text-muted);
+  border-color: var(--border-light);
+  background: transparent;
+  opacity: 0.6;
+}
