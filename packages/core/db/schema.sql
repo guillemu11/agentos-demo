@@ -947,3 +947,6 @@ DROP TRIGGER IF EXISTS campaign_briefs_touch ON campaign_briefs;
 CREATE TRIGGER campaign_briefs_touch
   BEFORE UPDATE ON campaign_briefs
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- Wizard working state (added 2026-04-22)
+ALTER TABLE campaign_briefs ADD COLUMN IF NOT EXISTS wizard_state JSONB;
