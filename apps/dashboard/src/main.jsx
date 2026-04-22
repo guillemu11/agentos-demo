@@ -32,6 +32,7 @@ import EmailStudioPage from './pages/EmailStudioPage.jsx';
 import BlockStudioPage from './pages/BlockStudioPage.jsx';
 import UnifiedStudioPage from './pages/UnifiedStudioPage.jsx';
 import CampaignCreationPage from './pages/CampaignCreationPage.jsx';
+import CampaignCreationV2Page from './pages/CampaignCreationV2Page.jsx';
 import PreviewTestPage from './pages/PreviewTestPage.jsx';
 import CompetitorAnalysisPage from './pages/CompetitorAnalysisPage.jsx';
 import BrandAuditPage from './pages/BrandAuditPage.jsx';
@@ -137,6 +138,7 @@ createRoot(document.getElementById('root')).render(
                       <Route path="/email-studio" element={<EmailStudioPage />} />
                       <Route path="/content-studio" element={<ContentStudioPage />} />
                       <Route path="/campaign-creation" element={<CampaignCreationPage />} />
+                      <Route path="/campaign-creation-v2" element={<CampaignCreationV2Page />} />
                       <Route path="/preview-test" element={<PreviewTestPage />} />
                       <Route path="/competitor-analysis" element={<CompetitorAnalysisPage />} />
                       <Route path="/brand-audit" element={<BrandAuditPage />} />

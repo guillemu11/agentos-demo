@@ -8348,6 +8348,1454 @@ async function listMcAssets(mc, { assetTypeIds, searchTerm, folderId, page = 1, 
     return { items, count: merged.length, page, pageSize, ...(items.length === 0 && firstError ? { error: firstError } : {}) };
 }
 
+// ═══════════════════════════════════════════════════════════════
+// MC Data Extension rows — used by Create Campaign wizard
+// CP 46476 reads from DEs: BAU campaigns, markets, languages
+// Falls back to hardcoded defaults if MC unreachable (demo mode)
+// ═══════════════════════════════════════════════════════════════
+
+// Fast path: read DE rows via REST (requires CustomerKey, returns paginated JSON)
+async function retrieveDERowsREST(mc, customerKey, pageSize = 200) {
+    const path = `/data/v1/customobjectdata/key/${encodeURIComponent(customerKey)}/rowset?$top=${pageSize}`;
+    const resp = await mc.rest('GET', path);
+    if (!resp?.items) return [];
+    return resp.items.map(r => r.values || r);
+}
+
+// Search for a DE by partial name (SOAP Name LIKE) — returns list of { name, key }
+async function findDEByName(mc, namePattern) {
+    const soapXml = `<RetrieveRequestMsg xmlns="http://exacttarget.com/wsdl/partnerAPI">
+    <RetrieveRequest>
+      <ObjectType>DataExtension</ObjectType>
+      <Properties>Name</Properties>
+      <Properties>CustomerKey</Properties>
+      <Properties>CreatedDate</Properties>
+      <Filter xsi:type="SimpleFilterPart" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <Property>Name</Property>
+        <SimpleOperator>like</SimpleOperator>
+        <Value>${namePattern}</Value>
+      </Filter>
+    </RetrieveRequest>
+  </RetrieveRequestMsg>`;
+
+    const xml = await mc.soap('Retrieve', soapXml);
+    const names = [...xml.matchAll(/<Name>([^<]+)<\/Name>/g)].map(m => m[1]);
+    const keys = [...xml.matchAll(/<CustomerKey>([^<]+)<\/CustomerKey>/g)].map(m => m[1]);
+    return names.map((n, i) => ({ name: n, key: keys[i] || n }));
+}
+
+// Try to find a DE by multiple candidate name patterns and return its rows
+async function retrieveDEByCandidates(mc, candidates, properties, { preferNewest = true } = {}) {
+    for (const pattern of candidates) {
+        try {
+            const des = await findDEByName(mc, pattern);
+            if (!des.length) continue;
+            // Prefer the newest-looking match — SOAP returns oldest-first, so take last
+            const target = preferNewest ? des[des.length - 1] : des[0];
+            const rows = await retrieveDERowsREST(mc, target.key, 500);
+            return { rows, de: target };
+        } catch (e) {
+            console.warn(`[mc-de] candidate "${pattern}" failed:`, e.message);
+        }
+    }
+    return { rows: [], de: null };
+}
+
+// In-memory cache — 10 min TTL — avoids hammering MC on every wizard load
+const _deCache = new Map();
+function cacheGet(key) {
+    const hit = _deCache.get(key);
+    if (!hit) return null;
+    if (Date.now() - hit.at > 10 * 60 * 1000) { _deCache.delete(key); return null; }
+    return hit.value;
+}
+function cacheSet(key, value) { _deCache.set(key, { at: Date.now(), value }); }
+
+// Fetch a Content Block (AMPscript source) by asset ID — useful to inspect
+// which DEs the CB references (e.g. content block 46476 drives wizard dropdowns)
+app.get('/api/campaign-brief/content-block/:id', requireAuth, async (req, res) => {
+    try {
+        const mc = await getEmailBuilderMCClient();
+        if (!mc) return res.status(503).json({ error: 'MC client not configured' });
+        const asset = await mc.rest('GET', `/asset/v1/content/assets/${encodeURIComponent(req.params.id)}`);
+        // Extract all LookupRows("DE_Name", ...) / LookupOrderedRows / DataExtension.Init references
+        const code = asset?.content || asset?.customerKey || '';
+        const deRefs = [...(code.matchAll?.(/Lookup(?:Ordered)?Rows\s*\(\s*["']([^"']+)["']/g) || [])].map(m => m[1]);
+        const initRefs = [...(code.matchAll?.(/DataExtension\.Init\s*\(\s*["']([^"']+)["']/g) || [])].map(m => m[1]);
+        const allDEs = [...new Set([...deRefs, ...initRefs])];
+        res.json({
+            id: asset?.id,
+            name: asset?.name,
+            customerKey: asset?.customerKey,
+            assetType: asset?.assetType?.name,
+            modifiedDate: asset?.modifiedDate,
+            dataExtensions: allDEs,
+            content: asset?.content,
+        });
+    } catch (err) {
+        console.error('[content-block] error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ───────────────────────────────────────────────────────────
+// BAU campaign types
+// Source priority:
+//   1. EDBS_Templates DE (SFMC — authoritative template types)
+//   2. Local BAU_CAMPAIGN_TYPES catalog (enriched with categories,
+//      perf history, typical agents) — merged if a local entry
+//      matches by templateType
+// ───────────────────────────────────────────────────────────
+app.get('/api/campaign-brief/bau-campaigns', requireAuth, async (req, res) => {
+    const cached = cacheGet('bau');
+    if (cached) return res.json({ items: cached, cached: true });
+
+    // Load local enriched catalog
+    let localCatalog = [];
+    try {
+        const mod = await import('../../apps/dashboard/src/data/emiratesBauTypes.js');
+        localCatalog = mod.BAU_CAMPAIGN_TYPES || [];
+    } catch (e) {
+        console.warn('[bau-campaigns] local catalog not loaded:', e.message);
+    }
+
+    // Try SFMC first for the template types
+    let mcTemplates = [];
+    let mcSource = null;
+    try {
+        const mc = await getEmailBuilderMCClient();
+        if (mc) {
+            const rows = await retrieveDERowsREST(mc, 'EDBS_Templates', 500);
+            mcTemplates = rows.map(r => ({
+                id: r.id || r.Id,
+                templateType: r.templatetype || r.TemplateType || r.Name,
+            })).filter(t => t.templateType);
+            mcSource = 'EDBS_Templates';
+        }
+    } catch (e) {
+        console.warn('[bau-campaigns] SFMC lookup failed:', e.message);
+    }
+
+    // Merge: local catalog is the UI source of truth. For each item,
+    // flag whether it has a matching SFMC template (= deployable as-is)
+    const items = localCatalog.map(bau => {
+        const mcMatch = mcTemplates.find(t =>
+            t.templateType.toLowerCase() === bau.name.toLowerCase() ||
+            t.templateType.toLowerCase().includes(bau.name.toLowerCase())
+        );
+        return {
+            id: bau.id,
+            name: bau.name,
+            category: bau.category,
+            frequency: bau.frequency,
+            complexity: bau.complexity,
+            description: bau.description,
+            defaultSegments: bau.defaultSegments || [],
+            templateTypeId: mcMatch?.id || null,
+            hasSfmcTemplate: !!mcMatch,
+            perf: bau.recentCampaigns?.[0]
+                ? { openRate: bau.recentCampaigns[0].openRate, ctr: bau.recentCampaigns[0].ctr }
+                : null,
+        };
+    });
+
+    // Also append any SFMC templates that aren't in the local catalog
+    for (const t of mcTemplates) {
+        const already = items.some(i => i.name.toLowerCase() === t.templateType.toLowerCase());
+        if (!already) {
+            items.push({
+                id: `mc-${t.id || t.templateType.toLowerCase().replace(/\s+/g, '-')}`,
+                name: t.templateType,
+                category: 'offers',
+                hasSfmcTemplate: true,
+                templateTypeId: t.id,
+                description: 'SFMC template only (no local catalog entry)',
+            });
+        }
+    }
+
+    cacheSet('bau', items);
+    res.json({
+        items,
+        cached: false,
+        source: mcSource ? `${mcSource} + local catalog` : 'local catalog',
+        mcTemplateCount: mcTemplates.length,
+        localCatalogCount: localCatalog.length,
+    });
+});
+
+// ───────────────────────────────────────────────────────────
+// Markets — Emirates doesn't have a single "markets" DE.
+// We use the curated fallback list covering all served markets.
+// ───────────────────────────────────────────────────────────
+app.get('/api/campaign-brief/markets', requireAuth, async (req, res) => {
+    const cached = cacheGet('markets');
+    if (cached) return res.json({ items: cached, cached: true });
+    cacheSet('markets', MARKETS_FALLBACK);
+    res.json({ items: MARKETS_FALLBACK, source: 'curated' });
+});
+
+// ───────────────────────────────────────────────────────────
+// Languages — read from REF_Language_cross_reference DE
+// Columns: language (PK), lang_code, per_language, country_code,
+//          culture_code, content_code, isactive
+// ───────────────────────────────────────────────────────────
+app.get('/api/campaign-brief/languages', requireAuth, async (req, res) => {
+    const cached = cacheGet('languages');
+    if (cached) return res.json({ items: cached, cached: true });
+
+    try {
+        const mc = await getEmailBuilderMCClient();
+        if (!mc) throw new Error('MC not configured');
+
+        const rows = await retrieveDERowsREST(mc, 'REF_Language_cross_reference', 500);
+        if (!rows.length) throw new Error('REF_Language_cross_reference returned no rows');
+
+        // Dedup by lang_code — there are multi-country duplicates (e.g. EN/GB, EN/US)
+        const byCode = new Map();
+        for (const r of rows) {
+            if (String(r.isactive).toLowerCase() !== 'true') continue;
+            const code = String(r.lang_code || r.content_code || '').trim().toUpperCase();
+            if (!code) continue;
+            const name = r.per_language
+                ? r.per_language.charAt(0) + r.per_language.slice(1).toLowerCase()
+                : r.language || code;
+            // Prefer the first entry we see for this code
+            if (!byCode.has(code)) {
+                byCode.set(code, {
+                    code,
+                    name,
+                    cultureCode: r.culture_code || '',
+                    countryCode: r.country_code || '',
+                    contentFolder: r.content_folder || '',
+                });
+            }
+        }
+
+        const items = [...byCode.values()].sort((a, b) => a.name.localeCompare(b.name));
+        cacheSet('languages', items);
+        res.json({ items, source: 'REF_Language_cross_reference' });
+    } catch (err) {
+        console.warn('[languages] falling back to curated list:', err.message);
+        res.json({ items: LANGUAGES_FALLBACK, fallback: true, reason: err.message });
+    }
+});
+
+// ───────────────────────────────────────────────────────────
+// Airports — read from REF_Airport_Desc_By_Language DE
+// Filtered to EN language rows only (one row per airport that way)
+// Plus: curated placeholders per market for demo speed
+// ───────────────────────────────────────────────────────────
+const AIRPORTS_PLACEHOLDER_BY_MARKET = {
+    AE: [
+        { code: 'DXB', name: 'Dubai International' },
+        { code: 'DWC', name: 'Al Maktoum (Dubai World Central)' },
+        { code: 'AUH', name: 'Abu Dhabi International' },
+    ],
+    GB: [
+        { code: 'LHR', name: 'London Heathrow' },
+        { code: 'LGW', name: 'London Gatwick' },
+        { code: 'STN', name: 'London Stansted' },
+        { code: 'MAN', name: 'Manchester' },
+        { code: 'BHX', name: 'Birmingham' },
+        { code: 'EDI', name: 'Edinburgh' },
+        { code: 'GLA', name: 'Glasgow' },
+        { code: 'NCL', name: 'Newcastle' },
+    ],
+    US: [
+        { code: 'JFK', name: 'New York JFK' },
+        { code: 'EWR', name: 'Newark' },
+        { code: 'LAX', name: 'Los Angeles' },
+        { code: 'SFO', name: 'San Francisco' },
+        { code: 'IAD', name: 'Washington Dulles' },
+        { code: 'ORD', name: "Chicago O'Hare" },
+        { code: 'BOS', name: 'Boston' },
+        { code: 'MIA', name: 'Miami' },
+        { code: 'DFW', name: 'Dallas / Fort Worth' },
+        { code: 'IAH', name: 'Houston' },
+        { code: 'SEA', name: 'Seattle' },
+    ],
+    FR: [
+        { code: 'CDG', name: 'Paris Charles de Gaulle' },
+        { code: 'ORY', name: 'Paris Orly' },
+        { code: 'NCE', name: 'Nice Côte d’Azur' },
+        { code: 'LYS', name: 'Lyon' },
+    ],
+    DE: [
+        { code: 'FRA', name: 'Frankfurt' },
+        { code: 'MUC', name: 'Munich' },
+        { code: 'DUS', name: 'Düsseldorf' },
+        { code: 'HAM', name: 'Hamburg' },
+        { code: 'BER', name: 'Berlin Brandenburg' },
+    ],
+    AU: [
+        { code: 'SYD', name: 'Sydney' },
+        { code: 'MEL', name: 'Melbourne' },
+        { code: 'BNE', name: 'Brisbane' },
+        { code: 'PER', name: 'Perth' },
+        { code: 'ADL', name: 'Adelaide' },
+    ],
+    CA: [
+        { code: 'YYZ', name: 'Toronto Pearson' },
+        { code: 'YUL', name: 'Montréal-Trudeau' },
+        { code: 'YVR', name: 'Vancouver' },
+    ],
+    IN: [
+        { code: 'BOM', name: 'Mumbai' },
+        { code: 'DEL', name: 'Delhi' },
+        { code: 'BLR', name: 'Bengaluru' },
+        { code: 'HYD', name: 'Hyderabad' },
+        { code: 'MAA', name: 'Chennai' },
+        { code: 'COK', name: 'Kochi' },
+        { code: 'AMD', name: 'Ahmedabad' },
+        { code: 'CCU', name: 'Kolkata' },
+    ],
+    SA: [
+        { code: 'RUH', name: 'Riyadh' },
+        { code: 'JED', name: 'Jeddah' },
+        { code: 'DMM', name: 'Dammam' },
+    ],
+    JP: [
+        { code: 'NRT', name: 'Tokyo Narita' },
+        { code: 'HND', name: 'Tokyo Haneda' },
+        { code: 'KIX', name: 'Osaka Kansai' },
+    ],
+    SG: [
+        { code: 'SIN', name: 'Singapore Changi' },
+    ],
+    ES: [
+        { code: 'MAD', name: 'Madrid Barajas' },
+        { code: 'BCN', name: 'Barcelona' },
+    ],
+    IT: [
+        { code: 'FCO', name: 'Rome Fiumicino' },
+        { code: 'MXP', name: 'Milan Malpensa' },
+        { code: 'VCE', name: 'Venice' },
+    ],
+    BR: [
+        { code: 'GRU', name: 'São Paulo Guarulhos' },
+        { code: 'GIG', name: 'Rio de Janeiro' },
+    ],
+    ZA: [
+        { code: 'JNB', name: 'Johannesburg' },
+        { code: 'CPT', name: 'Cape Town' },
+        { code: 'DUR', name: 'Durban' },
+    ],
+};
+
+app.get('/api/campaign-brief/airports', requireAuth, async (req, res) => {
+    const market = (req.query.market || '').toString().trim().toUpperCase();
+    const cacheKey = `airports:${market || 'ALL'}`;
+    const cached = cacheGet(cacheKey);
+    if (cached) return res.json({ items: cached, cached: true });
+
+    // If a specific market is requested, return the curated placeholder list
+    // — faster and enough for the demo
+    if (market && AIRPORTS_PLACEHOLDER_BY_MARKET[market]) {
+        const items = AIRPORTS_PLACEHOLDER_BY_MARKET[market].map(a => ({
+            code: a.code,
+            name: a.name,
+            market,
+        }));
+        cacheSet(cacheKey, items);
+        return res.json({ items, source: 'placeholder' });
+    }
+
+    // Otherwise, try the live DE — filter by EN to avoid dups across languages,
+    // and optional by country_code if a market was provided
+    try {
+        const mc = await getEmailBuilderMCClient();
+        if (!mc) throw new Error('MC not configured');
+
+        // The airport DE has a composite key — the REST endpoint returns up to 2500/page.
+        // With ~200k+ rows we need the per-lang restriction + optional country filter.
+        const deKey = 'A4FCD2AE-E672-4D82-A0DD-0730348D3AAB'; // REF_Airport_Desc_By_Language
+        const rows = await retrieveDERowsREST(mc, deKey, 2500);
+        const byCode = new Map();
+        for (const r of rows) {
+            const lang = String(r.iso_lang || '').toUpperCase();
+            if (lang && lang !== 'EN') continue;
+            const country = String(r.country_code || '').toUpperCase();
+            if (market && country !== market) continue;
+            const code = String(r.airport_code || r.iata_code || '').toUpperCase();
+            if (!code) continue;
+            if (!byCode.has(code)) {
+                byCode.set(code, {
+                    code,
+                    name: r.airport_name || r.airport_long_name || code,
+                    market: country,
+                    isEk: String(r.is_ek).toLowerCase() === 'true',
+                });
+            }
+        }
+        const items = [...byCode.values()].sort((a, b) => a.code.localeCompare(b.code));
+        cacheSet(cacheKey, items);
+        res.json({ items, source: 'REF_Airport_Desc_By_Language' });
+    } catch (err) {
+        // Fallback to the union of all placeholders
+        const all = [];
+        for (const [mkt, arr] of Object.entries(AIRPORTS_PLACEHOLDER_BY_MARKET)) {
+            if (market && market !== mkt) continue;
+            for (const a of arr) all.push({ ...a, market: mkt });
+        }
+        res.json({ items: all, fallback: true, reason: err.message });
+    }
+});
+
+// ───────────────────────────────────────────────────────────
+// Market → Language compatibility map
+// (server-side so the cascading logic is shared / testable)
+// Based on Emirates content folder practice + business rules
+// ───────────────────────────────────────────────────────────
+const MARKET_LANGUAGE_MAP = {
+    AE: ['EN', 'AR'],
+    SA: ['EN', 'AR'],
+    GB: ['EN'],
+    US: ['EN', 'EN-US'],
+    CA: ['EN', 'EN-US', 'FR'],
+    FR: ['EN', 'FR'],
+    DE: ['EN', 'DE'],
+    AU: ['EN'],
+    IN: ['EN', 'HI'],
+    JP: ['EN', 'JA'],
+    SG: ['EN', 'ZH'],
+    ES: ['EN', 'ES'],
+    IT: ['EN', 'IT'],
+    BR: ['EN', 'PT'],
+    ZA: ['EN'],
+};
+
+app.get('/api/campaign-brief/market-languages', requireAuth, async (req, res) => {
+    const market = (req.query.market || '').toString().trim().toUpperCase();
+    if (!market) return res.json({ items: [] });
+    const codes = MARKET_LANGUAGE_MAP[market] || ['EN'];
+    res.json({ items: codes.map(c => ({ code: c })), market });
+});
+
+// ───────────────────────────────────────────────────────────
+// Email blocks catalog + renderer
+// Each block is a real Emirates HTML template with AMPscript vars.
+// Frontend sends { blockId, vars } — server returns interpolated HTML.
+// ───────────────────────────────────────────────────────────
+// Helpers to infer field UI type from the variable name.
+// These conventions come from the Emirates blocks themselves — "_body" fields
+// are rich text, "_image" are image URLs, "_link" are URLs, everything else is a single-line input.
+// Robust JSON extraction from Claude text output.
+// Handles: code-fenced ```json blocks, trailing commas, single backslash in
+// strings (common when AI copies AMPscript syntax), and truncated output
+// that left a dangling string — we close it with a quote + rebalance braces.
+function extractJsonFromText(text) {
+    if (!text) throw new Error('empty response');
+    let src = text.trim();
+
+    // Strip ```json ... ``` or ``` ... ``` fences
+    src = src.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+
+    // Find first { and last } — use greedy match bounds
+    const first = src.indexOf('{');
+    const last = src.lastIndexOf('}');
+    if (first < 0) throw new Error('no JSON object found');
+    let slice = last > first ? src.slice(first, last + 1) : src.slice(first);
+
+    const tryParse = s => { try { return JSON.parse(s); } catch { return null; } };
+
+    // 1. Raw
+    let parsed = tryParse(slice);
+    if (parsed) return parsed;
+
+    // 2. Remove trailing commas before } or ]
+    let cleaned = slice.replace(/,(\s*[}\]])/g, '$1');
+    parsed = tryParse(cleaned);
+    if (parsed) return parsed;
+
+    // 3. Escape stray backslashes (common when copy includes URLs or AMPscript)
+    cleaned = cleaned.replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+    parsed = tryParse(cleaned);
+    if (parsed) return parsed;
+
+    // 4. Truncation recovery: close an unterminated string and rebalance braces/brackets
+    const openCurly = (cleaned.match(/\{/g) || []).length;
+    const closeCurly = (cleaned.match(/\}/g) || []).length;
+    const openSq = (cleaned.match(/\[/g) || []).length;
+    const closeSq = (cleaned.match(/\]/g) || []).length;
+
+    // Count unescaped quotes — odd means string is still open
+    let quoteCount = 0;
+    for (let i = 0; i < cleaned.length; i++) {
+        if (cleaned[i] === '"' && cleaned[i - 1] !== '\\') quoteCount++;
+    }
+    let repaired = cleaned;
+    if (quoteCount % 2 === 1) repaired += '"';
+    repaired = repaired.replace(/,\s*$/, '');
+    for (let i = 0; i < openSq - closeSq; i++) repaired += ']';
+    for (let i = 0; i < openCurly - closeCurly; i++) repaired += '}';
+    parsed = tryParse(repaired);
+    if (parsed) return parsed;
+
+    throw new Error('JSON parse failed after all repair attempts');
+}
+
+// Call Claude and extract structured JSON using the tool_use mechanism
+// so Anthropic returns guaranteed-valid JSON (vs. text matching).
+async function callClaudeWithJsonSchema({ system, user, schema, toolName = 'return_result', maxTokens = 4096 }) {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default;
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const msg = await anthropic.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: maxTokens,
+        system,
+        tools: [{ name: toolName, description: 'Return the structured result', input_schema: schema }],
+        tool_choice: { type: 'tool', name: toolName },
+        messages: [{ role: 'user', content: user }],
+    });
+    const toolBlock = msg.content?.find(c => c.type === 'tool_use');
+    if (toolBlock?.input) return toolBlock.input;
+    // Fallback — text parsing with repair
+    const textBlock = msg.content?.find(c => c.type === 'text');
+    if (textBlock?.text) return extractJsonFromText(textBlock.text);
+    throw new Error('no usable content in Claude response');
+}
+
+function _inferFieldType(name) {
+    const n = name.toLowerCase();
+    if (n.endsWith('_image') || n === 'image' || n === 'hero_image') return 'image';
+    if (n.endsWith('_body') || n === 'body_copy' || n === 'copywrite') return 'textarea';
+    if (n.endsWith('_link') || n === 'link' || n === 'url' || n.endsWith('_url1') || n.endsWith('_url2')) return 'url';
+    if (n.endsWith('_alias')) return 'alias';
+    return 'text';
+}
+function _labelize(name) {
+    return name
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase())
+        .replace(/\bCta\b/g, 'CTA')
+        .replace(/\bUrl\b/g, 'URL')
+        .replace(/\bIata\b/g, 'IATA')
+        .replace(/\bSkw\b/g, 'Skywards');
+}
+function _field(name, extras = {}) {
+    return {
+        name,
+        label: extras.label || _labelize(name),
+        type: extras.type || _inferFieldType(name),
+        default: extras.default || '',
+    };
+}
+
+// Catalog — the fields here are derived from the real AMPscript vars in each
+// email_blocks/*.html file. `_alias` fields are used as accessibility labels in
+// AMPscript and are hidden from the UI (we include them in defaults only).
+const EMAIL_BLOCK_CATALOG = [
+    // ── Structure ──────────────────────────────────────────────────────────
+    { id: 'ebase_header', file: 'Ebase_header.html', label: 'Header (Emirates)', category: 'structure', fields: [
+        _field('vawp_text', { label: 'View-in-browser text', default: 'View in browser' }),
+        _field('header_logo_link', { label: 'Logo URL', type: 'url', default: 'https://www.emirates.com' }),
+        _field('join_skw_text', { label: 'Join Skywards text', default: 'Join Emirates Skywards' }),
+        _field('join_skw_link', { label: 'Join Skywards URL', type: 'url', default: 'https://www.emirates.com/skywards' }),
+    ]},
+    { id: 'skw_header', file: 'skw_header.html', label: 'Header (Skywards — static)', category: 'structure', fields: [] },
+    { id: 'global_footer', file: 'Global_footer.html', label: 'Footer', category: 'structure', fields: [
+        _field('contactus_text', { label: 'Contact-us text', default: 'Contact us' }),
+        _field('contactus_link', { label: 'Contact-us URL', type: 'url', default: 'https://www.emirates.com/english/help/contact-us/' }),
+        _field('privacy_text', { label: 'Privacy text', default: 'Privacy policy' }),
+        _field('privacy_link', { label: 'Privacy URL', type: 'url', default: 'https://www.emirates.com/english/help/privacy-policy/' }),
+        _field('unsub_text', { label: 'Unsubscribe text', default: 'Unsubscribe' }),
+        _field('unsub_link', { label: 'Unsubscribe URL', type: 'url', default: '%%unsub_center_url%%' }),
+        _field('copywrite', { label: 'Copyright notice', type: 'textarea', default: '© Emirates' }),
+        _field('logo_link', { label: 'Logo URL', type: 'url', default: 'https://www.emirates.com' }),
+    ]},
+
+    // ── Hero / headers ─────────────────────────────────────────────────────
+    { id: 'global_hero_image', file: 'Global_Hero_Image.html', label: 'Hero image', category: 'hero', fields: [
+        _field('hero_image', { label: 'Image URL', type: 'image' }),
+        _field('hero_image_title', { label: 'Image alt text' }),
+        _field('hero_image_link', { label: 'Image link URL', type: 'url' }),
+    ]},
+    { id: 'global_header_title_v1', file: 'Global_header_title_v1.html', label: 'Header title v1 (title only)', category: 'hero', fields: [
+        _field('main_header', { label: 'Main title' }),
+    ]},
+    { id: 'global_header_title_v2', file: 'Global_Header_Title_v2.html', label: 'Header title v2 (subheader + title + CTA)', category: 'hero', fields: [
+        _field('main_subheader', { label: 'Subheader', default: 'TRAVEL INSPIRATION' }),
+        _field('main_header', { label: 'Main title' }),
+        _field('main_cta', { label: 'CTA label', default: 'Book now' }),
+        _field('main_link', { label: 'CTA URL', type: 'url' }),
+    ]},
+    { id: 'global_header_title_v3', file: 'Global_Header_Title_v3.html', label: 'Header title v3 (subheader + title)', category: 'hero', fields: [
+        _field('main_subheader', { label: 'Subheader', default: 'TRAVEL INSPIRATION' }),
+        _field('main_header', { label: 'Main title' }),
+    ]},
+
+    // ── Body / copy ────────────────────────────────────────────────────────
+    { id: 'global_body_copy', file: 'Global_body_copy.html', label: 'Body copy', category: 'body', fields: [
+        _field('body_copy', { label: 'Body text', type: 'textarea' }),
+    ]},
+    { id: 'global_body_copy_cta_red', file: 'Global_Body_Copy_CTA_red.html', label: 'Body + CTA (red)', category: 'body', fields: [
+        _field('body_copy', { label: 'Body text', type: 'textarea' }),
+        _field('body_cta', { label: 'CTA label', default: 'Book now' }),
+        _field('body_link', { label: 'CTA URL', type: 'url' }),
+    ]},
+    { id: 'global_body_copy_cta_black', file: 'Global_Body_Copy_CTA_black.html', label: 'Body + CTA (black)', category: 'body', fields: [
+        _field('body_copy', { label: 'Body text', type: 'textarea' }),
+        _field('body_cta', { label: 'CTA label', default: 'Explore' }),
+        _field('main_link', { label: 'CTA URL', type: 'url' }),
+    ]},
+    { id: 'global_section_title', file: 'Global_Section_Title.html', label: 'Section title', category: 'body', fields: [
+        _field('section_title', { label: 'Title' }),
+    ]},
+    { id: 'global_info_block', file: 'Global_info_block.html', label: 'Info block (text + image + link)', category: 'body', fields: [
+        _field('body_copy', { label: 'Body text', type: 'textarea' }),
+        _field('image', { label: 'Image URL', type: 'image' }),
+        _field('link', { label: 'Link URL', type: 'url' }),
+    ]},
+    { id: 'global_info_multiicons2', file: 'Global_info_multiIcons2.html', label: 'Info (multi-icons — static)', category: 'body', fields: [] },
+
+    // ── Offer blocks ───────────────────────────────────────────────────────
+    { id: 'global_offer_block', file: 'Global_offer_block.html', label: 'Offer block (with CTA)', category: 'offer', fields: [
+        _field('offer_block_header', { label: 'Offer header' }),
+        _field('offer_block_body', { label: 'Offer body', type: 'textarea' }),
+        _field('offer_block_cta_text', { label: 'CTA label', default: 'Book now' }),
+        _field('offer_block_cta_link', { label: 'CTA URL', type: 'url' }),
+    ]},
+    { id: 'global_offer_block_nocta', file: 'Global_Offer_Block_noCTA.html', label: 'Offer block (no CTA button)', category: 'offer', fields: [
+        _field('offer_block_header', { label: 'Offer header' }),
+        _field('offer_block_body', { label: 'Offer body', type: 'textarea' }),
+        _field('offer_block_cta_link', { label: 'Click-through URL', type: 'url' }),
+    ]},
+    { id: 'global_offer_block_nocta_subheader', file: 'Global_Offer_Block_noCTA_subheader.html', label: 'Offer (subheader + header + body)', category: 'offer', fields: [
+        _field('offer_block_subheader', { label: 'Subheader' }),
+        _field('offer_block_header', { label: 'Header' }),
+        _field('offer_block_body', { label: 'Body', type: 'textarea' }),
+        _field('offer_block_cta_link', { label: 'Click-through URL', type: 'url' }),
+    ]},
+    { id: 'en_global_offer_block_nocta_subheader', file: 'EN_Global_Offer_Block_noCTA_subheader.html', label: 'Offer (no CTA, EN-global)', category: 'offer', fields: [
+        _field('offer_block_subheader', { label: 'Subheader' }),
+        _field('offer_block_header', { label: 'Header' }),
+        _field('offer_block_body', { label: 'Body', type: 'textarea' }),
+        _field('offer_block_cta_link', { label: 'Click-through URL', type: 'url' }),
+    ]},
+    { id: 'global_offer_area', file: 'Global_offer_area.html', label: 'Offer area (image + sub-image)', category: 'offer', fields: [
+        _field('offer_area_main_image', { label: 'Main image', type: 'image' }),
+        _field('offer_area_sub_image', { label: 'Sub image', type: 'image' }),
+        _field('offer_area_subheader', { label: 'Subheader' }),
+        _field('offer_area_header', { label: 'Header' }),
+        _field('offer_header', { label: 'Secondary header' }),
+        _field('offer_area_body', { label: 'Body', type: 'textarea' }),
+        _field('offer_area_link', { label: 'CTA URL', type: 'url' }),
+    ]},
+    { id: 'global_offer_area_noimage', file: 'Global_offer_area_noImage.html', label: 'Offer area (no main image)', category: 'offer', fields: [
+        _field('offer_area_sub_image', { label: 'Sub image', type: 'image' }),
+        _field('offer_area_subheader', { label: 'Subheader' }),
+        _field('offer_area_header', { label: 'Header' }),
+        _field('offer_area_body', { label: 'Body', type: 'textarea' }),
+        _field('offer_area_link', { label: 'CTA URL', type: 'url' }),
+    ]},
+    { id: 'card_single_full', file: 'Card_Single_Full.html', label: 'Single full card', category: 'offer', fields: [
+        _field('offer_block_header', { label: 'Header' }),
+        _field('offer_block_body', { label: 'Body', type: 'textarea' }),
+        _field('offer_block_cta_text', { label: 'CTA label', default: 'Book now' }),
+        _field('offer_block_cta_link', { label: 'CTA URL', type: 'url' }),
+    ]},
+    { id: 'offers_card_double', file: 'offers_card_double.html', label: 'Double offers card (with image)', category: 'offer', fields: [
+        _field('offer_image', { label: 'Main offer image', type: 'image' }),
+        _field('offer_header', { label: 'Main offer header' }),
+        _field('offer_body', { label: 'Main offer body', type: 'textarea' }),
+        _field('offer_link', { label: 'Main offer URL', type: 'url' }),
+        _field('embedded_link_cta', { label: 'Embedded CTA label' }),
+        _field('embedded_link', { label: 'Embedded CTA URL', type: 'url' }),
+        _field('sub_offer1_header', { label: 'Sub-offer 1 header' }),
+        _field('sub_offer1_body', { label: 'Sub-offer 1 body', type: 'textarea' }),
+        _field('sub_offer1_link', { label: 'Sub-offer 1 URL', type: 'url' }),
+        _field('sub_offer2_header', { label: 'Sub-offer 2 header' }),
+        _field('sub_offer2_body', { label: 'Sub-offer 2 body', type: 'textarea' }),
+        _field('sub_offer2_link', { label: 'Sub-offer 2 URL', type: 'url' }),
+    ]},
+    { id: 'offers_card_double_noimage', file: 'offers_card_double_NoImage.html', label: 'Double offers card (no image)', category: 'offer', fields: [
+        _field('offer_header', { label: 'Main offer header' }),
+        _field('offer_body', { label: 'Main offer body', type: 'textarea' }),
+        _field('offer_link', { label: 'Main offer URL', type: 'url' }),
+        _field('embedded_link_cta', { label: 'Embedded CTA label' }),
+        _field('embedded_link', { label: 'Embedded CTA URL', type: 'url' }),
+        _field('sub_offer1_header', { label: 'Sub-offer 1 header' }),
+        _field('sub_offer1_body', { label: 'Sub-offer 1 body', type: 'textarea' }),
+        _field('sub_offer1_link', { label: 'Sub-offer 1 URL', type: 'url' }),
+        _field('sub_offer2_header', { label: 'Sub-offer 2 header' }),
+        _field('sub_offer2_body', { label: 'Sub-offer 2 body', type: 'textarea' }),
+        _field('sub_offer2_link', { label: 'Sub-offer 2 URL', type: 'url' }),
+    ]},
+
+    // ── CTAs ───────────────────────────────────────────────────────────────
+    { id: 'global_cta_red', file: 'Global_CTA_red.html', label: 'CTA button (red)', category: 'cta', fields: [
+        _field('cta', { label: 'Label', default: 'Book now' }),
+        _field('link', { label: 'URL', type: 'url' }),
+    ]},
+    { id: 'global_cta_black', file: 'Global_CTA_black.html', label: 'CTA button (black)', category: 'cta', fields: [
+        _field('cta', { label: 'Label', default: 'Explore' }),
+        _field('link', { label: 'URL', type: 'url' }),
+    ]},
+    { id: '3ctas_block', file: '3CTAs_block.html', label: '3 CTAs row', category: 'cta', fields: [
+        _field('cta1', { label: 'CTA 1 label' }),
+        _field('cta1_link', { label: 'CTA 1 URL', type: 'url' }),
+        _field('cta2', { label: 'CTA 2 label' }),
+        _field('cta2_link', { label: 'CTA 2 URL', type: 'url' }),
+        _field('cta3', { label: 'CTA 3 label' }),
+        _field('cta3_link', { label: 'CTA 3 URL', type: 'url' }),
+    ]},
+
+    // ── Story blocks ───────────────────────────────────────────────────────
+    { id: 'global_single_story_left_attached', file: 'Global_Single_Story_Left_Attached.html', label: 'Single story (image left, with CTA)', category: 'story', fields: [
+        _field('story_single_image', { label: 'Image URL', type: 'image' }),
+        _field('story_single_subheader', { label: 'Subheader' }),
+        _field('story_single_header', { label: 'Header' }),
+        _field('story_single_body', { label: 'Body', type: 'textarea' }),
+        _field('story_single_cta', { label: 'CTA label', default: 'Read more' }),
+        _field('story_single_link', { label: 'CTA URL', type: 'url' }),
+    ]},
+    { id: 'global_single_story_nosubheader', file: 'Global_Single_Story_noSubheader.html', label: 'Single story (no subheader)', category: 'story', fields: [
+        _field('story_single_image', { label: 'Image URL', type: 'image' }),
+        _field('story_single_header', { label: 'Header' }),
+        _field('story_single_body', { label: 'Body', type: 'textarea' }),
+        _field('story_single_cta', { label: 'CTA label', default: 'Read more' }),
+        _field('story_single_link', { label: 'CTA URL', type: 'url' }),
+    ]},
+    { id: 'global_single_story_left_noctanosub', file: 'Global_Single_Story_Left_noCTAnoSub.html', label: 'Single story (no CTA, no subheader)', category: 'story', fields: [
+        _field('story_single_image', { label: 'Image URL', type: 'image' }),
+        _field('story_single_header', { label: 'Header' }),
+        _field('story_single_body', { label: 'Body', type: 'textarea' }),
+        _field('story_single_link', { label: 'Click-through URL', type: 'url' }),
+    ]},
+    { id: 'global_double_story', file: 'Global_Double_Story.html', label: 'Double story', category: 'story', fields: [
+        _field('story_double_image1', { label: 'Image 1 URL', type: 'image' }),
+        _field('story_double_subheader1', { label: 'Subheader 1' }),
+        _field('story_double_header1', { label: 'Header 1' }),
+        _field('story_double_body1', { label: 'Body 1', type: 'textarea' }),
+        _field('story_double_url1', { label: 'Click-through URL 1', type: 'url' }),
+        _field('story_double_image2', { label: 'Image 2 URL', type: 'image' }),
+        _field('story_double_subheader2', { label: 'Subheader 2' }),
+        _field('story_double_header2', { label: 'Header 2' }),
+        _field('story_double_body2', { label: 'Body 2', type: 'textarea' }),
+        _field('story_double_url2', { label: 'Click-through URL 2', type: 'url' }),
+    ]},
+    { id: 'global_double_story_wcta', file: 'Global_Double_Story_wCTA.html', label: 'Double story (with CTA)', category: 'story', fields: [
+        _field('story_double_image1', { label: 'Image 1 URL', type: 'image' }),
+        _field('story_double_subheader1', { label: 'Subheader 1' }),
+        _field('story_double_header1', { label: 'Header 1' }),
+        _field('story_double_body1', { label: 'Body 1', type: 'textarea' }),
+        _field('story_double_cta1', { label: 'CTA 1', default: 'Discover' }),
+        _field('story_double_url1', { label: 'CTA 1 URL', type: 'url' }),
+        _field('story_double_image2', { label: 'Image 2 URL', type: 'image' }),
+        _field('story_double_subheader2', { label: 'Subheader 2' }),
+        _field('story_double_header2', { label: 'Header 2' }),
+        _field('story_double_body2', { label: 'Body 2', type: 'textarea' }),
+        _field('story_double_cta2', { label: 'CTA 2', default: 'Discover' }),
+        _field('story_double_url2', { label: 'CTA 2 URL', type: 'url' }),
+    ]},
+    { id: '3columns_story_triple', file: '3columns_story_triple.html', label: 'Triple story (3 cols, with body)', category: 'story', fields: [
+        _field('story1_image', { label: 'Image 1', type: 'image' }),
+        _field('story1_header', { label: 'Header 1' }),
+        _field('story1_body', { label: 'Body 1', type: 'textarea' }),
+        _field('story1_link', { label: 'URL 1', type: 'url' }),
+        _field('story2_image', { label: 'Image 2', type: 'image' }),
+        _field('story2_header', { label: 'Header 2' }),
+        _field('story2_body', { label: 'Body 2', type: 'textarea' }),
+        _field('story2_link', { label: 'URL 2', type: 'url' }),
+        _field('story3_image', { label: 'Image 3', type: 'image' }),
+        _field('story3_header', { label: 'Header 3' }),
+        _field('story3_body', { label: 'Body 3', type: 'textarea' }),
+        _field('story3_link', { label: 'URL 3', type: 'url' }),
+    ]},
+    { id: '3columns_story_triple_nobody', file: '3Columns_Story_Triple_noBody.html', label: 'Triple story (no body)', category: 'story', fields: [
+        _field('story1_image', { label: 'Image 1', type: 'image' }),
+        _field('story1_header', { label: 'Header 1' }),
+        _field('story1_link', { label: 'URL 1', type: 'url' }),
+        _field('story2_image', { label: 'Image 2', type: 'image' }),
+        _field('story2_header', { label: 'Header 2' }),
+        _field('story2_link', { label: 'URL 2', type: 'url' }),
+        _field('story3_image', { label: 'Image 3', type: 'image' }),
+        _field('story3_header', { label: 'Header 3' }),
+        _field('story3_link', { label: 'URL 3', type: 'url' }),
+    ]},
+    { id: 'global_story_right_circle_btn', file: 'Global_story_right_circle_btn.html', label: 'Story (circle, right)', category: 'story', fields: [
+        _field('story_right_circle_image', { label: 'Image URL', type: 'image' }),
+        _field('story_right_circle_header', { label: 'Header' }),
+        _field('story_right_circle_body', { label: 'Body', type: 'textarea' }),
+        _field('story_right_circle_cta', { label: 'CTA label', default: 'Explore' }),
+        _field('story_right_circle_link', { label: 'CTA URL', type: 'url' }),
+    ]},
+    { id: 'story_left_circle', file: 'story_left_circle.html', label: 'Story (circle, left — no CTA)', category: 'story', fields: [
+        _field('story_left_circle_image', { label: 'Image URL', type: 'image' }),
+        _field('story_left_circle_header', { label: 'Header' }),
+        _field('story_left_circle_body', { label: 'Body', type: 'textarea' }),
+        _field('story_left_circle_link', { label: 'Click-through URL', type: 'url' }),
+    ]},
+    { id: 'story_left_circle_btn', file: 'story_left_circle_btn.html', label: 'Story (circle, left — with CTA)', category: 'story', fields: [
+        _field('story_left_circle_image', { label: 'Image URL', type: 'image' }),
+        _field('story_left_circle_header', { label: 'Header' }),
+        _field('story_left_circle_body', { label: 'Body', type: 'textarea' }),
+        _field('story_left_circle_cta', { label: 'CTA label', default: 'Read more' }),
+        _field('story_left_circle_link', { label: 'CTA URL', type: 'url' }),
+    ]},
+    { id: 'global_article_block', file: 'Global_Article_Block.html', label: 'Article block', category: 'story', fields: [
+        _field('article_image', { label: 'Image URL', type: 'image' }),
+        _field('article_header', { label: 'Header' }),
+        _field('article_body', { label: 'Body', type: 'textarea' }),
+        _field('article_link', { label: 'Click-through URL', type: 'url' }),
+    ]},
+    { id: 'global_article_image_nosubheader', file: 'Global_Article_image_NoSubheader.html', label: 'Article (image, no subheader)', category: 'story', fields: [
+        _field('article_image', { label: 'Image URL', type: 'image' }),
+        _field('article_header', { label: 'Header' }),
+        _field('article_body', { label: 'Body', type: 'textarea' }),
+        _field('article_link', { label: 'Click-through URL', type: 'url' }),
+    ]},
+
+    // ── Layout helpers ─────────────────────────────────────────────────────
+    { id: '2_columns_block', file: '2_columns_block.html', label: '2 columns (products)', category: 'layout', fields: [
+        _field('product1_image', { label: 'Product 1 image', type: 'image' }),
+        _field('product1_header', { label: 'Product 1 header' }),
+        _field('product1_body', { label: 'Product 1 body', type: 'textarea' }),
+        _field('product1_link', { label: 'Product 1 URL', type: 'url' }),
+        _field('product2_image', { label: 'Product 2 image', type: 'image' }),
+        _field('product2_header', { label: 'Product 2 header' }),
+        _field('product2_body', { label: 'Product 2 body', type: 'textarea' }),
+        _field('product2_link', { label: 'Product 2 URL', type: 'url' }),
+    ]},
+    { id: 'infographic_left', file: 'InfoGraphic_Left.html', label: 'Infographic (image left)', category: 'layout', fields: [
+        _field('infographic_left_image', { label: 'Image URL', type: 'image' }),
+        _field('infographic_left_subheader', { label: 'Subheader' }),
+        _field('infographic_left_header', { label: 'Header' }),
+        _field('infographic_left_body', { label: 'Body', type: 'textarea' }),
+        _field('infographic_left_link', { label: 'Click-through URL', type: 'url' }),
+    ]},
+    { id: 'infographic_right', file: 'InfoGraphic_Right.html', label: 'Infographic (image right)', category: 'layout', fields: [
+        _field('infographic_right_image', { label: 'Image URL', type: 'image' }),
+        _field('infographic_right_subheader', { label: 'Subheader' }),
+        _field('infographic_right_header', { label: 'Header' }),
+        _field('infographic_right_body', { label: 'Body', type: 'textarea' }),
+        _field('infographic_right_link', { label: 'Click-through URL', type: 'url' }),
+    ]},
+
+    // ── Specialty ──────────────────────────────────────────────────────────
+    { id: 'flight_route', file: 'Flight_Route.html', label: 'Flight route info', category: 'specialty', fields: [
+        _field('origin_iata', { label: 'Origin IATA', default: 'DXB' }),
+        _field('origin_airport_name', { label: 'Origin airport', default: 'Dubai' }),
+        _field('destination_iata', { label: 'Destination IATA', default: 'LHR' }),
+        _field('destination_airport_name', { label: 'Destination airport', default: 'London Heathrow' }),
+        _field('departure_date', { label: 'Departure date' }),
+        _field('departure_time', { label: 'Departure time' }),
+        _field('departure_day', { label: 'Departure day' }),
+        _field('arrival_date', { label: 'Arrival date' }),
+        _field('arrival_time', { label: 'Arrival time' }),
+        _field('arrival_day', { label: 'Arrival day' }),
+        _field('duration', { label: 'Duration' }),
+        _field('flight_route_dept', { label: 'Dept label', default: 'Departing' }),
+        _field('flight_route_arrv', { label: 'Arrv label', default: 'Arriving' }),
+    ]},
+    { id: 'partner_block', file: 'partner_block.html', label: 'Partner block', category: 'specialty', fields: [
+        _field('partner_block_image', { label: 'Partner image', type: 'image' }),
+        _field('partner_block_body', { label: 'Partner body', type: 'textarea' }),
+        _field('partner_block_link', { label: 'Partner URL', type: 'url' }),
+    ]},
+];
+
+app.get('/api/email-blocks/catalog', requireAuth, (req, res) => {
+    res.json({ items: EMAIL_BLOCK_CATALOG });
+});
+
+app.get('/api/email-blocks/:id/template', requireAuth, async (req, res) => {
+    const def = EMAIL_BLOCK_CATALOG.find(b => b.id === req.params.id);
+    if (!def) return res.status(404).json({ error: 'block not found' });
+
+    const filePath = path.join(__dirname, '..', '..', 'email_blocks', def.file);
+    try {
+        const raw = fs.readFileSync(filePath, 'utf8');
+        res.json({ id: def.id, label: def.label, fields: def.fields, template: raw });
+    } catch (e) {
+        res.status(500).json({ error: `cannot read ${def.file}: ${e.message}` });
+    }
+});
+
+// Render a composition — array of { blockId, vars } → full HTML
+app.post('/api/email-blocks/render', requireAuth, async (req, res) => {
+    try {
+        const { blocks = [], shell = true } = req.body || {};
+        const { replaceAmpscriptVars, cleanTemplateShell } = await import('../../packages/core/email-builder/ampscript.js');
+
+        let bodyHtml = '';
+        for (const b of blocks) {
+            const def = EMAIL_BLOCK_CATALOG.find(x => x.id === b.blockId);
+            if (!def) continue;
+            const filePath = path.join(__dirname, '..', '..', 'email_blocks', def.file);
+            const raw = fs.readFileSync(filePath, 'utf8');
+            // Fill missing vars with defaults from the schema
+            const vars = { ...Object.fromEntries(def.fields.map(f => [f.name, f.default || ''])), ...(b.vars || {}) };
+            bodyHtml += replaceAmpscriptVars(raw, vars);
+        }
+
+        if (!shell) return res.json({ html: bodyHtml });
+
+        // Wrap in the Emirates template shell
+        let shellHtml = '';
+        try {
+            const shellPath = path.join(__dirname, '..', '..', 'email_blocks', 'template_style.html');
+            const rawShell = fs.readFileSync(shellPath, 'utf8');
+            shellHtml = cleanTemplateShell(rawShell);
+        } catch { /* ignore */ }
+
+        const fullHtml = shellHtml.includes('{{CONTENT}}')
+            ? shellHtml.replace('{{CONTENT}}', bodyHtml)
+            : `<!doctype html><html><head><meta charset="utf-8"><style>${shellHtml}</style></head><body>${bodyHtml}</body></html>`;
+
+        res.json({ html: fullHtml });
+    } catch (err) {
+        console.error('[email-blocks/render] error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ───────────────────────────────────────────────────────────
+// AI drafts — 3 proposals for an empty variant
+// Each draft = { label, rationale, subject, preheader, blocks: [...] }
+// ───────────────────────────────────────────────────────────
+app.post('/api/email-blocks/drafts', requireAuth, async (req, res) => {
+    try {
+        const { variant, campaign = {}, count = 3 } = req.body || {};
+        if (!variant) return res.status(400).json({ error: 'variant required' });
+
+        const blockList = EMAIL_BLOCK_CATALOG
+            .map(b => `  - ${b.id} [${b.category}] ${b.label} → fields: ${b.fields.map(f => f.name).join(', ') || '(none)'}`)
+            .join('\n');
+
+        const behaviors = (variant.behaviors || []).join(', ') || 'none';
+        const system = `You are an Emirates email marketing specialist. Given a segment variant, produce ${count} full email draft proposals. Each proposal uses a DIFFERENT narrative angle — e.g. urgency, aspirational, proof-driven, minimalist, emotional, incentive-heavy.
+
+Available Emirates email blocks (use these ids exactly):
+${blockList}
+
+Return JSON only, this exact shape:
+{
+  "drafts": [
+    {
+      "label": "Short angle name (2-3 words, Title Case)",
+      "rationale": "One sentence why this works for this segment",
+      "subject": "Email subject (under 60 chars)",
+      "preheader": "Inbox preview text (under 90 chars)",
+      "blocks": [
+        { "blockId": "ebase_header", "vars": {} },
+        { "blockId": "global_header_title_v1", "vars": { "header_subheader": "…", "header_title": "…" } },
+        …
+        { "blockId": "global_footer", "vars": {} }
+      ]
+    }
+  ]
+}
+
+Rules:
+- Always start with a header block and end with global_footer.
+- 4–8 blocks per draft. Vary structure across proposals.
+- Fill text vars (body_copy, *_header, *_body, cta, *_cta_text) with copy tailored to the segment — market/language/tier/behavior aware.
+- For language fields, write in the variant's language code (EN → English, FR → French, AR → Arabic, etc.).
+- Image URLs (hero_image, *_image): leave empty string or use a placeholder like "[[IMAGE:description]]" — another step will fill them.
+- Links (*_link, *_cta_link): use https://www.emirates.com/ for now.`;
+
+        const userMsg = `Variant:
+- market: ${variant.market}
+- language: ${variant.language}
+- tier: ${variant.tier}
+${variant.airport ? `- favorite airport: ${variant.airport}\n` : ''}- behaviors: ${behaviors}
+- segment angle: ${variant.content?.angle || 'Market-tailored messaging'}
+- segment code: ${variant.code}
+
+Campaign context:
+- name: ${campaign.name || ''}
+- BAU type: ${campaign.bauCampaign || campaign.template || ''}
+- business area: ${campaign.businessArea || ''}
+
+Produce ${count} DISTINCT drafts with different angles.`;
+
+        const Anthropic = (await import('@anthropic-ai/sdk')).default;
+        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+        const msg = await anthropic.messages.create({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 4096,
+            system,
+            messages: [{ role: 'user', content: userMsg }],
+        });
+
+        const text = msg.content?.find(c => c.type === 'text')?.text || '';
+        let parsed;
+        try {
+            parsed = extractJsonFromText(text);
+        } catch (e) {
+            return res.status(502).json({ error: `Claude JSON parse: ${e.message}`, raw: text.slice(0, 600) });
+        }
+
+        // Add stable IDs to each block so the UI can update them
+        (parsed.drafts || []).forEach((d, di) => {
+            d.id = `draft_${Date.now()}_${di}`;
+            (d.blocks || []).forEach((b, bi) => {
+                b.id = `b_${Date.now()}_${di}_${bi}`;
+                b.vars = b.vars || {};
+            });
+        });
+
+        res.json(parsed);
+    } catch (err) {
+        console.error('[email-blocks/drafts] error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ───────────────────────────────────────────────────────────
+// Field suggestions — 3 variations for a single field
+// ───────────────────────────────────────────────────────────
+app.post('/api/email-blocks/field-suggestions', requireAuth, async (req, res) => {
+    try {
+        const { variant, fieldName, fieldLabel, currentValue = '', blockLabel = '', count = 3, refine = '' } = req.body || {};
+        if (!variant || !fieldName) return res.status(400).json({ error: 'variant and fieldName required' });
+
+        const behaviors = (variant.behaviors || []).join(', ') || 'none';
+        const system = `You are an Emirates copywriter. Produce ${count} DIFFERENT suggestions for a single email field. Each suggestion has a different angle (urgency, aspirational, proof-driven, emotional, minimal, etc.).
+
+Return JSON only:
+{
+  "suggestions": [
+    { "value": "the actual copy", "angle": "2-3 word angle name" }
+  ]
+}
+
+Rules:
+- Write in the variant's language code (${variant.language}).
+- Be market/tier/behavior-aware.
+- Keep within Emirates brand tone: premium, confident, warm, never pushy.
+${refine ? `- User refinement request: "${refine}"` : ''}`;
+
+        const userMsg = `Field: ${fieldLabel || fieldName} (key: ${fieldName})
+${blockLabel ? `Block context: ${blockLabel}\n` : ''}${currentValue ? `Current value: "${currentValue}"\n` : ''}
+Variant:
+- ${variant.market} / ${variant.language} / ${variant.tier}${variant.airport ? ` / ✈ ${variant.airport}` : ''}
+- behaviors: ${behaviors}
+- angle: ${variant.content?.angle || ''}
+
+Produce ${count} distinct suggestions with different angles.`;
+
+        const Anthropic = (await import('@anthropic-ai/sdk')).default;
+        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+        const msg = await anthropic.messages.create({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 1024,
+            system,
+            messages: [{ role: 'user', content: userMsg }],
+        });
+        const text = msg.content?.find(c => c.type === 'text')?.text || '';
+        try { res.json(extractJsonFromText(text)); }
+        catch (e) { res.status(502).json({ error: `Claude JSON parse: ${e.message}`, raw: text.slice(0, 600) }); }
+    } catch (err) {
+        console.error('[email-blocks/field-suggestions] error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ───────────────────────────────────────────────────────────
+// Layout alternatives — 3 distinct block compositions
+// Preserves user-filled vars where the same field exists
+// ───────────────────────────────────────────────────────────
+app.post('/api/email-blocks/layout-alternatives', requireAuth, async (req, res) => {
+    try {
+        const { variant, currentBlocks = [], count = 3 } = req.body || {};
+        if (!variant) return res.status(400).json({ error: 'variant required' });
+
+        const blockList = EMAIL_BLOCK_CATALOG
+            .map(b => `  - ${b.id} [${b.category}] ${b.label}`)
+            .join('\n');
+
+        const system = `You are an Emirates email designer. Propose ${count} DIFFERENT layout alternatives for a segment. Each uses a different structural approach — minimal emotional, incentive-heavy, social-proof, story-led, offer-stacked, etc.
+
+Available blocks:
+${blockList}
+
+Return JSON only:
+{
+  "layouts": [
+    {
+      "label": "Short layout name (2-3 words)",
+      "rationale": "One sentence why this structure fits the segment",
+      "blocks": [
+        { "blockId": "..." }
+      ]
+    }
+  ]
+}
+
+Rules:
+- 4–8 blocks each, starting with a header and ending with global_footer.
+- Do NOT fill vars — just the ordered list of blockIds. The UI will preserve existing field values when possible.`;
+
+        const userMsg = `Variant: ${variant.market}/${variant.language}/${variant.tier}${variant.airport ? ` ✈${variant.airport}` : ''}, behaviors: ${(variant.behaviors||[]).join(',') || 'none'}, angle: ${variant.content?.angle || ''}
+Current layout: ${currentBlocks.map(b => b.blockId).join(' → ')}
+Produce ${count} DISTINCT alternatives.`;
+
+        const Anthropic = (await import('@anthropic-ai/sdk')).default;
+        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+        const msg = await anthropic.messages.create({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 2048,
+            system,
+            messages: [{ role: 'user', content: userMsg }],
+        });
+        const text = msg.content?.find(c => c.type === 'text')?.text || '';
+        let parsed;
+        try { parsed = extractJsonFromText(text); }
+        catch (e) { return res.status(502).json({ error: `Claude JSON parse: ${e.message}`, raw: text.slice(0, 600) }); }
+        // Add block ids
+        (parsed.layouts || []).forEach((l, li) => {
+            (l.blocks || []).forEach((b, bi) => {
+                b.id = `b_${Date.now()}_${li}_${bi}`;
+                b.vars = {};
+            });
+        });
+        res.json(parsed);
+    } catch (err) {
+        console.error('[email-blocks/layout-alternatives] error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ───────────────────────────────────────────────────────────
+// Fill-all — 3 distinct content fills for the CURRENT layout
+// Respects block order, fills all vars + subject/preheader with a consistent angle
+// ───────────────────────────────────────────────────────────
+app.post('/api/email-blocks/fill-all', requireAuth, async (req, res) => {
+    try {
+        const { variant, campaign = {}, blocks = [], count = 3 } = req.body || {};
+        if (!variant || !blocks.length) return res.status(400).json({ error: 'variant and blocks required' });
+
+        // Build a schema description for each block in the current layout so
+        // Claude knows exactly which fields to fill, in order.
+        const layoutSpec = blocks.map((b, i) => {
+            const def = EMAIL_BLOCK_CATALOG.find(x => x.id === b.blockId);
+            if (!def) return `  ${i + 1}. [unknown] ${b.blockId}`;
+            const fields = def.fields.map(f => `${f.name}${f.type === 'image' ? '(image url)' : f.type === 'textarea' ? '(multi-line)' : ''}`).join(', ') || '(no vars)';
+            return `  ${i + 1}. [${def.category}] ${def.label} (id=${def.id}) → fields: ${fields}`;
+        }).join('\n');
+
+        const behaviors = (variant.behaviors || []).join(', ') || 'none';
+        const system = `You are an Emirates email copywriter. Produce ${count} DIFFERENT complete content fills for a FIXED layout. Each fill uses a different narrative angle (e.g. urgency, aspirational, proof-driven, emotional, minimalist, incentive-heavy). All text goes in the variant's language (${variant.language}).
+
+The layout order and block types are FIXED — you must fill EVERY field of EVERY block plus subject/preheader. Do NOT add or remove blocks.
+
+Layout to fill (${blocks.length} blocks, in order):
+${layoutSpec}
+
+Return JSON only:
+{
+  "fills": [
+    {
+      "label": "2-3 word angle name (Title Case)",
+      "rationale": "One sentence why this works for this segment",
+      "subject": "under 60 chars",
+      "preheader": "under 90 chars",
+      "blocks": [
+        { "blockId": "<same id as layout>", "vars": { /* all fields filled */ } }
+      ]
+    }
+  ]
+}
+
+Rules:
+- Return exactly ${blocks.length} blocks per fill, in the SAME order with the SAME blockId as the layout.
+- Fill ALL text fields with copy tailored to the variant (market/tier/behavior aware).
+- Image URLs: leave empty "" or use placeholder "[[IMAGE:short description]]" — the user picks real images next.
+- Links (*_link): use "https://www.emirates.com/".
+- Brand tone: premium, warm, never pushy. No "buy now" / "last chance".`;
+
+        const userMsg = `Variant:
+- ${variant.market} / ${variant.language} / ${variant.tier}${variant.airport ? ` / ✈ ${variant.airport}` : ''}
+- behaviors: ${behaviors}
+- angle hint: ${variant.content?.angle || 'Market-tailored messaging'}
+- segment code: ${variant.code}
+
+Campaign: ${campaign.name || campaign.bauCampaign || ''} · ${campaign.businessArea || ''}
+
+Produce ${count} DISTINCT full fills with different angles.`;
+
+        const parsed = await callClaudeWithJsonSchema({
+            system,
+            user: userMsg,
+            maxTokens: 8192,
+            toolName: 'return_fills',
+            schema: {
+                type: 'object',
+                required: ['fills'],
+                properties: {
+                    fills: {
+                        type: 'array',
+                        items: {
+                            type: 'object',
+                            required: ['label', 'rationale', 'subject', 'preheader', 'blocks'],
+                            properties: {
+                                label: { type: 'string' },
+                                rationale: { type: 'string' },
+                                subject: { type: 'string' },
+                                preheader: { type: 'string' },
+                                blocks: {
+                                    type: 'array',
+                                    items: {
+                                        type: 'object',
+                                        required: ['blockId', 'vars'],
+                                        properties: {
+                                            blockId: { type: 'string' },
+                                            vars: { type: 'object', additionalProperties: { type: 'string' } },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        // Re-attach stable block ids from the input layout so the UI's block identity
+        // survives (expanded state, image refs, etc.)
+        (parsed.fills || []).forEach((fill, fi) => {
+            fill.id = `fill_${Date.now()}_${fi}`;
+            fill.blocks = (fill.blocks || []).map((b, bi) => ({
+                ...b,
+                id: blocks[bi]?.id || `b_${Date.now()}_${fi}_${bi}`,
+                blockId: blocks[bi]?.blockId || b.blockId, // force source layout
+                vars: b.vars || {},
+            }));
+        });
+
+        res.json(parsed);
+    } catch (err) {
+        console.error('[email-blocks/fill-all] error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ───────────────────────────────────────────────────────────
+// Brand compliance check — runs after a draft is picked or on demand
+// ───────────────────────────────────────────────────────────
+app.post('/api/email-blocks/brand-check', requireAuth, async (req, res) => {
+    try {
+        const { variant, content } = req.body || {};
+        if (!content) return res.status(400).json({ error: 'content required' });
+
+        const blocksSummary = (content.blocks || []).map(b => {
+            const def = EMAIL_BLOCK_CATALOG.find(x => x.id === b.blockId);
+            const varsText = Object.entries(b.vars || {}).map(([k, v]) => `${k}="${String(v).slice(0, 120)}"`).join(', ');
+            return `  - ${def?.label || b.blockId}: ${varsText || '(empty)'}`;
+        }).join('\n');
+
+        const system = `You are the Emirates Brand Guardian. Check an email variant against brand guidelines.
+
+Emirates brand rules (summary):
+- Tone: premium, confident, warm. Never pushy, never generic.
+- Voice: aspirational but accessible. Use "you" and "your". Avoid "buy now", "last chance", "hurry".
+- Copy quality: clear value prop, no filler. Subject under 60 chars. Preheader adds info, doesn't repeat subject.
+- Legal: Skywards mentions must include "Emirates Skywards". Fare claims need conditions.
+- Market-specific: UAE/SA must respect cultural tone. Children/alcohol imagery sensitive in some markets.
+
+Return JSON only:
+{
+  "status": "pass" | "warn" | "fail",
+  "score": 0-100,
+  "checks": [
+    { "label": "Tone", "status": "pass"|"warn"|"fail", "detail": "brief explanation" },
+    { "label": "Copy length", "status": "...", "detail": "..." },
+    { "label": "Legal/compliance", "status": "...", "detail": "..." },
+    { "label": "Market fit", "status": "...", "detail": "..." }
+  ],
+  "summary": "one sentence overall"
+}`;
+
+        const userMsg = `Variant: ${variant?.market || '?'}/${variant?.language || '?'}/${variant?.tier || '?'}
+Subject: "${content.subject || ''}"
+Preheader: "${content.preheader || ''}"
+Blocks:
+${blocksSummary || '(none)'}`;
+
+        const Anthropic = (await import('@anthropic-ai/sdk')).default;
+        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+        const msg = await anthropic.messages.create({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 1024,
+            system,
+            messages: [{ role: 'user', content: userMsg }],
+        });
+        const text = msg.content?.find(c => c.type === 'text')?.text || '';
+        try { res.json(extractJsonFromText(text)); }
+        catch (e) { res.status(502).json({ error: `Claude JSON parse: ${e.message}`, raw: text.slice(0, 600) }); }
+    } catch (err) {
+        console.error('[email-blocks/brand-check] error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ───────────────────────────────────────────────────────────
+// MC pool images — fetch a small sample of images from Content Builder
+// Reused by the image library drawer and by AI image matching
+// ───────────────────────────────────────────────────────────
+const MC_IMAGE_ASSET_TYPES = [8, 9, 11, 22, 23, 27, 28, 29]; // jpg, png, gif, psd, tif, svg, ai, eps
+
+app.get('/api/email-blocks/mc-images', requireAuth, async (req, res) => {
+    const { q = '', pageSize = '24' } = req.query;
+    const cacheKey = `mc-imgs:${q}:${pageSize}`;
+    const cached = cacheGet(cacheKey);
+    if (cached) return res.json({ items: cached, cached: true });
+
+    try {
+        const mc = await getEmailBuilderMCClient();
+        if (!mc) throw new Error('MC not configured');
+
+        const size = Math.min(parseInt(pageSize, 10) || 24, 100);
+        // Simple name filter; MC asset API supports $filter
+        const filterParts = [`(${MC_IMAGE_ASSET_TYPES.map(id => `assetType.id=${id}`).join(' or ')})`];
+        if (q) filterParts.push(`name like '%25${encodeURIComponent(q)}%25'`);
+        const filter = filterParts.join(' and ');
+        const path = `/asset/v1/content/assets?$pageSize=${size}&$page=1&$orderBy=modifiedDate%20desc&$filter=${encodeURIComponent(filter)}`;
+        const r = await mc.rest('GET', path);
+
+        const items = (r?.items || []).map(a => ({
+            id: a.id,
+            name: a.name,
+            url: a.fileProperties?.publishedURL || a.thumbnail?.thumbnailUrl || null,
+            thumbnail: a.thumbnail?.thumbnailUrl || null,
+            width: a.fileProperties?.width,
+            height: a.fileProperties?.height,
+            assetType: a.assetType?.name,
+            modifiedDate: a.modifiedDate,
+        })).filter(i => i.url || i.thumbnail);
+
+        cacheSet(cacheKey, items);
+        res.json({ items, cached: false, source: 'mc' });
+    } catch (err) {
+        console.warn('[mc-images] fallback:', err.message);
+        res.json({ items: [], fallback: true, reason: err.message });
+    }
+});
+
+// Debug endpoint: search DEs by name pattern
+app.get('/api/campaign-brief/find-de', requireAuth, async (req, res) => {
+    const pattern = req.query.q || '%';
+    try {
+        const mc = await getEmailBuilderMCClient();
+        if (!mc) return res.status(503).json({ error: 'MC client not configured' });
+        const des = await findDEByName(mc, pattern);
+        res.json({ pattern, count: des.length, items: des });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Claude-powered brief autofill
+app.post('/api/campaign-brief/generate', requireAuth, async (req, res) => {
+    try {
+        const { prompt, markets = [], languages = [], bauCampaigns = [] } = req.body || {};
+        if (!prompt || typeof prompt !== 'string' || prompt.trim().length < 4) {
+            return res.status(400).json({ error: 'prompt is required' });
+        }
+
+        const Anthropic = (await import('@anthropic-ai/sdk')).default;
+        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+        const marketCodes = markets.map(m => m.code).join(', ') || 'FR, US, GB, DE, AE';
+        const languageCodes = languages.map(l => l.code).join(', ') || 'EN, FR, DE, AR, EN-US';
+        const bauList = bauCampaigns
+            .map(b => `- ${b.name} [${b.category || 'other'}]${b.description ? ': ' + b.description.slice(0, 80) : ''}${b.hasSfmcTemplate ? ' (SFMC ready)' : ''}`)
+            .slice(0, 50)
+            .join('\n');
+
+        const system = `You are a marketing ops assistant for Emirates. You read a user's natural-language brief and output JSON describing the campaign.
+
+BAU campaign types available in the system (pick EXACTLY one name for "bauCampaign"):
+${bauList || 'Partner Offer, Product Offer Ecommerce, Newsletter, Flash Sale, Skywards Offers'}
+
+Available market codes: ${marketCodes}
+Available language codes: ${languageCodes}
+Available tiers: Platinum, Gold, Silver, Blue, Non-member
+Available behavior tags: highly_engaged, dormant_90d, abandoned_cart, vip_whale, win_back, new_subscriber, at_risk, price_sensitive, premium_seeker
+
+Business areas: E-commerce, Skywards, Emirates Holidays, Dubai Experience, Commercial
+
+Return JSON only — no prose, no markdown:
+{
+  "code": "UPPER_SNAKE campaign code, under 40 chars",
+  "name": "YYYYMMDD_MKT_CampaignName pattern",
+  "bauCampaign": "EXACT name from the BAU list above",
+  "template": "same as bauCampaign (the template name)",
+  "businessArea": "one of the business areas above",
+  "deployAt": "ISO8601 datetime (e.g. 2026-02-28T17:00) or empty string",
+  "markets": ["FR"],
+  "languages": ["EN", "FR"],
+  "tiers": ["Gold"],
+  "behaviors": ["highly_engaged"],
+  "reasoning": "1-sentence why you chose these fields"
+}`;
+
+        const msg = await anthropic.messages.create({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 1024,
+            system,
+            messages: [{ role: 'user', content: prompt }],
+        });
+
+        const text = msg.content?.find(c => c.type === 'text')?.text || '';
+        let parsed;
+        try { parsed = extractJsonFromText(text); }
+        catch (e) { return res.status(502).json({ error: `Claude JSON parse: ${e.message}`, raw: text.slice(0, 600) }); }
+        res.json({ brief: parsed });
+    } catch (err) {
+        console.error('[campaign-brief/generate] error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Fallback data — used when MC is unreachable or DE is empty
+const BAU_FALLBACK = [
+    { id: 'po-partner-offer', name: 'Partner Offer', businessArea: 'Skywards', templateType: 'Partner Offer' },
+    { id: 'po-product-offer-ecom', name: 'Product offer ecommerce', businessArea: 'E-commerce', templateType: 'Product offer ecommerce' },
+    { id: 'po-partner-offer-ecom', name: 'Partner Offer ecommerce', businessArea: 'E-commerce', templateType: 'Partner Offer ecommerce' },
+    { id: 'po-promo-generic', name: 'Promotional - Generic', businessArea: 'Emirates Holidays', templateType: 'Promotional - Generic' },
+    { id: 'po-cash-miles', name: 'Cash & Miles', businessArea: 'Skywards', templateType: 'Cash & Miles' },
+    { id: 'po-fare-push', name: 'Fare Push', businessArea: 'E-commerce', templateType: 'Fare Push' },
+    { id: 'po-destination', name: 'Destination Spotlight', businessArea: 'Dubai Experience', templateType: 'Destination Spotlight' },
+    { id: 'po-upgrade', name: 'Upgrade Offer', businessArea: 'Skywards', templateType: 'Upgrade Offer' },
+];
+
+const MARKETS_FALLBACK = [
+    { code: 'AE', name: 'United Arab Emirates', region: 'Middle East' },
+    { code: 'GB', name: 'United Kingdom', region: 'Europe' },
+    { code: 'US', name: 'United States', region: 'Americas' },
+    { code: 'FR', name: 'France', region: 'Europe' },
+    { code: 'DE', name: 'Germany', region: 'Europe' },
+    { code: 'AU', name: 'Australia', region: 'Asia-Pacific' },
+    { code: 'CA', name: 'Canada', region: 'Americas' },
+    { code: 'IN', name: 'India', region: 'Asia-Pacific' },
+    { code: 'SA', name: 'Saudi Arabia', region: 'Middle East' },
+    { code: 'JP', name: 'Japan', region: 'Asia-Pacific' },
+    { code: 'SG', name: 'Singapore', region: 'Asia-Pacific' },
+    { code: 'ES', name: 'Spain', region: 'Europe' },
+    { code: 'IT', name: 'Italy', region: 'Europe' },
+    { code: 'BR', name: 'Brazil', region: 'Americas' },
+    { code: 'ZA', name: 'South Africa', region: 'Africa' },
+];
+
+const LANGUAGES_FALLBACK = [
+    { code: 'EN', name: 'English' },
+    { code: 'EN-US', name: 'English (US)' },
+    { code: 'AR', name: 'Arabic' },
+    { code: 'FR', name: 'French' },
+    { code: 'DE', name: 'German' },
+    { code: 'ES', name: 'Spanish' },
+    { code: 'IT', name: 'Italian' },
+    { code: 'PT', name: 'Portuguese' },
+    { code: 'JA', name: 'Japanese' },
+    { code: 'ZH', name: 'Chinese (Simplified)' },
+    { code: 'RU', name: 'Russian' },
+    { code: 'HI', name: 'Hindi' },
+];
+
 app.get('/api/mc/content-blocks', requireAuth, async (req, res) => {
     try {
         const mc = await getEmailBuilderMCClient();
@@ -10011,28 +11459,29 @@ app.get('/api/competitor-intel/investigations/:id/comparative', async (req, res)
         WHERE e.classification->>'type' NOT IN ('double_opt_in','transactional')
           AND e.brand_id IS NOT NULL
         GROUP BY e.brand_id, e.persona_id
-      ),
-      per_brand AS (
-        SELECT b.id AS brand_id, b.name AS brand_name,
-               MIN(EXTRACT(EPOCH FROM (fu.first_at - st.executed_at))) AS seconds_to_first
-        FROM competitor_brands b
-        LEFT JOIN sub_times st ON st.brand_id = b.id
-        LEFT JOIN first_useful fu ON fu.brand_id = b.id AND fu.persona_id = st.persona_id
-        WHERE b.investigation_id = $1
-        GROUP BY b.id, b.name
       )
-      SELECT * FROM per_brand ORDER BY brand_name
+      SELECT b.id AS brand_id, b.name AS brand_name,
+             p.id AS persona_id, p.name AS persona_name,
+             EXTRACT(EPOCH FROM (fu.first_at - st.executed_at)) AS seconds_to_first
+      FROM competitor_brands b
+      CROSS JOIN competitor_personas p
+      LEFT JOIN sub_times st ON st.brand_id = b.id AND st.persona_id = p.id
+      LEFT JOIN first_useful fu ON fu.brand_id = b.id AND fu.persona_id = p.id
+      WHERE b.investigation_id = $1
+      ORDER BY b.name, p.name
     `, [id]);
 
     const heat = await pool.query(`
       SELECT b.id AS brand_id, b.name AS brand_name,
-             classification->>'type' AS type,
+             e.persona_id, p.name AS persona_name,
+             e.classification->>'type' AS type,
              COUNT(*)::int AS c
       FROM competitor_brands b
       LEFT JOIN competitor_emails e ON e.brand_id = b.id
+      LEFT JOIN competitor_personas p ON p.id = e.persona_id
       WHERE b.investigation_id = $1
-      GROUP BY b.id, b.name, classification->>'type'
-      ORDER BY b.name
+      GROUP BY b.id, b.name, e.persona_id, p.name, e.classification->>'type'
+      ORDER BY b.name, p.name
     `, [id]);
 
     const stages = ['welcome','nurture','triggered_click_followup','re_engagement','abandonment','transactional'];
