@@ -61,3 +61,53 @@
   font-size: 13px;
   line-height: 1.5;
 }
+
+/* BriefCard */
+.cc2-brief-card {
+  width: 100%;
+  text-align: left;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  color: var(--text-main);
+  font-family: inherit;
+  transition: border-color 0.15s, transform 0.05s;
+}
+.cc2-brief-card:hover { border-color: var(--primary); }
+.cc2-brief-card:active { transform: translateY(1px); }
+.cc2-brief-card.is-ai { border-color: var(--color-ai-soft); }
+.cc2-brief-card.is-ai:hover { border-color: var(--color-ai); }
+
+.cc2-brief-card__header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 8px; font-size: 10px;
+}
+.cc2-brief-card__badge {
+  display: inline-flex; gap: 4px; align-items: center;
+  font-weight: 700; letter-spacing: 0.04em;
+}
+.cc2-brief-card__badge.ai    { color: var(--color-ai); }
+.cc2-brief-card__badge.human { color: var(--primary); }
+.cc2-brief-card__status {
+  color: var(--text-muted); text-transform: uppercase;
+  font-weight: 600;
+}
+
+.cc2-brief-card__title {
+  margin: 0 0 6px 0; font-size: 14px; font-weight: 600;
+  color: var(--text-main);
+}
+.cc2-brief-card__reason {
+  margin: 0 0 8px 0; font-size: 12px; color: var(--text-muted);
+  line-height: 1.4;
+}
+.cc2-brief-card__meta {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  font-size: 11px; color: var(--text-muted);
+}
+.cc2-brief-card__meta span {
+  display: inline-flex; gap: 4px; align-items: center;
+}
