@@ -363,3 +363,60 @@
   margin: 0 0 12px 0;
 }
 .cc2-option-preview__mock--wide { font-size: 14px; }
+
+/* Overview */
+.cc2-overview { display: flex; flex-direction: column; gap: 20px; }
+
+.cc2-kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.cc2-kpi-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 14px;
+}
+.cc2-kpi-card.k-muted   { border-left: 3px solid var(--text-muted); }
+.cc2-kpi-card.k-yellow  { border-left: 3px solid var(--accent-yellow); }
+.cc2-kpi-card.k-primary { border-left: 3px solid var(--primary); }
+.cc2-kpi-card.k-green   { border-left: 3px solid var(--accent-green); }
+.cc2-kpi-card__label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.cc2-kpi-card__value {
+  font-size: 28px; font-weight: 700; margin-top: 4px;
+  color: var(--text-main);
+}
+
+.cc2-pipeline {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 14px;
+}
+.cc2-pipeline__title { font-size: 13px; font-weight: 600; margin-bottom: 12px; color: var(--text-main); }
+.cc2-pipeline__table { width: 100%; font-size: 12px; border-collapse: collapse; }
+.cc2-pipeline__table th {
+  text-align: left; color: var(--text-muted);
+  font-weight: 600; padding: 6px 8px;
+  border-bottom: 1px solid var(--border-light);
+}
+.cc2-pipeline__table td {
+  padding: 8px; border-top: 1px solid var(--border-light);
+  color: var(--text-main);
+}
+.cc2-pipeline__empty { text-align: center; padding: 24px; color: var(--text-muted); }
+
+.cc2-source-pill, .cc2-status-pill {
+  display: inline-block;
+  padding: 2px 8px; border-radius: 10px;
+  font-size: 10px; text-transform: uppercase;
+  font-weight: 600;
+}
+.cc2-source-pill.s-human { background: var(--primary-soft); color: var(--primary); }
+.cc2-source-pill.s-ai    { background: var(--color-ai-soft); color: var(--color-ai); }
+
+.cc2-status-pill.s-draft     { background: rgba(107,114,128,0.12); color: var(--text-muted); }
+.cc2-status-pill.s-active    { background: var(--primary-soft); color: var(--primary); }
+.cc2-status-pill.s-in_wizard { background: rgba(212,175,55,0.15); color: var(--accent-yellow); }
+.cc2-status-pill.s-sent      { background: rgba(16,185,129,0.15); color: var(--accent-green); }
+.cc2-status-pill.s-dismissed { background: rgba(107,114,128,0.12); color: var(--text-muted); }
