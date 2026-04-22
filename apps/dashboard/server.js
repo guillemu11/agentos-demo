@@ -45,6 +45,7 @@ import {
 import { deployJourney } from '../../packages/core/journey-builder/deploy.js';
 import { getOrEnrich as enrichCalendarInsights, clearCache as clearCalendarCache } from './server-calendar-ai.js';
 import * as competitorIntelRecon from '../../packages/core/competitor-intel/recon.js';
+import { runChatTurn } from './server/briefs/chatTurn.js';
 import * as competitorIntelOAuth from '../../packages/core/competitor-intel/gmail-oauth.js';
 import * as competitorIntelIngestion from '../../packages/core/competitor-intel/gmail-ingestion.js';
 import * as competitorIntelClassifierLLM from '../../packages/core/competitor-intel/classifier-llm.js';
@@ -10339,9 +10340,68 @@ app.post('/api/campaign-briefs/ai-opportunities/regenerate', requireAuth, (req, 
     res.status(501).json({ error: 'not implemented — phase 5' });
 });
 
-// POST /api/campaign-briefs/:id/chat/turn — phase 3
-app.post('/api/campaign-briefs/:id/chat/turn', requireAuth, (req, res) => {
-    res.status(501).json({ error: 'not implemented — phase 3' });
+// POST /api/campaign-briefs/:id/chat/turn
+app.post('/api/campaign-briefs/:id/chat/turn', requireAuth, async (req, res) => {
+    try {
+        const { message } = req.body || {};
+        if (!message || typeof message !== 'string') {
+            return res.status(400).json({ error: 'message (string) required' });
+        }
+
+        const { rows: [brief] } = await pool.query(
+            `SELECT * FROM campaign_briefs WHERE id = $1`,
+            [req.params.id],
+        );
+        if (!brief) return res.status(404).json({ error: 'brief not found' });
+
+        const { extracted, assistantMessage, newHistory } = await runChatTurn({
+            brief,
+            userMessage: message,
+            apiKey: process.env.ANTHROPIC_API_KEY,
+        });
+
+        // Merge extracted fields — never blank a field that already had a value
+        const mergeable = ['name', 'objective', 'send_date', 'template_id', 'markets',
+                           'languages', 'variants_plan', 'audience_summary'];
+        const jsonbFields = new Set(['markets', 'languages', 'variants_plan']);
+        const merged = {};
+        for (const key of mergeable) {
+            const v = extracted[key];
+            if (v == null) continue;
+            if (Array.isArray(v) && v.length === 0) continue;
+            if (typeof v === 'string' && v.trim() === '') continue;
+            merged[key] = v;
+        }
+        const status = extracted.is_complete ? 'active' : 'draft';
+
+        const setClauses = [];
+        const params = [];
+        for (const [k, v] of Object.entries(merged)) {
+            const val = jsonbFields.has(k) ? JSON.stringify(v) : v;
+            params.push(val);
+            setClauses.push(`${k} = $${params.length}${jsonbFields.has(k) ? '::jsonb' : ''}`);
+        }
+        params.push(JSON.stringify(newHistory));
+        setClauses.push(`chat_transcript = $${params.length}::jsonb`);
+        params.push(status);
+        setClauses.push(`status = $${params.length}`);
+        params.push(req.params.id);
+
+        const { rows: [updated] } = await pool.query(
+            `UPDATE campaign_briefs SET ${setClauses.join(', ')}
+             WHERE id = $${params.length} RETURNING *`,
+            params,
+        );
+
+        res.json({
+            brief: updated,
+            assistantMessage,
+            isComplete: !!extracted.is_complete,
+        });
+    } catch (err) {
+        console.error('[briefs] chat/turn failed', err);
+        res.status(502).json({ error: 'AI service error', detail: err.message });
+    }
 });
 
 // POST /api/campaign-briefs/:id/options/generate — phase 4
