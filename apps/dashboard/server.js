@@ -10251,6 +10251,125 @@ app.get('/api/competitor-intel/investigations/:id/timeline', async (req, res) =>
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Campaign Briefs — /api/campaign-briefs
+// Briefs-first flow hub. Human briefs come from the setup chat; AI briefs are
+// generated from mock signals (see apps/dashboard/src/data/mockSignals.js).
+// Chat turn + option generation + opportunities regeneration are filled in
+// in later tasks; this task wires the CRUD skeleton.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/campaign-briefs?source=human|ai&status=draft,active
+app.get('/api/campaign-briefs', requireAuth, async (req, res) => {
+    try {
+        const { source, status } = req.query;
+        const clauses = [];
+        const params = [];
+        if (source) { params.push(source); clauses.push(`source = $${params.length}`); }
+        if (status) {
+            const list = String(status).split(',').filter(Boolean);
+            if (list.length > 0) {
+                params.push(list);
+                clauses.push(`status = ANY($${params.length})`);
+            }
+        }
+        const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+        const { rows } = await pool.query(
+            `SELECT * FROM campaign_briefs ${where} ORDER BY created_at DESC`,
+            params,
+        );
+        res.json({ briefs: rows });
+    } catch (err) {
+        console.error('[briefs] list failed', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/campaign-briefs — create empty draft (human)
+app.post('/api/campaign-briefs', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session?.userId || null;
+        const { rows } = await pool.query(
+            `INSERT INTO campaign_briefs (created_by, source, status)
+             VALUES ($1, 'human', 'draft') RETURNING *`,
+            [userId],
+        );
+        res.json({ brief: rows[0] });
+    } catch (err) {
+        console.error('[briefs] create failed', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PATCH /api/campaign-briefs/:id
+app.patch('/api/campaign-briefs/:id', requireAuth, async (req, res) => {
+    try {
+        const allowed = [
+            'name','objective','send_date','template_id','markets','languages',
+            'variants_plan','audience_summary','status','accepted_option','campaign_id',
+        ];
+        const jsonbFields = new Set(['markets','languages','variants_plan','accepted_option']);
+        const updates = [];
+        const params = [];
+        for (const key of allowed) {
+            if (key in req.body) {
+                const raw = req.body[key];
+                const v = jsonbFields.has(key) && raw != null ? JSON.stringify(raw) : raw;
+                params.push(v);
+                const cast = jsonbFields.has(key) ? '::jsonb' : '';
+                updates.push(`${key} = $${params.length}${cast}`);
+            }
+        }
+        if (updates.length === 0) return res.status(400).json({ error: 'no fields to update' });
+        params.push(req.params.id);
+        const { rows } = await pool.query(
+            `UPDATE campaign_briefs SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
+            params,
+        );
+        if (!rows[0]) return res.status(404).json({ error: 'not found' });
+        res.json({ brief: rows[0] });
+    } catch (err) {
+        console.error('[briefs] patch failed', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/campaign-briefs/ai-opportunities/regenerate — phase 5
+app.post('/api/campaign-briefs/ai-opportunities/regenerate', requireAuth, (req, res) => {
+    res.status(501).json({ error: 'not implemented — phase 5' });
+});
+
+// POST /api/campaign-briefs/:id/chat/turn — phase 3
+app.post('/api/campaign-briefs/:id/chat/turn', requireAuth, (req, res) => {
+    res.status(501).json({ error: 'not implemented — phase 3' });
+});
+
+// POST /api/campaign-briefs/:id/options/generate — phase 4
+app.post('/api/campaign-briefs/:id/options/generate', requireAuth, (req, res) => {
+    res.status(501).json({ error: 'not implemented — phase 4' });
+});
+
+// POST /api/campaign-briefs/:id/options/accept — phase 4
+app.post('/api/campaign-briefs/:id/options/accept', requireAuth, (req, res) => {
+    res.status(501).json({ error: 'not implemented — phase 4' });
+});
+
+// POST /api/campaign-briefs/:id/dismiss — soft-dismiss an AI brief
+app.post('/api/campaign-briefs/:id/dismiss', requireAuth, async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            `UPDATE campaign_briefs SET status = 'dismissed'
+             WHERE id = $1 AND source = 'ai' RETURNING *`,
+            [req.params.id],
+        );
+        if (!rows[0]) return res.status(404).json({ error: 'not found or not AI' });
+        res.json({ brief: rows[0] });
+    } catch (err) {
+        console.error('[briefs] dismiss failed', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 process.on('uncaughtException', (err) => {
     console.error('[Server] Uncaught exception (keeping process alive):', err.message);
 });
