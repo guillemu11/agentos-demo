@@ -1016,6 +1016,115 @@
     .ci-ttft { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* TTFT — brand card with per-persona split (Sarah vs Tom) */
+.ci-ttft-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: var(--space-3);
+}
+.ci-ttft-brand-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+}
+.ci-ttft-brand-name {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-main);
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--border-light);
+}
+.ci-ttft-personas {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+}
+.ci-ttft-grid .ci-ttft-cell {
+    padding: var(--space-3) var(--space-3);
+    gap: 2px;
+}
+.ci-ttft-grid .ci-ttft-cell .ci-ttft-persona {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    opacity: 0.85;
+}
+.ci-ttft-grid .ci-ttft-cell .ci-ttft-value {
+    font-size: 1.4rem;
+    font-weight: 800;
+    margin-top: 2px;
+    line-height: 1;
+}
+.ci-ttft-grid .ci-ttft-cell .ci-ttft-qual {
+    font-size: 0.68rem;
+    font-weight: 500;
+    opacity: 0.9;
+}
+@media (max-width: 960px) {
+    .ci-ttft-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+    .ci-ttft-grid { grid-template-columns: 1fr; }
+}
+
+/* Heatmap — persona split cells */
+.ci-heatmap .ci-heatmap-brand-cell {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--text-main);
+    padding: var(--space-4);
+    background: var(--bg-elevated);
+    border-right: 1px solid var(--border-light);
+    white-space: nowrap;
+}
+.ci-heatmap .ci-heatmap-persona-cell {
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    background: var(--bg-elevated);
+    border-right: 1px solid var(--border-light);
+    text-align: left;
+    padding-left: var(--space-4);
+    white-space: nowrap;
+}
+
+/* Persona chip in inbox table */
+.ci-persona-chip {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    color: var(--text-main);
+}
+.ci-persona-chip--sarah {
+    background: var(--theme-violet-soft, #f3e8ff);
+    color: #6b21a8;
+    border-color: transparent;
+}
+.ci-persona-chip--tom {
+    background: var(--theme-emerald-soft);
+    color: #065f46;
+    border-color: transparent;
+}
+.ci-inbox-table .col-persona {
+    width: 1%;
+    white-space: nowrap;
+}
+
 /* ─── Insights page ─── */
 .ci-insights-form {
     background: var(--bg-elevated);

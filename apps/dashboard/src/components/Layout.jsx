@@ -41,6 +41,7 @@ export default function Layout({ user, onLogout }) {
             items: [
                 { to: '/app/journeys', icon: icons.workflows, label: t('layout.createJourney') },
                 { to: '/app/campaign-creation', icon: icons.campaignCreation, label: t('layout.campaignCreation') },
+                { to: '/app/campaign-creation-v2', icon: icons.campaignCreation, label: 'Create Campaign ✨' },
                 { to: '/app/preview-test', icon: icons.previewTest, label: t('layout.previewTest') },
                 { to: '/app/competitor-analysis', icon: icons.competitorAnalysis, label: t('layout.competitorAnalysis') },
                 { to: '/app/competitor-intel', icon: icons.competitorIntel, label: t('layout.competitorIntel') },

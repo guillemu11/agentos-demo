@@ -26,6 +26,7 @@ export default function InboxTable({ emails, onSelect }) {
             !filter ||
             (e.subject || '').toLowerCase().includes(filter.toLowerCase()) ||
             (e.brand_name || '').toLowerCase().includes(filter.toLowerCase()) ||
+            (e.persona_name || '').toLowerCase().includes(filter.toLowerCase()) ||
             (e.sender_email || '').toLowerCase().includes(filter.toLowerCase())
     );
 
@@ -41,7 +42,7 @@ export default function InboxTable({ emails, onSelect }) {
                         : ' emails'}
                 </span>
                 <input
-                    placeholder="Filter by subject, brand, or sender…"
+                    placeholder="Filter by subject, brand, persona, or sender…"
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
                     className="ci-filter"
@@ -61,17 +62,27 @@ export default function InboxTable({ emails, onSelect }) {
                             <tr>
                                 <th>Received</th>
                                 <th>Brand</th>
+                                <th>Persona</th>
                                 <th>Subject</th>
                                 <th>Type</th>
                                 <th>From</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {filtered.map((e) => (
+                            {filtered.map((e) => {
+                                const firstName = (e.persona_name || '').split(' ')[0];
+                                return (
                                 <tr key={e.id} onClick={() => onSelect?.(e)} className="ci-row">
                                     <td className="col-date">{fmtDate(e.received_at)}</td>
                                     <td className="col-brand">
                                         {e.brand_name || <em>Unclassified</em>}
+                                    </td>
+                                    <td className="col-persona">
+                                        {firstName ? (
+                                            <span className={`ci-persona-chip ci-persona-chip--${firstName.toLowerCase()}`}>
+                                                {firstName}
+                                            </span>
+                                        ) : <em>—</em>}
                                     </td>
                                     <td className="col-subject">{e.subject || '—'}</td>
                                     <td className="col-type">
@@ -79,7 +90,8 @@ export default function InboxTable({ emails, onSelect }) {
                                     </td>
                                     <td className="col-from">{e.sender_email}</td>
                                 </tr>
-                            ))}
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
