@@ -73,8 +73,7 @@ Queremos convertirlo en un **OS de campañas** donde:
 ```sql
 CREATE TABLE campaign_briefs (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id           UUID NOT NULL REFERENCES organizations(id),
-  created_by       UUID REFERENCES users(id),         -- null si IA
+  created_by       INTEGER REFERENCES workspace_users(id) ON DELETE SET NULL,  -- null si IA
 
   source           TEXT NOT NULL CHECK (source IN ('human','ai')),
   status           TEXT NOT NULL CHECK (status IN ('draft','active','in_wizard','sent','dismissed')),
@@ -97,14 +96,15 @@ CREATE TABLE campaign_briefs (
   -- Estado del flujo
   chat_transcript   JSONB,                             -- solo human
   accepted_option   JSONB,                             -- la opción 1/2/3 aceptada
-  campaign_id       UUID REFERENCES campaigns(id),     -- null hasta in_wizard
+  campaign_id       TEXT,                              -- FK opcional a tabla campaigns (si existe). null hasta in_wizard
 
   created_at        TIMESTAMPTZ DEFAULT NOW(),
   updated_at        TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_briefs_org_status ON campaign_briefs(org_id, status);
-CREATE INDEX idx_briefs_source     ON campaign_briefs(source);
+CREATE INDEX idx_briefs_status ON campaign_briefs(status);
+CREATE INDEX idx_briefs_source ON campaign_briefs(source);
+CREATE INDEX idx_briefs_created_by ON campaign_briefs(created_by);
 ```
 
 Reflejar también en `packages/core/db/schema.sql` (regla 7 de CLAUDE.md).
