@@ -10252,6 +10252,10 @@ app.get('/api/competitor-intel/investigations/:id/timeline', async (req, res) =>
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// In-memory cache for options not yet accepted. Dies on server restart by design —
+// if the user comes back after a restart, they'll regenerate.
+const briefOptionsCache = new Map();  // briefId -> options[]
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Campaign Briefs — /api/campaign-briefs
 // Briefs-first flow hub. Human briefs come from the setup chat; AI briefs are
@@ -10404,14 +10408,51 @@ app.post('/api/campaign-briefs/:id/chat/turn', requireAuth, async (req, res) => 
     }
 });
 
-// POST /api/campaign-briefs/:id/options/generate — phase 4
-app.post('/api/campaign-briefs/:id/options/generate', requireAuth, (req, res) => {
-    res.status(501).json({ error: 'not implemented — phase 4' });
+// POST /api/campaign-briefs/:id/options/generate
+app.post('/api/campaign-briefs/:id/options/generate', requireAuth, async (req, res) => {
+    try {
+        const { rows: [brief] } = await pool.query(
+            `SELECT * FROM campaign_briefs WHERE id = $1`,
+            [req.params.id],
+        );
+        if (!brief) return res.status(404).json({ error: 'brief not found' });
+
+        const options = await generateOptions({ brief, apiKey: process.env.ANTHROPIC_API_KEY });
+        briefOptionsCache.set(brief.id, options);
+        res.json({ options });
+    } catch (err) {
+        console.error('[briefs] options/generate failed', err);
+        res.status(502).json({ error: 'AI service error', detail: err.message });
+    }
 });
 
-// POST /api/campaign-briefs/:id/options/accept — phase 4
-app.post('/api/campaign-briefs/:id/options/accept', requireAuth, (req, res) => {
-    res.status(501).json({ error: 'not implemented — phase 4' });
+// POST /api/campaign-briefs/:id/options/accept
+app.post('/api/campaign-briefs/:id/options/accept', requireAuth, async (req, res) => {
+    try {
+        const { optionIndex } = req.body || {};
+        if (!Number.isInteger(optionIndex) || optionIndex < 0 || optionIndex > 2) {
+            return res.status(400).json({ error: 'optionIndex must be 0, 1, or 2' });
+        }
+        const options = briefOptionsCache.get(req.params.id);
+        if (!options) {
+            return res.status(400).json({ error: 'no options cached — regenerate before accepting' });
+        }
+        const accepted = options[optionIndex];
+        if (!accepted) return res.status(400).json({ error: 'option not found at that index' });
+
+        const { rows: [updated] } = await pool.query(
+            `UPDATE campaign_briefs
+             SET accepted_option = $1::jsonb, status = 'in_wizard'
+             WHERE id = $2 RETURNING *`,
+            [JSON.stringify(accepted), req.params.id],
+        );
+        if (!updated) return res.status(404).json({ error: 'brief not found' });
+        briefOptionsCache.delete(req.params.id);
+        res.json({ brief: updated });
+    } catch (err) {
+        console.error('[briefs] options/accept failed', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // POST /api/campaign-briefs/:id/dismiss — soft-dismiss an AI brief
